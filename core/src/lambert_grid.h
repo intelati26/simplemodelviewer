@@ -9,23 +9,26 @@
 #include <cmath>
 #include <utility>
 
-// The Lambert conformal conic grid of SPC's REFS data (the same 3 km CONUS grid as HRRR): 1799 x 1059 points, standard
-// parallels 38.5, central meridian 262.5 E, sphere of radius 6371229 m, first (south-west) point 21.138123 N 237.280472 E.
-// The formulas reproduce the latitude / longitude arrays in the Zarr store to better than 1e-10 degrees.
+// A Lambert conformal conic grid with one standard parallel on a sphere of radius 6371229 m (the grids of SPC's REFS data).
+// REFS: 1799 x 1059 points, 3 km, parallel 38.5, central meridian 262.5 E, first (south-west) point 21.138123 N 237.280472 E; the
+// formulas reproduce the store's own latitude / longitude arrays to better than 1e-10 degrees. GREFS: 185 x 129 points, 42.081 km,
+// effective parallel 45.68967, central meridian 245 E, first point 12.19 N 226.540985 E: these three were fitted to corner and centre
+// points of the store's own latitude / longitude arrays (residual < 1e-5 cells) since SPC does not document the grid.
 struct LambertGrid {
-    static constexpr int columns = 1799;
-    static constexpr int rows = 1059;
-    static constexpr double cell = 3000.0;   // metres
-
-    LambertGrid() {
-        const double phi1 = degrees(38.5);
+    LambertGrid(int cols, int rows, double cellMetres, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
+        : columns(cols), rows(rows), cell(cellMetres), lon0Rad(degrees(centralMeridianDeg)) {
+        const double phi1 = degrees(parallelDeg);
         n = std::sin(phi1);
         f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
         rho0 = rho(phi1);
-        const auto first = project(21.138123, 237.280472);
+        const auto first = project(firstLat, firstLon);
         x0 = first.first;
         y0 = first.second;
     }
+
+    const int columns;
+    const int rows;
+    const double cell;   // metres
 
     // fractional grid position (column from the west, row from the south) of a latitude / west-negative longitude
     void toGrid(double lat, double lon, double& column, double& row) const {
@@ -41,7 +44,7 @@ struct LambertGrid {
         const double r = std::hypot(x, rho0 - y);
         const double theta = std::atan2(x, rho0 - y);
         lat = (2.0 * std::atan(std::pow(radius * f / r, 1.0 / n)) - pi / 2.0) * 180.0 / pi;
-        lon = (degrees(262.5) + theta / n) * 180.0 / pi;
+        lon = (lon0Rad + theta / n) * 180.0 / pi;
         lon = std::fmod(lon + 540.0, 360.0) - 180.0;
     }
 
@@ -51,12 +54,13 @@ private:
     static double degrees(double d) { return d * pi / 180.0; }
     double rho(double phi) const { return radius * f / std::pow(std::tan(pi / 4.0 + phi / 2.0), n); }
     std::pair<double, double> project(double lat, double lon) const {
-        double dl = degrees(lon) - degrees(262.5);
+        double dl = degrees(lon) - lon0Rad;
         dl = std::fmod(dl + 3.0 * pi, 2.0 * pi) - pi;
         const double r = rho(degrees(lat));
         const double theta = n * dl;
         return {r * std::sin(theta), rho0 - r * std::cos(theta)};
     }
+    double lon0Rad{0.0};
     double n{0.0};
     double f{0.0};
     double rho0{0.0};

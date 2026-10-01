@@ -5,7 +5,7 @@
 #include <vector>
 #include "blosc_decode.h"
 #include "chunk_decode.h"
-#include "lambert_grid.h"
+#include "grids.h"
 #include "spcrefs_core.h"
 #ifdef HAVE_LIBBLOSC
 #include <blosc.h>
@@ -65,7 +65,7 @@ static void testBloscRoundTrip(const char * codec, int typesize) {
 #endif
 
 static void testLambert() {
-    LambertGrid g;
+    const LambertGrid& g = Grids::get(SPC_GRID_REFS);
     double col = 0, row = 0;
     g.toGrid(21.138123, -122.719528, col, row);   // 237.280472 E = -122.719528
     CHECK(std::fabs(col) < 1e-3 && std::fabs(row) < 1e-3);
@@ -75,9 +75,28 @@ static void testLambert() {
     CHECK(std::fabs(col - 900.0) < 1e-6 && std::fabs(row - 530.0) < 1e-6);
     CHECK(lat > 35 && lat < 45 && lon > -105 && lon < -90);   // the middle of the grid is over the central US
     // the same through the C interface
-    spc_grid_to_latlon(900.0, 530.0, &lat, &lon);
-    spc_latlon_to_grid(lat, lon, &col, &row);
+    spc_grid_to_latlon(SPC_GRID_REFS, 900.0, 530.0, &lat, &lon);
+    spc_latlon_to_grid(SPC_GRID_REFS, lat, lon, &col, &row);
     CHECK(std::fabs(col - 900.0) < 1e-6);
+}
+
+// The GREFS grid (fitted, see lambert_grid.h): five points of the real store's own latitude / longitude arrays (row, column, lat, east lon).
+static void testGrefsGrid() {
+    CHECK(spc_grid_columns(SPC_GRID_GREFS) == 185 && spc_grid_rows(SPC_GRID_GREFS) == 129);
+    CHECK(spc_grid_columns(SPC_GRID_REFS) == 1799 && spc_grid_rows(SPC_GRID_REFS) == 1059);
+    const double ref[5][4] = {{0, 0, 12.190000, 226.540985}, {0, 184, 3.878576, 285.203903}, {128, 0, 56.093790, 206.851787},
+                              {128, 184, 38.303064, 315.383658}, {64, 92, 35.558324, 262.038798}};
+    for (const auto & p : ref) {
+        double col = 0, row = 0;
+        spc_latlon_to_grid(SPC_GRID_GREFS, p[2], p[3] - 360.0, &col, &row);
+        if (!(std::fabs(col - p[1]) < 0.01 && std::fabs(row - p[0]) < 0.01)) {
+            std::printf("  grid point (%g,%g): got (%.4f,%.4f)\n", p[0], p[1], row, col);
+        }
+        CHECK(std::fabs(col - p[1]) < 0.01 && std::fabs(row - p[0]) < 0.01);
+        double lat = 0, lon = 0;
+        spc_grid_to_latlon(SPC_GRID_GREFS, p[1], p[0], &lat, &lon);
+        CHECK(std::fabs(lat - p[2]) < 0.01 && std::fabs(std::fmod(lon + 360.0, 360.0) - p[3]) < 0.01);
+    }
 }
 
 static void testGlobe() {
@@ -85,18 +104,18 @@ static void testGlobe() {
     std::vector<float> values(static_cast<size_t>(SPC_GRID_COLUMNS) * SPC_GRID_ROWS, 40.0f);
     const spc_stop stops[2] = {{10.0, 0, 0, 255}, {50.0, 255, 0, 0}};
     spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0};
-    spc_globe globe{200, 200, 90.0, 38.5, -98.0, 1, 0x40FFFFFFu};
+    spc_globe globe{SPC_GRID_REFS, 200, 200, 90.0, 38.5, -98.0, 1, 0x40FFFFFFu};
     std::vector<uint32_t> img(200 * 200, 0xDEADBEEF);
     spc_render_globe(values.data(), &globe, &style, img.data());
     CHECK((img[100 * 200 + 100] >> 24) == 0xFF);        // centre: data
     CHECK(img[2 * 200 + 2] == 0);                       // corner: outside the sphere
     for (uint32_t p : img) { CHECK(p != 0xDEADBEEF); }
     // looking at the far side of the earth: nothing over the grid
-    spc_globe away{200, 200, 90.0, -38.5, 82.0, 1, 0x40FFFFFFu};
+    spc_globe away{SPC_GRID_REFS, 200, 200, 90.0, -38.5, 82.0, 1, 0x40FFFFFFu};
     spc_render_globe(values.data(), &away, &style, img.data());
     CHECK(img[100 * 200 + 100] == 0);
     // coarse preview fills the same pixels in blocks
-    spc_globe coarse{200, 200, 90.0, 38.5, -98.0, 4, 0x40FFFFFFu};
+    spc_globe coarse{SPC_GRID_REFS, 200, 200, 90.0, 38.5, -98.0, 4, 0x40FFFFFFu};
     spc_render_globe(values.data(), &coarse, &style, img.data());
     CHECK(img[100 * 200 + 100] == img[101 * 200 + 101]);
     // NaN data inside the grid -> the domain colour
@@ -110,7 +129,7 @@ static void testRender() {
     values[10 * SPC_GRID_COLUMNS + 20] = 45.0f;   // one cell at column 20, row 10 (from the south)
     const spc_stop stops[2] = {{10.0, 0, 0, 255}, {50.0, 255, 0, 0}};
     spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0};
-    spc_view view{0, 0, 40, 20, 1, 1};
+    spc_view view{SPC_GRID_REFS, 0, 0, 40, 20, 1, 1};
     std::vector<uint32_t> img(40 * 20, 0xDEADBEEF);
     spc_render(values.data(), &view, &style, img.data());
     // north at the top: row 10 of 20 shown rows is image row 20 - 1 - 10 = 9
@@ -122,7 +141,7 @@ static void testRender() {
     // data saver: every 2nd cell -> half-size picture (it samples the odd cells), so move the one value to column 21 / row 11
     values[10 * SPC_GRID_COLUMNS + 20] = std::nanf("");
     values[11 * SPC_GRID_COLUMNS + 21] = 45.0f;
-    spc_view half{0, 0, 40, 20, 1, 2};
+    spc_view half{SPC_GRID_REFS, 0, 0, 40, 20, 1, 2};
     std::vector<uint32_t> small(20 * 10, 0xDEADBEEF);
     spc_render(values.data(), &half, &style, small.data());
     int painted = 0;
@@ -142,6 +161,7 @@ int main() {
     testHalf();
     testDtypes();
     testLambert();
+    testGrefsGrid();
     testRender();
     testGlobe();
 #ifdef HAVE_LIBBLOSC

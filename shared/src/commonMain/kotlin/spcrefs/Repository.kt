@@ -41,11 +41,18 @@ class RefsRepository(private val http: Http, private val core: Core) {
         if (result.status != 200 || result.body.isEmpty())
             throw RefsException("no Zarr metadata for ${cycle.label} (HTTP ${result.status})")
         val arrays = try {
-            parseZMetadata(result.body.decodeToString())
+            parseZMetadata(result.body.decodeToString()).toMutableMap()
         } catch (e: IllegalStateException) {
             throw RefsException("unknown layout for ${cycle.label}: ${e.message}")
         } catch (e: Exception) {
             throw RefsException("the metadata for ${cycle.label} could not be read: ${e.message}")
+        }
+        // GREFS probabilities live in their own stores; a cycle without them (or a server hiccup) simply has no GREFS products
+        for (kind in listOf(StoreKind.GREFS4) + if (cycle.hasLongRange) listOf(StoreKind.GREFS24) else emptyList()) {
+            val extra = try { http.get(cycle.storeUrl(kind) + "/.zmetadata") } catch (e: Exception) { null }
+            if (extra != null && extra.status == 200 && extra.body.isNotEmpty()) {
+                try { arrays += parseZMetadata(extra.body.decodeToString(), kind) } catch (_: Exception) { }
+            }
         }
         val products = Catalogue.build(arrays.values)
         if (products.isEmpty()) throw RefsException("no products found in ${cycle.label}")
@@ -56,9 +63,10 @@ class RefsRepository(private val http: Http, private val core: Core) {
     suspend fun readFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int): FloatArray {
         val array = store.arrays.getValue(product.id)
         val index = if (product.hasMembers) listOf(memberIndex, timeIndex, 0, 0) else listOf(timeIndex, 0, 0)
-        val raw = fetchChunk(store.cycle, array, index) ?: return FloatArray(GRID_COLUMNS * GRID_ROWS) { Float.NaN }
+        val cells = product.grid.cells
+        val raw = fetchChunk(store.cycle, array, index) ?: return FloatArray(cells) { Float.NaN }
         return try {
-            core.decodeFloats(raw, array.dtype, array.compressed, GRID_COLUMNS * GRID_ROWS)
+            core.decodeFloats(raw, array.dtype, array.compressed, cells)
         } catch (e: Exception) {
             throw RefsException("could not decode ${product.id}: ${e.message}")
         }
@@ -74,7 +82,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
     suspend fun validTimes(store: CycleStore, product: Product): List<Long> {
         val name = product.timeDimension ?: return emptyList()
         val array = store.arrays[name] ?: return emptyList()
-        val key = store.cycle.storeUrl + "/" + name
+        val key = store.cycle.storeUrl(array.kind) + "/" + name
         validTimes[key]?.let { return it }
         val chunk = maxOf(1, array.chunks.firstOrNull() ?: 1)
         val count = array.shape.firstOrNull() ?: 0
@@ -121,7 +129,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
 
     /** Chunk bytes, or null for a chunk the server never wrote (404 / 403: treated as the fill value). */
     private suspend fun fetchChunk(cycle: Cycle, array: ArrayInfo, index: List<Int>): ByteArray? {
-        val url = "${cycle.storeUrl}/${array.name}/${chunkKey(index)}"
+        val url = "${cycle.storeUrl(array.kind)}/${array.path}/${chunkKey(index)}"
         var result = http.get(url)
         if (result.status != 200 && result.status != 404 && result.status != 403) result = http.get(url)   // one retry
         return when (result.status) {

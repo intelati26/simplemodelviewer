@@ -5,7 +5,7 @@
 #include "raster.h"
 #include <algorithm>
 #include <cmath>
-#include "lambert_grid.h"
+#include "grids.h"
 
 namespace Raster {
     namespace {
@@ -44,9 +44,7 @@ namespace Raster {
         return argb(stops[n - 1].r, stops[n - 1].g, stops[n - 1].b);
     }
 
-    float sampleAt(const float * values, double column, double row, bool smooth) {
-        const int w = SPC_GRID_COLUMNS;
-        const int h = SPC_GRID_ROWS;
+    float sampleAt(const float * values, int w, int h, double column, double row, bool smooth) {
         if (!smooth) {
             const int c = std::clamp(static_cast<int>(std::lround(column)), 0, w - 1);
             const int r = std::clamp(static_cast<int>(std::lround(row)), 0, h - 1);
@@ -68,9 +66,9 @@ namespace Raster {
         return static_cast<float>((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy);
     }
 
-    uint32_t shade(const float * values, double column, double row, bool smooth, const spc_style& style) {
+    uint32_t shade(const float * values, int w, int h, double column, double row, bool smooth, const spc_style& style) {
         if (style.kind == SPC_PAINTBALL) {
-            const float raw = sampleAt(values, column, row, false);
+            const float raw = sampleAt(values, w, h, column, row, false);
             const int mask = std::isnan(raw) ? 0 : static_cast<int>(raw);
             if (mask == 0) {
                 return 0;
@@ -87,11 +85,14 @@ namespace Raster {
             }
             return argb(static_cast<int>(r), static_cast<int>(g), static_cast<int>(b));
         }
-        const float raw = sampleAt(values, column, row, smooth);
+        const float raw = sampleAt(values, w, h, column, row, smooth);
         return colourFor(style, std::isnan(raw) ? std::nan("") : raw * style.factor + style.offset);
     }
 
     void render(const float * values, const spc_view& view, const spc_style& style, uint32_t * out) {
+        const LambertGrid& gridInfo = Grids::get(view.grid);
+        const int gw = gridInfo.columns;
+        const int gh = gridInfo.rows;
         const int step = std::max(view.step, 1);
         const int scale = step > 1 ? 1 : std::max(view.scale, 1);
         const int outW = view.cols * scale / step;
@@ -100,12 +101,14 @@ namespace Raster {
             const double row = view.row0 + view.rows - (y + 0.5) * step / scale - 0.5;   // north at the top
             for (int x = 0; x < outW; x += 1) {
                 const double column = view.col0 + (x + 0.5) * step / scale - 0.5;
-                out[static_cast<size_t>(y) * outW + x] = shade(values, column, row, scale > 1, style);
+                out[static_cast<size_t>(y) * outW + x] = shade(values, gw, gh, column, row, scale > 1, style);
             }
         }
     }
 
-    void renderGlobe(const float * values, const LambertGrid& grid, const spc_globe& globe, const spc_style& style, uint32_t * out) {
+    void renderGlobe(const float * values, const spc_globe& globe, const spc_style& style, uint32_t * out) {
+        const LambertGrid& grid = Grids::get(globe.grid);
+        const Grids::Window win = Grids::window(globe.grid);
         const double pi = 3.14159265358979323846;
         const double lat0 = globe.center_lat * pi / 180.0;
         const double lon0 = globe.center_lon * pi / 180.0;
@@ -136,13 +139,13 @@ namespace Raster {
                         lon = lon0 + std::atan2(x * sinC, rho * cosLat0 * cosC - y * sinLat0 * sinC);
                     }
                     const double latDeg = lat * 180.0 / pi;
-                    if (latDeg > 15.0 && latDeg < 60.0) {   // quick reject before the Lambert projection
+                    if (latDeg > win.latMin && latDeg < win.latMax) {   // quick reject before the Lambert projection
                         double lonDeg = std::fmod(lon * 180.0 / pi + 540.0, 360.0) - 180.0;
-                        if (lonDeg > -140.0 && lonDeg < -55.0) {
+                        if (lonDeg > win.lonMin && lonDeg < win.lonMax) {
                             double column = 0.0, row = 0.0;
                             grid.toGrid(latDeg, lonDeg, column, row);
-                            if (column >= 0.0 && column <= SPC_GRID_COLUMNS - 1 && row >= 0.0 && row <= SPC_GRID_ROWS - 1) {
-                                colour = shade(values, column, row, true, style);
+                            if (column >= 0.0 && column <= grid.columns - 1 && row >= 0.0 && row <= grid.rows - 1) {
+                                colour = shade(values, grid.columns, grid.rows, column, row, true, style);
                                 if (colour == 0) {
                                     colour = globe.domain_argb;   // inside the REFS grid but nothing to show
                                 }

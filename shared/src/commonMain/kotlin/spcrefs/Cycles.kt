@@ -7,8 +7,11 @@ data class Cycle(val year: Int, val month: Int, val day: Int, val hour: Int) {
     private fun two(n: Int) = n.toString().padStart(2, '0')
 
     /** e.g. https://www.spc.noaa.gov/exper/refs/data/2026/10/01/refs-spc_20261001_1800.zarr */
-    val storeUrl: String
-        get() = "$BASE/$year/${two(month)}/${two(day)}/refs-spc_$year${two(month)}${two(day)}_${two(hour)}00.zarr"
+    val storeUrl: String get() = storeUrl(StoreKind.REFS)
+
+    /** The store of [kind] for this cycle (GREFS: grefs-4hr_..., and at 00 / 12 UTC also grefs-24hr_...). */
+    fun storeUrl(kind: StoreKind): String =
+        "$BASE/$year/${two(month)}/${two(day)}/${kind.filePrefix}_$year${two(month)}${two(day)}_${two(hour)}00.zarr"
 
     val label: String get() = "$year-${two(month)}-${two(day)} ${two(hour)}Z"
 

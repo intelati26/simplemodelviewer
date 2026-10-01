@@ -20,6 +20,7 @@ import spcrefs.Catalogue
 import spcrefs.Cycle
 import spcrefs.CycleStore
 import spcrefs.GlobeCamera
+import spcrefs.Grid
 import spcrefs.globeInverse
 import spcrefs.Place
 import spcrefs.Product
@@ -220,10 +221,12 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.globe) { renderGlobeNow(1); return }
         val product = _state.value.product ?: return
         val data = values ?: return
+        if (data.size < product.grid.cells) return   // the frame of the previous product is still loaded (another grid)
         val sector = _state.value.sector
         val members = _state.value.members
         val (bitmap, style, v) = withContext(Dispatchers.Default) {
-            val v = if (sector.name == "CONUS") View.CONUS.decimated(if (_state.value.settings.dataSaver) 2 else 1) else sector.view(core)
+            val g = product.grid
+            val v = if (sector.name == "CONUS") View.whole(g).decimated(if (_state.value.settings.dataSaver && g == Grid.REFS) 2 else 1) else sector.view(core, g)
             val style = withAutoStops(product.style, data)
             Triple(renderer.render(product, style, data, members, v, dark), style, v)
         }
@@ -263,10 +266,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val data = values ?: return
         val ll = globeInverse(_state.value.cam, globeW, globeH, px.toDouble(), py.toDouble())
         if (ll == null) { clearTap(); return }
-        val (c, r) = core.latLonToGrid(ll[0], ll[1])
+        val grid = product.grid
+        val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
         val column = Math.round(c).toInt()
         val row = Math.round(r).toInt()
-        if (column !in 0 until spcrefs.GRID_COLUMNS || row !in 0 until spcrefs.GRID_ROWS) {
+        if (column !in 0 until grid.columns || row !in 0 until grid.rows) {
             update { it.copy(tapLatLon = ll[0] to ll[1], readout = "%.2f%s %.2f%s   outside the REFS area".format(
                 kotlin.math.abs(ll[0]), if (ll[0] >= 0) "N" else "S", kotlin.math.abs(ll[1]), if (ll[1] < 0) "W" else "E")) }
             return
@@ -298,11 +302,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun renderGlobeNow(stride: Int) {
         val product = _state.value.product ?: return
         val data = values ?: return
-        if (globeW == 0) return
+        if (globeW == 0 || data.size < product.grid.cells) return
         val st = _state.value
         val (bitmap, style) = withContext(Dispatchers.Default) {
             val style = withAutoStops(product.style, data)
-            globeRenderer.render(data, style, st.members, st.cam, globeW, globeH, stride, dark) to style
+            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark) to style
         }
         update { it.copy(map = bitmap, style = style, busy = false) }
     }
@@ -314,7 +318,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (fx !in 0f..1f || fy !in 0f..1f) { update { it.copy(crosshair = null, readout = null) }; return }
         val column = view.col0 + floor(fx * view.cols).toInt().coerceIn(0, view.cols - 1)
         val row = view.row0 + view.rows - 1 - floor(fy * view.rows).toInt().coerceIn(0, view.rows - 1)
-        val (lat, lon) = core.gridToLatLon(column.toDouble(), row.toDouble())
+        val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
         update { it.copy(crosshair = fx to fy, readout = readout(core, product, data, it.members, column, row), tapLatLon = lat to lon) }
     }
 
@@ -344,7 +348,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
     fun goToPlace(place: Place) {
-        val (c, r) = core.latLonToGrid(place.lat, place.lon)
+        val (c, r) = core.latLonToGrid(_state.value.product?.grid ?: Grid.REFS, place.lat, place.lon)
         var inView = c >= view.col0 && c <= view.col0 + view.cols - 1 && r >= view.row0 && r <= view.row0 + view.rows - 1
         if (!inView && _state.value.sector.name != "CONUS") {
             update { it.copy(sector = Sector.all[0]) }
@@ -442,19 +446,20 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** The grid window an export covers, drawn at a resolution that suits its size (about 1800 px wide, at most 8 px per cell). */
     private fun resolveView(area: ShareArea): View = when (area) {
         ShareArea.Globe -> view   // (the globe is drawn by buildArea, not as a grid window)
-        ShareArea.Whole -> if (view.step > 1) View.CONUS else view
-        is ShareArea.Meso -> if (area.sector.name == "CONUS") View.CONUS else area.sector.view(core)
+        ShareArea.Whole -> if (view.step > 1) View.whole(view.grid) else view
+        is ShareArea.Meso -> if (area.sector.name == "CONUS") View.whole(view.grid) else area.sector.view(core, view.grid)
         ShareArea.Screen -> {
             val (l, t, r, b) = viewport.toList()
             val c0 = view.col0 + l * view.cols
             val c1 = view.col0 + r * view.cols
             val r0 = view.row0 + (1f - b) * view.rows      // image top is north
             val r1 = view.row0 + (1f - t) * view.rows
-            val col0 = floor(c0).toInt().coerceIn(0, spcrefs.GRID_COLUMNS - 2)
-            val row0 = floor(r0).toInt().coerceIn(0, spcrefs.GRID_ROWS - 2)
-            val cols = (kotlin.math.ceil(c1).toInt() - col0).coerceIn(2, spcrefs.GRID_COLUMNS - col0)
-            val rows = (kotlin.math.ceil(r1).toInt() - row0).coerceIn(2, spcrefs.GRID_ROWS - row0)
-            View("Screen area", col0, row0, cols, rows, (1800f / cols).toInt().coerceIn(1, 8))
+            val g = view.grid
+            val col0 = floor(c0).toInt().coerceIn(0, g.columns - 2)
+            val row0 = floor(r0).toInt().coerceIn(0, g.rows - 2)
+            val cols = (kotlin.math.ceil(c1).toInt() - col0).coerceIn(2, g.columns - col0)
+            val rows = (kotlin.math.ceil(r1).toInt() - row0).coerceIn(2, g.rows - row0)
+            View("Screen area", col0, row0, cols, rows, (1800f / cols).toInt().coerceIn(1, if (g == Grid.REFS) 8 else 32), 1, g)
         }
     }
 
@@ -500,7 +505,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (area == ShareArea.Globe && globeW > 0) {
             val size = 1500
             val h = size * globeH / globeW
-            globeRenderer.render(data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
+            globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
         } else renderer.render(product, style, data, st.members, v, dark = false)
 
     /** Writes the shareable picture (header, map, colour key) and returns the file, or null when there is nothing to share. */

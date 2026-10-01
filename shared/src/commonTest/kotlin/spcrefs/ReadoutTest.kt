@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 
 class ReadoutTest {
     private val core = object : Core by StubCore {
-        override fun gridToLatLon(column: Double, row: Double) = doubleArrayOf(39.1, -97.2)
+        override fun gridToLatLon(grid: Grid, column: Double, row: Double) = doubleArrayOf(39.1, -97.2)
     }
     private val grid = FloatArray(GRID_COLUMNS * GRID_ROWS) { Float.NaN }
 

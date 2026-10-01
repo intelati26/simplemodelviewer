@@ -53,30 +53,30 @@ JNIEXPORT jfloatArray JNICALL Java_org_spcrefs_app_NativeCore_decodeFloats(JNIEn
     return result;
 }
 
-JNIEXPORT jdoubleArray JNICALL Java_org_spcrefs_app_NativeCore_latLonToGrid(JNIEnv * env, jobject, jdouble lat, jdouble lon) {
+JNIEXPORT jdoubleArray JNICALL Java_org_spcrefs_app_NativeCore_latLonToGridNative(JNIEnv * env, jobject, jint grid, jdouble lat, jdouble lon) {
     double c = 0, r = 0;
-    spc_latlon_to_grid(lat, lon, &c, &r);
+    spc_latlon_to_grid(grid, lat, lon, &c, &r);
     const double v[2] = {c, r};
     jdoubleArray result = env->NewDoubleArray(2);
     env->SetDoubleArrayRegion(result, 0, 2, v);
     return result;
 }
 
-JNIEXPORT jdoubleArray JNICALL Java_org_spcrefs_app_NativeCore_gridToLatLon(JNIEnv * env, jobject, jdouble column, jdouble row) {
+JNIEXPORT jdoubleArray JNICALL Java_org_spcrefs_app_NativeCore_gridToLatLonNative(JNIEnv * env, jobject, jint grid, jdouble column, jdouble row) {
     double lat = 0, lon = 0;
-    spc_grid_to_latlon(column, row, &lat, &lon);
+    spc_grid_to_latlon(grid, column, row, &lat, &lon);
     const double v[2] = {lat, lon};
     jdoubleArray result = env->NewDoubleArray(2);
     env->SetDoubleArrayRegion(result, 0, 2, v);
     return result;
 }
 
-JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_renderGlobe(JNIEnv * env, jobject, jfloatArray values, jint width, jint height,
+JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_renderGlobe(JNIEnv * env, jobject, jint grid, jfloatArray values, jint width, jint height,
                                                                    jdouble radius, jdouble centerLat, jdouble centerLon, jint stride,
                                                                    jint domainArgb, jint kind, jdoubleArray stopValues, jintArray stopRgb,
                                                                    jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,
                                                                    jintArray argb) {
-    if (env->GetArrayLength(values) < SPC_GRID_COLUMNS * SPC_GRID_ROWS || env->GetArrayLength(argb) < width * height) {
+    if (env->GetArrayLength(values) < spc_grid_columns(grid) * spc_grid_rows(grid) || env->GetArrayLength(argb) < width * height) {
         throwRuntime(env, "globe buffers are too small");
         return;
     }
@@ -94,7 +94,7 @@ JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_renderGlobe(JNIEnv * env,
     for (jsize i = 0; i < memberCount; i += 1) {
         members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
     }
-    const spc_globe globe{width, height, radius, centerLat, centerLon, stride, static_cast<uint32_t>(domainArgb)};
+    const spc_globe globe{grid, width, height, radius, centerLat, centerLon, stride, static_cast<uint32_t>(domainArgb)};
     const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size())};
     jint * out = env->GetIntArrayElements(argb, nullptr);
     spc_render_globe(v, &globe, &style, reinterpret_cast<uint32_t *>(out));
@@ -105,12 +105,12 @@ JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_renderGlobe(JNIEnv * env,
     env->ReleaseFloatArrayElements(values, v, JNI_ABORT);
 }
 
-JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_render(JNIEnv * env, jobject, jfloatArray values, jint col0, jint row0, jint cols,
+JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_render(JNIEnv * env, jobject, jint grid, jfloatArray values, jint col0, jint row0, jint cols,
                                                               jint rows, jint scale, jint step, jint kind, jdoubleArray stopValues, jintArray stopRgb,
                                                               jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,
                                                               jintArray argb) {
     const jsize n = env->GetArrayLength(values);
-    if (n < SPC_GRID_COLUMNS * SPC_GRID_ROWS || env->GetArrayLength(argb) < (cols * scale / (step > 1 ? step : 1)) * (rows * scale / (step > 1 ? step : 1))) {
+    if (n < spc_grid_columns(grid) * spc_grid_rows(grid) || env->GetArrayLength(argb) < (cols * scale / (step > 1 ? step : 1)) * (rows * scale / (step > 1 ? step : 1))) {
         throwRuntime(env, "render buffers are too small");
         return;
     }
@@ -128,7 +128,7 @@ JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_render(JNIEnv * env, jobj
     for (jsize i = 0; i < memberCount; i += 1) {
         members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
     }
-    const spc_view view{col0, row0, cols, rows, scale, step};
+    const spc_view view{grid, col0, row0, cols, rows, scale, step};
     const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size())};
     jint * out = env->GetIntArrayElements(argb, nullptr);
     spc_render(v, &view, &style, reinterpret_cast<uint32_t *>(out));

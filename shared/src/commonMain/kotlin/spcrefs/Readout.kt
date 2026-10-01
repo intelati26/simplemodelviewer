@@ -15,18 +15,19 @@ fun fixed(value: Double, digits: Int): String {
 }
 
 /** The value of a cell as shown (stored * factor + offset); NaN when there is none. */
-fun shownValue(style: Style, values: FloatArray, column: Int, row: Int): Double {
-    if (column !in 0 until GRID_COLUMNS || row !in 0 until GRID_ROWS || values.size < GRID_COLUMNS * GRID_ROWS) return Double.NaN
-    val v = values[row * GRID_COLUMNS + column]
+fun shownValue(style: Style, values: FloatArray, column: Int, row: Int, grid: Grid = Grid.REFS): Double {
+    if (column !in 0 until grid.columns || row !in 0 until grid.rows || values.size < grid.cells) return Double.NaN
+    val v = values[row * grid.columns + column]
     return if (v.isNaN()) Double.NaN else v * style.factor + style.offset
 }
 
 /** Text for the read-out at a grid cell: "39.10N 97.20W   42.5 dBZ", or "6 of 10 members: ..." for paintball products. */
 fun readout(core: Core, product: Product, values: FloatArray, members: List<String>, column: Int, row: Int): String {
-    if (column !in 0 until GRID_COLUMNS || row !in 0 until GRID_ROWS || values.size < GRID_COLUMNS * GRID_ROWS) return ""
-    val (lat, lon) = core.gridToLatLon(column + 0.5, row + 0.5)
+    val grid = product.grid
+    if (column !in 0 until grid.columns || row !in 0 until grid.rows || values.size < grid.cells) return ""
+    val (lat, lon) = core.gridToLatLon(grid, column + 0.5, row + 0.5)
     val where = "${fixed(abs(lat), 2)}${if (lat >= 0) "N" else "S"} ${fixed(abs(lon), 2)}${if (lon < 0) "W" else "E"}   "
-    val raw = values[row * GRID_COLUMNS + column]
+    val raw = values[row * grid.columns + column]
     if (raw.isNaN()) return where + "no data"
     val style = product.style
     if (style.kind == Kind.Paintball) {

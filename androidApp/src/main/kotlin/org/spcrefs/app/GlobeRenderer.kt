@@ -8,6 +8,7 @@ import android.graphics.RadialGradient
 import android.graphics.Shader
 import spcrefs.Core
 import spcrefs.GlobeCamera
+import spcrefs.Grid
 import spcrefs.Palettes
 import spcrefs.Product
 import spcrefs.Style
@@ -18,7 +19,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private var buffer = IntArray(0)
 
     @Synchronized
-    fun render(values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean): Bitmap {
+    fun render(grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean): Bitmap {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF070B14.toInt() else 0xFFE8EDF3.toInt())
@@ -40,7 +41,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColours[members.getOrNull(it)] ?: 0x808080 }
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
-        core.renderGlobe(values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
+        core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
         canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)
 
         lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1)

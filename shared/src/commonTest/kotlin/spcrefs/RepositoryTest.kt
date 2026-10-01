@@ -47,6 +47,50 @@ class MetaTest {
         assertEquals("kt", Catalogue.styleFor("gust_mean", "knot").units)
     }
 
+    @Test fun grefsStoresAreKeyedAndCatalogued() {
+        val grefs = """{"metadata":{
+          "tor_prob/.zarray":{"shape":[57,129,185],"chunks":[1,129,185],"dtype":"<f4","fill_value":"NaN","compressor":{"id":"blosc"}},
+          "tor_prob/.zattrs":{"_ARRAY_DIMENSIONS":["valid_time","y","x"],"units":"percent"},
+          "wind_prob/.zarray":{"shape":[57,129,185],"chunks":[1,129,185],"dtype":"<f4","fill_value":"NaN","compressor":{"id":"blosc"}},
+          "wind_prob/.zattrs":{"_ARRAY_DIMENSIONS":["valid_time","y","x"],"units":"percent"},
+          "latitude/.zarray":{"shape":[129,185],"chunks":[129,185],"dtype":"<f8","fill_value":"NaN","compressor":{"id":"blosc"}},
+          "valid_time/.zarray":{"shape":[57],"chunks":[1],"dtype":"<f8","fill_value":"NaN","compressor":{"id":"blosc"}}}}"""
+        val all = parseZMetadata(zmeta) + parseZMetadata(grefs, StoreKind.GREFS4)
+        val tor = all.getValue("grefs-4hr/tor_prob")
+        assertEquals("tor_prob", tor.path)
+        assertEquals(StoreKind.GREFS4, tor.kind)
+        assertEquals(Grid.GREFS, tor.grid)
+        assertEquals(Grid.REFS, all.getValue("cref_max").grid)
+        assertEquals(null, all.getValue("grefs-4hr/latitude").grid)   // coordinates are not products
+        val products = Catalogue.build(all.values)
+        val p = products.first { it.id == "grefs-4hr/tor_prob" }
+        assertEquals("4-h Tornado Probability (GREFS)", p.title)
+        assertEquals(Groups.GREFS, p.group)
+        assertEquals(Grid.GREFS, p.grid)
+        assertEquals("grefs-4hr/valid_time", p.timeDimension)
+        assertEquals(Kind.Banded, p.style.kind)
+        assertEquals(100.0, p.style.factor)
+        assertEquals(2.0, p.style.hideBelow)                        // tornado probabilities start at 2%
+        assertEquals(5.0, products.first { it.id == "grefs-4hr/wind_prob" }.style.hideBelow)
+        // GREFS comes right after "Severe storms" in the menu
+        assertEquals(listOf(Groups.SEVERE, Groups.GREFS), products.map { it.group }.distinct().take(2))
+    }
+
+    @Test fun storeUrlsPerKind() {
+        val c = Cycle(2026, 10, 1, 12)
+        assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/grefs-4hr_20261001_1200.zarr", c.storeUrl(StoreKind.GREFS4))
+        assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/grefs-24hr_20261001_1200.zarr", c.storeUrl(StoreKind.GREFS24))
+        assertEquals(c.storeUrl, c.storeUrl(StoreKind.REFS))
+    }
+
+    @Test fun gridsMatchShapes() {
+        assertEquals(Grid.REFS, Grid.matching(listOf(19, 1059, 1799)))
+        assertEquals(Grid.GREFS, Grid.matching(listOf(57, 129, 185)))
+        assertEquals(Grid.GREFS, Grid.matching(listOf(10, 57, 129, 185)))
+        assertEquals(null, Grid.matching(listOf(129, 185)))
+        assertEquals(null, Grid.matching(listOf(19, 100, 100)))
+    }
+
     @Test fun chunkKeys() = assertEquals("2.5.0.0", chunkKey(listOf(2, 5, 0, 0)))
 
     @Test fun timeFormatting() {
@@ -76,9 +120,9 @@ class MetaTest {
 internal object StubCore : Core {
     override fun inflate(raw: ByteArray) = raw
     override fun decodeFloats(raw: ByteArray, dtype: String, compressed: Boolean, count: Int) = FloatArray(count)
-    override fun latLonToGrid(lat: Double, lon: Double) = doubleArrayOf(0.0, 0.0)
-    override fun gridToLatLon(column: Double, row: Double) = doubleArrayOf(0.0, 0.0)
+    override fun latLonToGrid(grid: Grid, lat: Double, lon: Double) = doubleArrayOf(0.0, 0.0)
+    override fun gridToLatLon(grid: Grid, column: Double, row: Double) = doubleArrayOf(0.0, 0.0)
     override fun render(values: FloatArray, view: View, style: Style, memberRgb: IntArray, argb: IntArray) {}
-    override fun renderGlobe(values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
+    override fun renderGlobe(grid: Grid, values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
                              domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray) {}
 }

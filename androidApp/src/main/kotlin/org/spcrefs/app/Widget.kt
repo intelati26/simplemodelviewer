@@ -88,7 +88,7 @@ class WidgetWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val values = repo.readFrame(store, product, t, 0)
         val style = withAutoStops(product.style, values)
         val sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0]
-        val view = if (sector.name == "CONUS") View.CONUS else sector.view(core)
+        val view = if (sector.name == "CONUS") View.whole(product.grid) else sector.view(core, product.grid)
         val renderer = MapRenderer(core, AppContainer.lines)
         val map = renderer.render(product, style, values, repo.members(store), view, dark = true)
         val hour = if (times.isEmpty()) 0 else (times[t] - cycle.epochSeconds) / 3600

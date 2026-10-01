@@ -8,15 +8,8 @@
 #include <vector>
 #include "blosc_decode.h"
 #include "chunk_decode.h"
-#include "lambert_grid.h"
+#include "grids.h"
 #include "raster.h"
-
-namespace {
-    const LambertGrid & grid() {
-        static const LambertGrid g;
-        return g;
-    }
-}
 
 extern "C" {
 
@@ -51,16 +44,19 @@ long spc_blosc_inflate(const uint8_t * data, size_t size, uint8_t * out, size_t 
     return static_cast<long>(bytes.size());
 }
 
-void spc_latlon_to_grid(double lat, double lon, double * column, double * row) {
-    grid().toGrid(lat, lon, *column, *row);
+int spc_grid_columns(int grid) { return Grids::get(grid).columns; }
+int spc_grid_rows(int grid) { return Grids::get(grid).rows; }
+
+void spc_latlon_to_grid(int grid, double lat, double lon, double * column, double * row) {
+    Grids::get(grid).toGrid(lat, lon, *column, *row);
 }
 
-void spc_grid_to_latlon(double column, double row, double * lat, double * lon) {
-    grid().toLatLon(column, row, *lat, *lon);
+void spc_grid_to_latlon(int grid, double column, double row, double * lat, double * lon) {
+    Grids::get(grid).toLatLon(column, row, *lat, *lon);
 }
 
 void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb) {
-    Raster::renderGlobe(values, grid(), *globe, *style, argb);
+    Raster::renderGlobe(values, *globe, *style, argb);
 }
 
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb) {

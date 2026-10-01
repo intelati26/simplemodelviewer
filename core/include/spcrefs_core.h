@@ -10,8 +10,13 @@
 extern "C" {
 #endif
 
-#define SPC_GRID_COLUMNS 1799
+/* The grids of SPC's data: REFS (1799 x 1059, 3 km) and GREFS probabilities (185 x 129, 40.6 km). */
+enum { SPC_GRID_REFS = 0, SPC_GRID_GREFS = 1 };
+#define SPC_GRID_COLUMNS 1799   /* the REFS grid */
 #define SPC_GRID_ROWS 1059
+
+int spc_grid_columns(int grid);
+int spc_grid_rows(int grid);
 
 /* Decodes one downloaded Zarr chunk into `count` floats (C order). `compressed` != 0: blosc. Returns 0 on success, otherwise
  * -1 with a message in `error` (up to `error_cap` bytes). */
@@ -24,12 +29,13 @@ long spc_blosc_inflate(const uint8_t * data, size_t size, uint8_t * out, size_t 
 
 /* Lambert grid: fractional column (from the west) and row (from the south) of a latitude / longitude (east-positive or
  * west-negative both fine), and back. */
-void spc_latlon_to_grid(double lat, double lon, double * column, double * row);
-void spc_grid_to_latlon(double column, double row, double * lat, double * lon);
+void spc_latlon_to_grid(int grid, double lat, double lon, double * column, double * row);
+void spc_grid_to_latlon(int grid, double column, double row, double * lat, double * lon);
 
-/* A window of the grid: cells from col0 / row0 (south-west), `cols` x `rows` cells, drawn `scale` pixels per cell. */
+/* A window of a grid: cells from col0 / row0 (south-west), `cols` x `rows` cells, drawn `scale` pixels per cell. */
 /* `step` > 1 (with scale 1) draws every step-th cell: a half-memory "data saver" picture, (cols/step) x (rows/step) pixels. */
 typedef struct {
+    int grid;
     int col0, row0, cols, rows, scale, step;
 } spc_view;
 
@@ -55,6 +61,7 @@ typedef struct {
  * show); everything else stays transparent (0) for the caller to paint. `stride` > 1 draws coarse stride x stride blocks (fast
  * preview while dragging). */
 typedef struct {
+    int grid;
     int width, height;
     double radius;
     double center_lat, center_lon;
@@ -64,7 +71,7 @@ typedef struct {
 
 void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb);
 
-/* Renders `values` (SPC_GRID_COLUMNS x SPC_GRID_ROWS, row 0 = south) into `argb` ((view.cols*scale/step) x (view.rows*scale/step), north up,
+/* Renders `values` (the grid's columns x rows, row 0 = south) into `argb` ((view.cols*scale/step) x (view.rows*scale/step), north up,
  * 0xAARRGGBB, transparent where nothing is shown). */
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb);
 

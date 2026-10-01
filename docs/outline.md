@@ -58,7 +58,7 @@ Name and pricing; licence; distribution (F-Droid/GitHub only vs Play); alerts in
 | Repo layout, GPLv3 notice, README | Android / iOS app modules and Compose UI |
 | `core/`: blosc decode (lz4+zstd) ported from wxqt, dtype conversion, Lambert grid, rasteriser (blended / banded / paintball), C API | JNI / cinterop bindings, map line geometry |
 | Core unit tests incl. byte-identical decode vs libblosc - pass on Linux | Real-chunk fixtures and golden images |
-| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass; run on an emulator against live data. Done beyond v1: globe, export (screen area / meso sector / globe, PNG or MP4 loop), widget, saved places, new-run banner, settings, tablet layout | iOS app, GREFS / REFSCT stores, golden images, accessibility pass |
+| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass; run on an emulator against live data. Done beyond v1: GREFS 4-h / 24-h tornado, wind and hail probabilities (own 42 km grid, projection fitted to the store's coordinates), globe, export (screen area / meso sector / globe, PNG or MP4 loop), widget, saved places, new-run banner, settings, tablet layout | iOS app, REFSCT thunder probability (store not located), golden images, accessibility pass |
 | CI: `core-tests` workflow; `android` skeleton | `android-ui`, `ios`, `release` workflows |
 
 Next: (1) fetch real chunks as fixtures and add golden tests, (2) Gradle Android + iOS targets and the JNI/cinterop hello app, (3) port SPC titles

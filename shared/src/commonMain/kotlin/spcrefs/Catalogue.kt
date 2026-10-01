@@ -21,25 +21,44 @@ data class Product(
     val group: String,
     val style: Style,
     val hasMembers: Boolean,       // 4-D (member, time, y, x): one member at a time
-    val timeDimension: String?,    // name of the time coordinate array
+    val timeDimension: String?,    // key of the time coordinate array (prefixed like the product's own for secondary stores)
+    val grid: Grid = Grid.REFS,
 )
 
 object Groups {
     const val SEVERE = "Severe storms"
+    const val GREFS = "Calibrated severe probabilities (GREFS)"
     const val INSTABILITY = "Instability and shear"
     const val PRECIP = "Precipitation"
     const val SURFACE = "Surface and upper air"
     const val FIRE = "Fire weather"
     const val OTHER = "Other fields"
-    val ordered = listOf(SEVERE, INSTABILITY, PRECIP, SURFACE, FIRE, OTHER)
+    val ordered = listOf(SEVERE, GREFS, INSTABILITY, PRECIP, SURFACE, FIRE, OTHER)
 }
 
 object Catalogue {
-    private val curated = curatedList.associate { it.first to (it.second to it.third) }
-    private val curatedOrder = curatedList.mapIndexed { i, t -> t.first to i }.toMap()
+    /** GREFS: SPC's calibrated 4-h and 24-h probabilities of tornadoes, damaging wind and severe hail (a coarse 42 km grid). */
+    private val grefsList = listOf(
+        Triple("grefs-4hr/tor_prob", "4-h Tornado Probability (GREFS)", Groups.GREFS),
+        Triple("grefs-4hr/wind_prob", "4-h Damaging Wind Probability (GREFS)", Groups.GREFS),
+        Triple("grefs-4hr/hail_prob", "4-h Severe Hail Probability (GREFS)", Groups.GREFS),
+        Triple("grefs-24hr/tor_prob", "24-h Tornado Probability (GREFS)", Groups.GREFS),
+        Triple("grefs-24hr/wind_prob", "24-h Damaging Wind Probability (GREFS)", Groups.GREFS),
+        Triple("grefs-24hr/hail_prob", "24-h Severe Hail Probability (GREFS)", Groups.GREFS),
+    )
+    private val allCurated = curatedList + grefsList
+    private val curated = allCurated.associate { it.first to (it.second to it.third) }
+    private val curatedOrder = allCurated.mapIndexed { i, t -> t.first to i }.toMap()
 
     /** Colours and units from the array's name and its `units` attribute (ported from the desktop viewer). */
     fun styleFor(id: String, units: String): Style {
+        if (id.startsWith("grefs-")) {
+            // stored as fractions; shown as percent with the colours of SPC's convective outlook probabilities
+            val tornado = id.endsWith("tor_prob")
+            val stops = if (tornado) listOf(2.0 to 0x008B00, 5.0 to 0x8B4726, 10.0 to 0xFFC800, 15.0 to 0xFF0000, 30.0 to 0xFF00FF, 45.0 to 0x912CEE, 60.0 to 0x104E8B)
+            else listOf(5.0 to 0x8B4726, 15.0 to 0xFFC800, 30.0 to 0xFF0000, 45.0 to 0xFF00FF, 60.0 to 0x912CEE)
+            return Style(Kind.Banded, stops.map { Stop(it.first, it.second) }, factor = 100.0, hideBelow = stops.first().first, units = "%", digits = 0)
+        }
         if ("_pb_" in id) return Style(Kind.Paintball, units = "members")
         if ("nmep" in id || "_prob" in id)
             return Style(Kind.Banded, Palettes.probability, factor = 100.0, hideBelow = 5.0, units = "%", digits = 0)
@@ -88,7 +107,7 @@ object Catalogue {
     fun describe(array: ArrayInfo): Product {
         val (title, group) = curated[array.name] ?: (array.name.replace('_', ' ') to Groups.OTHER)
         return Product(array.name, title, group, styleFor(array.name, array.units), array.dims.size == 4,
-            if (array.dims.size >= 3) array.dims[array.dims.size - 3] else null)
+            if (array.dims.size >= 3) array.kind.prefix + array.dims[array.dims.size - 3] else null, array.grid ?: Grid.REFS)
     }
 
     /** Every displayable field of a store (3-D / 4-D on the CONUS grid), in menu order: groups, then SPC's order within a group. */

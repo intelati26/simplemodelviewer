@@ -1,7 +1,9 @@
 package spcrefs
 
 /** A window of the grid: cells from (col0, row0) at the south-west, drawn `scale` pixels per cell. Row 0 is the south row. */
-data class View(val name: String, val col0: Int, val row0: Int, val cols: Int, val rows: Int, val scale: Int, val step: Int = 1) {
+data class View(
+    val name: String, val col0: Int, val row0: Int, val cols: Int, val rows: Int, val scale: Int, val step: Int = 1, val grid: Grid = Grid.REFS,
+) {
     val pixelWidth get() = cols * scale / step
     val pixelHeight get() = rows * scale / step
 
@@ -10,6 +12,12 @@ data class View(val name: String, val col0: Int, val row0: Int, val cols: Int, v
 
     companion object {
         val CONUS = View("CONUS", 0, 0, GRID_COLUMNS, GRID_ROWS, 1)
+
+        /** The whole of a grid. The coarse GREFS grid is drawn 8 pixels per cell (and smoothed) so it fills a screen. */
+        fun whole(grid: Grid) = when (grid) {
+            Grid.REFS -> CONUS
+            Grid.GREFS -> View("Whole grid", 0, 0, grid.columns, grid.rows, 8, 1, grid)
+        }
     }
 }
 
@@ -22,10 +30,10 @@ interface Core {
     fun decodeFloats(raw: ByteArray, dtype: String, compressed: Boolean, count: Int): FloatArray
 
     /** Fractional grid position (column from the west, row from the south) of a latitude / longitude. Returns [column, row]. */
-    fun latLonToGrid(lat: Double, lon: Double): DoubleArray
+    fun latLonToGrid(grid: Grid, lat: Double, lon: Double): DoubleArray
 
     /** Latitude / longitude of a fractional grid position. Returns [lat, lon]. */
-    fun gridToLatLon(column: Double, row: Double): DoubleArray
+    fun gridToLatLon(grid: Grid, column: Double, row: Double): DoubleArray
 
     /**
      * Renders the grid values into [argb] (view.pixelWidth x view.pixelHeight, north up, 0xAARRGGBB, transparent where nothing
@@ -39,31 +47,31 @@ interface Core {
      * [domainArgb]. [stride] > 1 draws coarse blocks (a fast preview while dragging).
      */
     fun renderGlobe(
-        values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
+        grid: Grid, values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
         domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray,
     )
 }
 
 /** A latitude / longitude box (west-negative longitudes). */
 data class Sector(val name: String, val west: Double, val south: Double, val east: Double, val north: Double) {
-    /** The grid window around the box, drawn 4 x 4 pixels per 3 km cell and smoothed. The box bends on the Lambert grid, so walk its outline. */
-    fun view(core: Core, pixelsPerCell: Int = 4): View {
+    /** The grid window around the box, drawn 4 x 4 pixels per 3 km REFS cell (16 per 42 km GREFS cell) and smoothed. The box bends on the Lambert grid, so walk its outline. */
+    fun view(core: Core, grid: Grid = Grid.REFS, pixelsPerCell: Int = if (grid == Grid.REFS) 4 else 16): View {
         var minCol = 1e9; var maxCol = -1e9; var minRow = 1e9; var maxRow = -1e9
         for (i in 0..40) {
             val t = i / 40.0
             val lon = west + (east - west) * t
             val lat = south + (north - south) * t
             for ((la, lo) in listOf(south to lon, north to lon, lat to west, lat to east)) {
-                val (c, r) = core.latLonToGrid(la, lo)
+                val (c, r) = core.latLonToGrid(grid, la, lo)
                 minCol = minOf(minCol, c); maxCol = maxOf(maxCol, c)
                 minRow = minOf(minRow, r); maxRow = maxOf(maxRow, r)
             }
         }
-        val col0 = kotlin.math.floor(minCol).toInt().coerceIn(0, GRID_COLUMNS - 2)
-        val row0 = kotlin.math.floor(minRow).toInt().coerceIn(0, GRID_ROWS - 2)
-        val col1 = kotlin.math.ceil(maxCol).toInt().coerceIn(col0 + 1, GRID_COLUMNS - 1)
-        val row1 = kotlin.math.ceil(maxRow).toInt().coerceIn(row0 + 1, GRID_ROWS - 1)
-        return View(name, col0, row0, col1 - col0 + 1, row1 - row0 + 1, pixelsPerCell.coerceIn(1, 8))
+        val col0 = kotlin.math.floor(minCol).toInt().coerceIn(0, grid.columns - 2)
+        val row0 = kotlin.math.floor(minRow).toInt().coerceIn(0, grid.rows - 2)
+        val col1 = kotlin.math.ceil(maxCol).toInt().coerceIn(col0 + 1, grid.columns - 1)
+        val row1 = kotlin.math.ceil(maxRow).toInt().coerceIn(row0 + 1, grid.rows - 1)
+        return View(name, col0, row0, col1 - col0 + 1, row1 - row0 + 1, pixelsPerCell.coerceIn(1, 32), 1, grid)
     }
 
     companion object {
