@@ -311,6 +311,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         pickCycle(newer)
     }
 
+    fun reportNotice(text: String) = update { it.copy(notice = text) }
+
     fun dismissNotice() = update { it.copy(notice = null) }
 
     fun dismissNewerCycle() = update { it.copy(newerCycle = null) }
@@ -361,6 +363,43 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private fun isMetered(): Boolean {
         val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
         return cm.isActiveNetworkMetered
+    }
+
+    /**
+     * Renders every forecast time of the current product / sector into an MP4 and returns the file. [onProgress] gets (done, total).
+     * Frames come from the HTTP cache when the loop has been played.
+     */
+    suspend fun buildLoopFile(onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
+        val s = store ?: return@withContext null
+        val st = _state.value
+        val product = st.product ?: return@withContext null
+        val cycle = st.cycle ?: return@withContext null
+        val n = st.times.size
+        if (n < 2) return@withContext null
+        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = File(dir, "spc_refs_loop_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}.mp4")
+        var exporter: LoopExporter? = null
+        try {
+            for (t in 0 until n) {
+                val data = repo.readFrame(s, product, t, st.member)
+                val style = withAutoStops(product.style, data)
+                val v = if (st.sector.name == "CONUS") View.CONUS else st.sector.view(core)
+                val map = renderer.render(product, style, data, st.members, v, dark = false)
+                val hour = (st.times[t] - cycle.epochSeconds) / 3600
+                val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
+                var picture = renderer.shareImage(map, product, style, header, st.members)
+                if (picture.width > 1280) picture = Bitmap.createScaledBitmap(picture, 1280, picture.height * 1280 / picture.width, true)
+                if (exporter == null) exporter = LoopExporter(file, picture.width, picture.height)
+                exporter.add(picture, last = t == n - 1)
+                onProgress(t + 1, n)
+            }
+            exporter?.finish()
+            file
+        } catch (e: Exception) {
+            exporter?.abort()
+            throw e
+        }
     }
 
     /** Writes the shareable picture (header, map, colour key) and returns the file, or null when there is nothing to share. */

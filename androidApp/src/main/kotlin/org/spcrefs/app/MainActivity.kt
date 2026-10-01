@@ -114,6 +114,7 @@ private fun RefsScreen(vm: RefsViewModel) {
     var places by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
+    var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
 
     Scaffold(topBar = {
@@ -121,18 +122,26 @@ private fun RefsScreen(vm: RefsViewModel) {
             title = { Text("SPC REFS") },
             actions = {
                 SectorMenu(s.sector, vm::pickSector)
-                TextButton(onClick = {
-                    scope.launch {
-                        val file = vm.buildShareFile() ?: return@launch
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "image/png"
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                ShareMenu(enabled = s.map != null, canLoop = s.times.size > 1,
+                    onImage = {
+                        scope.launch {
+                            val file = vm.buildShareFile() ?: return@launch
+                            shareFile(context, file, "image/png", "Share map")
                         }
-                        context.startActivity(Intent.createChooser(send, "Share map"))
-                    }
-                }, enabled = s.map != null) { Text("Share") }
+                    },
+                    onLoop = {
+                        scope.launch {
+                            loopProgress = 0 to s.times.size
+                            try {
+                                val file = vm.buildLoopFile { done, total -> loopProgress = done to total }
+                                loopProgress = null
+                                if (file != null) shareFile(context, file, "video/mp4", "Share loop")
+                            } catch (e: Exception) {
+                                loopProgress = null
+                                vm.reportNotice("Could not make the video: ${e.message}")
+                            }
+                        }
+                    })
                 MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             },
         )
@@ -227,6 +236,19 @@ private fun RefsScreen(vm: RefsViewModel) {
     )
     if (settings) SettingsDialog(s.settings, vm::setSettings) { settings = false }
     s.strip?.let { PointStripSheet(it, s.product?.title ?: "", s.cycle?.label ?: "", vm::closePointForecast) }
+    loopProgress?.let { (done, total) ->
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Making the loop video") },
+            text = {
+                Column {
+                    Text("Frame $done of $total")
+                    LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+            },
+        )
+    }
     if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
@@ -513,6 +535,28 @@ private fun StripChart(series: PointSeries) {
                 Text(formatUtc(series.times[i]), style = MaterialTheme.typography.bodySmall)
                 Text(if (v.isNaN()) "-" else fixed(v, digits) + unit, style = MaterialTheme.typography.bodySmall, fontWeight = if (i == peak) FontWeight.Bold else FontWeight.Normal)
             }
+        }
+    }
+}
+
+private fun shareFile(context: android.content.Context, file: java.io.File, mime: String, title: String) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = mime
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(send, title))
+}
+
+@Composable
+private fun ShareMenu(enabled: Boolean, canLoop: Boolean, onImage: () -> Unit, onLoop: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }, enabled = enabled) { Text("Share") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Picture (PNG)") }, onClick = { open = false; onImage() })
+            if (canLoop) DropdownMenuItem(text = { Text("Loop (MP4 video)") }, onClick = { open = false; onLoop() })
         }
     }
 }
