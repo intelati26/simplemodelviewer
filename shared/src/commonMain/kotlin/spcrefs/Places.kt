@@ -34,9 +34,11 @@ class PointSeries(val times: List<Long>, val values: List<Double>, val units: St
  * second pass cheap). [onProgress] gets 0..1.
  */
 suspend fun RefsRepository.pointSeries(
-    store: CycleStore, product: Product, memberIndex: Int, lat: Double, lon: Double, core: Core, onProgress: (Float) -> Unit = {},
+    store: CycleStore, product: Product, memberIndex: Int, lat: Double, lon: Double, core: Core, maxHours: Int? = null, onProgress: (Float) -> Unit = {},
 ): PointSeries {
-    val times = validTimes(store, product)
+    val allTimes = validTimes(store, product)
+    // alerts only look a limited number of hours ahead (less data per check)
+    val times = if (maxHours == null) allTimes else allTimes.filter { it - store.cycle.epochSeconds <= maxHours * 3600L }
     val (c, r) = core.latLonToGrid(lat, lon)
     val column = c.roundToInt()
     val row = r.roundToInt()

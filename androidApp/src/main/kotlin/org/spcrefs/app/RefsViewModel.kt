@@ -19,6 +19,9 @@ import kotlinx.coroutines.withContext
 import spcrefs.Catalogue
 import spcrefs.Cycle
 import spcrefs.CycleStore
+import spcrefs.AlertRule
+import spcrefs.decodeRules
+import spcrefs.encodeRules
 import spcrefs.Place
 import spcrefs.PointSeries
 import spcrefs.Product
@@ -67,6 +70,8 @@ data class UiState(
     val tapLatLon: Pair<Double, Double>? = null,
     val strip: StripState? = null,
     val newerCycle: Cycle? = null,
+    val rules: List<AlertRule> = emptyList(),
+    val alertStatus: String = "",
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
 ) {
     val validLabel: String
@@ -76,9 +81,9 @@ data class UiState(
 }
 
 class RefsViewModel(app: Application) : AndroidViewModel(app) {
-    private val core = NativeCore()
-    private val prefs = app.getSharedPreferences("spcrefs", Context.MODE_PRIVATE)
-    private val repo = RefsRepository(OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()), core)   // a new cache size applies on the next launch
+    private val core = AppContainer.core
+    private val prefs = AppContainer.prefs
+    private val repo = AppContainer.repo
     private val renderer = MapRenderer(core, MapLines(app, core))
 
     private var store: CycleStore? = null
@@ -93,6 +98,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(),
             settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150)),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
+            rules = decodeRules(prefs.getString("rules", "").orEmpty()),
+            alertStatus = prefs.getString("alert_status", "").orEmpty(),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
         )
     )
@@ -235,6 +242,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             .putInt("cache_mb", settings.cacheMegabytes).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver
         update { it.copy(settings = settings) }
+        AlertScheduler.sync(getApplication(), _state.value.rules.isNotEmpty(), settings.wifiOnlyLoop)
         if (redraw && values != null) viewModelScope.launch { rerender() }
     }
 
@@ -288,6 +296,45 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closePointForecast() { stripJob?.cancel(); update { it.copy(strip = null) } }
+
+    // ---- threshold alerts ----
+    /** A default alert level for the current product: a mid-table value in shown units. */
+    fun suggestedThreshold(): Double {
+        val style = _state.value.product?.style ?: return 50.0
+        return when {
+            style.kind == spcrefs.Kind.Paintball -> 3.0
+            style.stops.isEmpty() -> 50.0
+            else -> style.stops[minOf(2, style.stops.size - 1)].value
+        }
+    }
+
+    fun addRule(place: Place, threshold: Double) {
+        val product = _state.value.product ?: return
+        val rule = AlertRule(place.name, place.lat, place.lon, product.id, product.title, threshold)
+        val rules = _state.value.rules.filter { it.key != rule.key } + rule
+        saveRules(rules)
+    }
+
+    fun deleteRule(rule: AlertRule) = saveRules(_state.value.rules - rule)
+
+    private fun saveRules(rules: List<AlertRule>) {
+        prefs.edit().putString("rules", encodeRules(rules)).apply()
+        update { it.copy(rules = rules) }
+        AlertScheduler.sync(getApplication(), rules.isNotEmpty(), _state.value.settings.wifiOnlyLoop)
+    }
+
+    fun checkAlertsNow() {
+        prefs.edit().putString("alert_status", "Checking...").apply()
+        update { it.copy(alertStatus = "Checking...") }
+        AlertScheduler.checkNow(getApplication())
+        viewModelScope.launch {   // the worker writes its result to the preferences; show it when it lands
+            repeat(60) {
+                delay(2000)
+                val status = prefs.getString("alert_status", "").orEmpty()
+                if (status.isNotEmpty() && status != "Checking...") { update { it.copy(alertStatus = status) }; return@launch }
+            }
+        }
+    }
 
     // ---- a newer run on the server? ----
     private var lastCheck = 0L

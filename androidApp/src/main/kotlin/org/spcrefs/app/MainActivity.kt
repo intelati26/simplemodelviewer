@@ -1,9 +1,13 @@
 package org.spcrefs.app
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -80,6 +84,7 @@ import spcrefs.fixed
 import spcrefs.formatUtc
 import spcrefs.placeLabel
 import kotlinx.coroutines.launch
+import spcrefs.AlertRule
 import spcrefs.Cycle
 import spcrefs.Groups
 import spcrefs.Kind
@@ -115,6 +120,8 @@ private fun RefsScreen(vm: RefsViewModel) {
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var alertFor by remember { mutableStateOf<Place?>(null) }
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
 
     Scaffold(topBar = {
@@ -233,8 +240,36 @@ private fun RefsScreen(vm: RefsViewModel) {
         onGo = { places = false; vm.goToPlace(it) },
         onForecast = { places = false; vm.showPointForecast(it.name, it.lat, it.lon) },
         onDelete = vm::deletePlace,
+        rules = s.rules, productTitle = s.product?.title.orEmpty(),
+        onAlert = { alertFor = it },
+        onDeleteRule = vm::deleteRule,
     )
-    if (settings) SettingsDialog(s.settings, vm::setSettings) { settings = false }
+    alertFor?.let { place ->
+        var level by remember(place) { mutableStateOf(fixed(vm.suggestedThreshold(), 2).trimEnd('0').trimEnd('.')) }
+        AlertDialog(
+            onDismissRequest = { alertFor = null },
+            title = { Text("Alert for ${place.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Notify me when a new run reaches this level in the next 24 hours:")
+                    Text(s.product?.title.orEmpty(), fontWeight = FontWeight.Bold)
+                    OutlinedTextField(level, { level = it }, singleLine = true, label = { Text("Level (${s.style?.units.orEmpty()})") })
+                    Text("Checked about once per new run, in the background, only on a new run. Experimental guidance: not a warning service.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    level.toDoubleOrNull()?.let {
+                        vm.addRule(place, it)
+                        if (!Notifier.canNotify(context) && Build.VERSION.SDK_INT >= 33) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    alertFor = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { alertFor = null }) { Text("Cancel") } },
+        )
+    }
+    if (settings) SettingsDialog(s.settings, vm::setSettings, s.rules.size, s.alertStatus, vm::checkAlertsNow) { settings = false }
     s.strip?.let { PointStripSheet(it, s.product?.title ?: "", s.cycle?.label ?: "", vm::closePointForecast) }
     loopProgress?.let { (done, total) ->
         AlertDialog(
@@ -427,7 +462,10 @@ private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
 }
 
 @Composable
-private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onForecast: (Place) -> Unit, onDelete: (Place) -> Unit) {
+private fun PlacesDialog(
+    places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onForecast: (Place) -> Unit, onDelete: (Place) -> Unit,
+    rules: List<AlertRule>, productTitle: String, onAlert: (Place) -> Unit, onDeleteRule: (AlertRule) -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
@@ -438,9 +476,16 @@ private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Plac
                 items(places, key = { it.name }) { p ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(p.name, fontWeight = FontWeight.Bold)
+                        rules.filter { it.placeName == p.name }.forEach { r ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Alert: ${r.productTitle} >= ${fixed(r.threshold, 2).trimEnd('0').trimEnd('.')}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = { onDeleteRule(r) }) { Text("Remove") }
+                            }
+                        }
                         Row {
                             TextButton(onClick = { onGo(p) }) { Text("Show") }
                             TextButton(onClick = { onForecast(p) }) { Text("Forecast") }
+                            TextButton(onClick = { onAlert(p) }) { Text("Alert") }
                             TextButton(onClick = { onDelete(p) }) { Text("Delete") }
                         }
                     }
@@ -452,7 +497,7 @@ private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Plac
 }
 
 @Composable
-private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onDismiss: () -> Unit) {
+private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, ruleCount: Int, alertStatus: String, onCheckNow: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
@@ -464,6 +509,11 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                 }
                 SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
                     onChange(settings.copy(dataSaver = it))
+                }
+                Column {
+                    Text("Alerts: $ruleCount rule(s)")
+                    Text(alertStatus.ifEmpty { "Set one from Places > Alert." }, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onCheckNow, enabled = ruleCount > 0) { Text("Check now") }
                 }
                 Column {
                     Text("Cache size (applies on the next launch)")
