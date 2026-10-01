@@ -82,6 +82,7 @@ import spcrefs.Place
 import spcrefs.PointSeries
 import spcrefs.fixed
 import spcrefs.formatUtc
+import spcrefs.visibleFractions
 import spcrefs.placeLabel
 import kotlinx.coroutines.launch
 import spcrefs.AlertRule
@@ -121,6 +122,7 @@ private fun RefsScreen(vm: RefsViewModel) {
     var savingPlace by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var alertFor by remember { mutableStateOf<Place?>(null) }
+    var sharing by remember { mutableStateOf(false) }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
 
@@ -129,26 +131,7 @@ private fun RefsScreen(vm: RefsViewModel) {
             title = { Text("SPC REFS") },
             actions = {
                 SectorMenu(s.sector, vm::pickSector)
-                ShareMenu(enabled = s.map != null, canLoop = s.times.size > 1,
-                    onImage = {
-                        scope.launch {
-                            val file = vm.buildShareFile() ?: return@launch
-                            shareFile(context, file, "image/png", "Share map")
-                        }
-                    },
-                    onLoop = {
-                        scope.launch {
-                            loopProgress = 0 to s.times.size
-                            try {
-                                val file = vm.buildLoopFile { done, total -> loopProgress = done to total }
-                                loopProgress = null
-                                if (file != null) shareFile(context, file, "video/mp4", "Share loop")
-                            } catch (e: Exception) {
-                                loopProgress = null
-                                vm.reportNotice("Could not make the video: ${e.message}")
-                            }
-                        }
-                    })
+                TextButton(onClick = { sharing = true }, enabled = s.map != null) { Text("Share") }
                 MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             },
         )
@@ -271,6 +254,28 @@ private fun RefsScreen(vm: RefsViewModel) {
     }
     if (settings) SettingsDialog(s.settings, vm::setSettings, s.rules.size, s.alertStatus, vm::checkAlertsNow) { settings = false }
     s.strip?.let { PointStripSheet(it, s.product?.title ?: "", s.cycle?.label ?: "", vm::closePointForecast) }
+    if (sharing) ShareDialog(
+        canLoop = s.times.size > 1, current = s.sector.name, onDismiss = { sharing = false },
+        onShare = { area, loop ->
+            sharing = false
+            scope.launch {
+                if (!loop) {
+                    val file = vm.buildShareFile(area) ?: return@launch
+                    shareFile(context, file, "image/png", "Share map")
+                } else {
+                    loopProgress = 0 to s.times.size
+                    try {
+                        val file = vm.buildLoopFile(area) { done, total -> loopProgress = done to total }
+                        loopProgress = null
+                        if (file != null) shareFile(context, file, "video/mp4", "Share loop")
+                    } catch (e: Exception) {
+                        loopProgress = null
+                        vm.reportNotice("Could not make the video: ${e.message}")
+                    }
+                }
+            }
+        },
+    )
     loopProgress?.let { (done, total) ->
         AlertDialog(
             onDismissRequest = {},
@@ -307,6 +312,12 @@ private fun MapView(s: UiState, vm: RefsViewModel) {
     var offset by remember(bitmap.width, bitmap.height) { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val image = remember(bitmap) { bitmap.asImageBitmap() }
+    // tell the view model which part of the picture is on screen, for "export this screen area"
+    LaunchedEffect(scale, offset, size, bitmap) {
+        if (size.width == 0) return@LaunchedEffect
+        val f = visibleFractions(size.width.toFloat(), size.height.toFloat(), bitmap.width.toFloat() / bitmap.height, scale, offset.x, offset.y)
+        vm.setViewport(f[0], f[1], f[2], f[3])
+    }
 
     Box(
         Modifier.fillMaxSize().clipToBounds().onSizeChanged { size = it }
@@ -599,14 +610,40 @@ private fun shareFile(context: android.content.Context, file: java.io.File, mime
     context.startActivity(Intent.createChooser(send, title))
 }
 
+/** Choose what to export (this screen area, the whole map, or a meso sector) and in what form. */
 @Composable
-private fun ShareMenu(enabled: Boolean, canLoop: Boolean, onImage: () -> Unit, onLoop: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { open = true }, enabled = enabled) { Text("Share") }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Picture (PNG)") }, onClick = { open = false; onImage() })
-            if (canLoop) DropdownMenuItem(text = { Text("Loop (MP4 video)") }, onClick = { open = false; onLoop() })
-        }
+private fun ShareDialog(canLoop: Boolean, current: String, onDismiss: () -> Unit, onShare: (ShareArea, Boolean) -> Unit) {
+    var area by remember { mutableStateOf<ShareArea>(ShareArea.Screen) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Share") },
+        text = {
+            Column {
+                Text("Area", style = MaterialTheme.typography.labelLarge)
+                LazyColumn(Modifier.height(300.dp)) {
+                    item { AreaRow("This screen area", area == ShareArea.Screen) { area = ShareArea.Screen } }
+                    item { AreaRow("Whole map ($current)", area == ShareArea.Whole) { area = ShareArea.Whole } }
+                    item { Text("Meso areas", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge) }
+                    items(Sector.all) { sector ->
+                        AreaRow(sector.name, (area as? ShareArea.Meso)?.sector == sector) { area = ShareArea.Meso(sector) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = { onShare(area, false) }) { Text("Picture") }
+                if (canLoop) TextButton(onClick = { onShare(area, true) }) { Text("Loop video") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun AreaRow(text: String, selected: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (selected) "●" else "○", Modifier.padding(end = 12.dp), fontSize = 18.sp)
+        Text(text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
     }
 }

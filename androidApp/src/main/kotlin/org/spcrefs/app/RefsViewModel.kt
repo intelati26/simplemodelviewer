@@ -41,6 +41,16 @@ import spcrefs.withAutoStops
 import java.io.File
 import kotlin.math.floor
 
+/** What part of the map an export covers. */
+sealed class ShareArea {
+    /** Whatever is on the screen right now (the zoomed / panned part of the picture). */
+    object Screen : ShareArea()
+    /** The whole picture currently selected (CONUS or the chosen sector). */
+    object Whole : ShareArea()
+    /** A meso sector, whatever is shown now. */
+    data class Meso(val sector: Sector) : ShareArea()
+}
+
 data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150)
 
 /** The point-forecast sheet: one place, every forecast time. */
@@ -90,6 +100,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private var values: FloatArray? = null
     private var view: View = View.CONUS
     private var dark = false
+    private var viewport = floatArrayOf(0f, 0f, 1f, 1f)   // visible part of the picture as fractions: left, top, right, bottom
     private var frameJob: Job? = null
     private var playJob: Job? = null
 
@@ -412,11 +423,34 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         return cm.isActiveNetworkMetered
     }
 
+    /** The UI reports which part of the picture is on screen (after pinch-zoom / pan). */
+    fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
+        viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+    }
+
+    /** The grid window an export covers, drawn at a resolution that suits its size (about 1800 px wide, at most 8 px per cell). */
+    private fun resolveView(area: ShareArea): View = when (area) {
+        ShareArea.Whole -> if (view.step > 1) View.CONUS else view
+        is ShareArea.Meso -> if (area.sector.name == "CONUS") View.CONUS else area.sector.view(core)
+        ShareArea.Screen -> {
+            val (l, t, r, b) = viewport.toList()
+            val c0 = view.col0 + l * view.cols
+            val c1 = view.col0 + r * view.cols
+            val r0 = view.row0 + (1f - b) * view.rows      // image top is north
+            val r1 = view.row0 + (1f - t) * view.rows
+            val col0 = floor(c0).toInt().coerceIn(0, spcrefs.GRID_COLUMNS - 2)
+            val row0 = floor(r0).toInt().coerceIn(0, spcrefs.GRID_ROWS - 2)
+            val cols = (kotlin.math.ceil(c1).toInt() - col0).coerceIn(2, spcrefs.GRID_COLUMNS - col0)
+            val rows = (kotlin.math.ceil(r1).toInt() - row0).coerceIn(2, spcrefs.GRID_ROWS - row0)
+            View("Screen area", col0, row0, cols, rows, (1800f / cols).toInt().coerceIn(1, 8))
+        }
+    }
+
     /**
      * Renders every forecast time of the current product / sector into an MP4 and returns the file. [onProgress] gets (done, total).
      * Frames come from the HTTP cache when the loop has been played.
      */
-    suspend fun buildLoopFile(onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
+    suspend fun buildLoopFile(area: ShareArea, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val s = store ?: return@withContext null
         val st = _state.value
         val product = st.product ?: return@withContext null
@@ -427,11 +461,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         dir.listFiles()?.forEach { it.delete() }
         val file = File(dir, "spc_refs_loop_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}.mp4")
         var exporter: LoopExporter? = null
+        val v = resolveView(area)
         try {
             for (t in 0 until n) {
                 val data = repo.readFrame(s, product, t, st.member)
                 val style = withAutoStops(product.style, data)
-                val v = if (st.sector.name == "CONUS") View.CONUS else st.sector.view(core)
                 val map = renderer.render(product, style, data, st.members, v, dark = false)
                 val hour = (st.times[t] - cycle.epochSeconds) / 3600
                 val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
@@ -450,13 +484,13 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Writes the shareable picture (header, map, colour key) and returns the file, or null when there is nothing to share. */
-    suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val product = st.product ?: return@withContext null
         val data = values ?: return@withContext null
         val cycle = st.cycle ?: return@withContext null
         val style = withAutoStops(product.style, data)
-        val map = renderer.render(product, style, data, st.members, view, dark = false)
+        val map = renderer.render(product, style, data, st.members, resolveView(area), dark = false)
         val header = "Run ${cycle.label}   Valid ${st.validLabel}" + (st.forecastHour?.let { "  (f${it.toString().padStart(2, '0')})" } ?: "") +
             "   Data: NOAA/NWS Storm Prediction Center (experimental)"
         val image = renderer.shareImage(map, product, style, header, st.members)
