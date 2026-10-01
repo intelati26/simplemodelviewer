@@ -71,3 +71,9 @@ and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
   and the `noaa-mrms-pds` AWS bucket (needs a gunzip + GRIB2 decoder; radar is out of scope for v1). Not pursued.
 - **Decision (owner): no location-based alerts or point forecasts.** A saved-place point-forecast strip and threshold notifications were built and
   verified on the emulator, then removed; saved places remain as map bookmarks. Products (including GREFS / thunder probability later) are not affected.
+- **Decision (owner): GitHub only, for now.** Distribution is the GitHub repository plus APKs from GitHub Releases / Actions (CI artifacts are named
+  `simplemodelview-*`); no Google Play or F-Droid listing, so the Play-specific risks above do not apply yet. The contact address sent to the data
+  provider is user-set in Settings (stored on the device, empty by default), not hard-coded.
+- **Contact email (owner):** Settings has an optional email field; it is appended to the User-Agent (`simplemodelview/0.1 (...) contact: <email>`) so
+  the data provider can reach the user. It is optional but a dialog asks for it at every launch (and after 30 min away) until one is saved; "Not now"
+  closes it and the app works without. The dialog states that the address is sent to SPC's server. The address is stored only on the device.

@@ -5,12 +5,13 @@
 set -u
 OUT=${1:-screenshots}
 mkdir -p "$OUT"
-APK=${APK:-androidApp/build/outputs/apk/debug/androidApp-debug.apk}
+source "$(dirname "$0")/emu.sh"   # adb on PATH + emu_tap_text
+APK=${APK:-androidApp/build/outputs/apk/debug/simplemodelview-debug.apk}
 fail=0
 
 adb install -r "$APK" >/dev/null || { echo "install failed"; exit 1; }
 adb shell settings put global hide_error_dialogs 1       # a slow CI emulator can trip "System UI isn't responding"
-adb shell am force-stop org.spcrefs.app
+adb shell pm clear org.spcrefs.app >/dev/null 2>&1   # a fresh install state
 adb logcat -c
 adb shell am start -n org.spcrefs.app/.MainActivity >/dev/null
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1)
@@ -40,6 +41,10 @@ wait_for_picture() {   # $1 = name, $2 = seconds to wait
   done
   return 1
 }
+
+# a fresh install asks for an (optional) contact email at launch; a user would tap "Not now"
+sleep 6; shot email-dialog
+emu_tap_text "Not now" || { echo "FAIL: no email dialog on a fresh launch"; fail=1; }
 
 echo "waiting for the map (up to 6 min)"
 wait_for_picture map 360 || { echo "FAIL: the map never appeared"; fail=1; }

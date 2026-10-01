@@ -86,6 +86,7 @@ import androidx.compose.material3.FilterChip
 import spcrefs.Place
 import spcrefs.fixed
 import spcrefs.formatUtc
+import spcrefs.isValidEmail
 import spcrefs.visibleFractions
 import spcrefs.globeForward
 import spcrefs.placeLabel
@@ -127,7 +128,7 @@ private fun RefsScreen(vm: RefsViewModel) {
     var savingPlace by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sharing by remember { mutableStateOf(false) }
-    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); onPauseOrDispose { } }
 
     val dark = isSystemInDarkTheme()
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)     // the map picture's own background: no dead white around it
@@ -217,6 +218,7 @@ private fun RefsScreen(vm: RefsViewModel) {
         }
     }
 
+    if (s.contactPrompt) ContactDialog(onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt)
     if (picker) ProductPicker(s.products, s.product, s.favourites, onToggle = vm::toggleFavourite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
@@ -518,7 +520,7 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onD
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
         title = { Text("Settings") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SwitchRow("Download loops on Wi-Fi only", "Play will not start a loop on a metered connection (a loop is about 15 MB).", settings.wifiOnlyLoop) {
                     onChange(settings.copy(wifiOnlyLoop = it))
                 }
@@ -531,6 +533,14 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                         for (mb in listOf(50, 150, 300)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text("$mb MB") })
                     }
                 }
+                var email by remember { mutableStateOf(settings.contactEmail) }
+                OutlinedTextField(
+                    value = email, onValueChange = { email = it; if (isValidEmail(it)) onChange(settings.copy(contactEmail = it.trim())) }, singleLine = true,
+                    label = { Text("Your email (optional)") }, isError = email.isNotEmpty() && !isValidEmail(email),
+                    supportingText = { Text(if (isValidEmail(email)) "Sent to the data provider in this app's User-Agent." else if (email.isEmpty()) "Optional. Sent to the data provider in this app's User-Agent." else "Enter a valid address; the last valid one stays in use.") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Disclaimer()
             }
         },
@@ -606,3 +616,32 @@ private const val DISCLAIMER = "Data: NOAA/NWS Storm Prediction Center. Experime
 @Composable
 private fun Disclaimer(modifier: Modifier = Modifier) =
     Text(DISCLAIMER, modifier, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+/** Asks for a contact address. Optional, but it comes back at every launch until one is saved; "Not now" closes it. */
+@Composable
+private fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit) {
+    var email by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onNotNow,
+        title = { Text("Your email address") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "This app reads the Storm Prediction Center's public data directly. To be a polite client it would like to identify " +
+                        "you to SPC's server: your address would be sent in the User-Agent header of every request, so SPC can contact you if the app " +
+                        "ever causes them problems. It is not shared with anyone else and is kept only on this device. Optional; you can also " +
+                        "set it later in Settings.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = email, onValueChange = { email = it }, singleLine = true, label = { Text("Email") },
+                    isError = email.isNotEmpty() && !isValidEmail(email),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(email.trim()) }, enabled = isValidEmail(email)) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onNotNow) { Text("Not now") } },
+    )
+}

@@ -1,6 +1,6 @@
 # iOS is best effort (no Apple Developer membership): this proves the shared C++ core builds for the iOS Simulator and passes its
 # tests on macOS. There is no iOS app target yet; see docs/outline.md.
-name: ios
+name: simplemodelview / ios
 on:
   workflow_dispatch:
   push:

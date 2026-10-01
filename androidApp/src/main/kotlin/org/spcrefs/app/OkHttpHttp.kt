@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import spcrefs.Http
 import spcrefs.HttpResult
+import spcrefs.userAgent
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -18,13 +19,13 @@ import java.util.concurrent.TimeUnit
  * requests, and a disk cache. Chunks of one cycle never change, so they are cached whatever the server's headers say; only
  * the `.zgroup` probes (does a newer cycle exist yet?) are always fresh.
  */
-class OkHttpHttp(context: Context, cacheMegabytes: Long = 150) : Http {
+class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val contact: () -> String = { "" }) : Http {
     private val client = OkHttpClient.Builder()
         .cache(Cache(File(context.cacheDir, "http"), cacheMegabytes * 1024 * 1024))
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .addInterceptor(Interceptor { chain ->
-            chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
+            chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent(USER_AGENT, contact())).build())
         })
         .addNetworkInterceptor(Interceptor { chain ->
             val response = chain.proceed(chain.request())
@@ -46,7 +47,7 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150) : Http {
     }
 
     companion object {
-        // TODO(before release): put a real contact address / project URL here (see docs/outline.md, risk 2)
-        const val USER_AGENT = "SPCRefsMobile/0.1 (unofficial viewer; +https://github.com/OWNER/spcrefs)"
+        // the contact address is set by the user in Settings and appended to this per request (see spcrefs.userAgent)
+        const val USER_AGENT = "simplemodelview/0.1 (unofficial viewer; +https://github.com/intelati26/simplemodelviewer;)"
     }
 }

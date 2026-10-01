@@ -1,4 +1,4 @@
-name: core-tests
+name: simplemodelview / core-tests
 on:
   push:
     paths: ['core/**', 'fixtures/**', '.github/workflows/core-tests.yml']

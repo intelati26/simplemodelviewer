@@ -1,4 +1,4 @@
-# SPC REFS (working title)
+# simplemodelview (SPC REFS viewer)
 
 Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and decisions: [docs/outline.md](docs/outline.md)
 (source: `android-spc-refs-scope.md`).
@@ -25,6 +25,6 @@ cmake -S core -B build && cmake --build build && ctest --test-dir build --output
 ## Build the Android app
 Needs the Android SDK + NDK (GitHub's runners have them; locally set `ANDROID_HOME`):
 ```
-./gradlew :androidApp:assembleDebug
+./gradlew :androidApp:assembleDebug     # -> androidApp/build/outputs/apk/debug/simplemodelview-debug.apk
 ```
-Before any release: put a real contact in `OkHttpHttp.USER_AGENT` and write to SPC (see outline, risk 1).
+Distribution is GitHub only for now (Releases / Actions artifacts). Requests carry a `simplemodelview/0.1` User-Agent plus the contact email you set in Settings (optional). Before wider use, write to SPC (see outline, risk 1).

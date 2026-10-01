@@ -5,6 +5,8 @@ plugins {
     kotlin("plugin.serialization") version "2.2.20"
 }
 
+base { archivesName.set("simplemodelview") }
+
 android {
     namespace = "org.spcrefs.app"
     compileSdk = 35

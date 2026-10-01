@@ -1,6 +1,6 @@
 # Starts an emulator, drives the app like a person (scripts/ui_smoke.sh) and keeps a screenshot per step as artifacts,
 # so a UI change can be eyeballed without a device. The app reads SPC's live data: a server outage fails this job, not the build.
-name: android-ui
+name: simplemodelview / android-ui
 on:
   workflow_dispatch:
   push:
@@ -39,5 +39,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ui-screenshots
+          name: simplemodelview-ui-screenshots
           path: screenshots/

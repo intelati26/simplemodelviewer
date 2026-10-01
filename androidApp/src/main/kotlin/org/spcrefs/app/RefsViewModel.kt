@@ -23,6 +23,7 @@ import spcrefs.GlobeCamera
 import spcrefs.Grid
 import spcrefs.globeInverse
 import spcrefs.Place
+import spcrefs.isValidEmail
 import spcrefs.Product
 import spcrefs.decodePlaces
 import spcrefs.encodePlaces
@@ -51,7 +52,7 @@ sealed class ShareArea {
     data class Meso(val sector: Sector) : ShareArea()
 }
 
-data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150)
+data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150, val contactEmail: String = "")
 
 data class UiState(
     val busy: Boolean = true,
@@ -78,6 +79,7 @@ data class UiState(
     val newerCycle: Cycle? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val contactPrompt: Boolean = false,          // the "please enter your email" dialog is showing
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
 ) {
     val validLabel: String
@@ -107,7 +109,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = kotlinx.coroutines.flow.MutableStateFlow(
         UiState(
             favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(),
-            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150)),
+            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
         )
@@ -116,7 +118,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     private inline fun update(f: (UiState) -> UiState) { _state.value = f(_state.value) }
 
-    init { load() }
+    init { load(); promptForContact() }
 
     fun load() {
         viewModelScope.launch {
@@ -335,7 +337,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).apply()
+            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver
         update { it.copy(settings = settings) }
         if (redraw && values != null) viewModelScope.launch { rerender() }
@@ -391,6 +393,21 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(newerCycle = null, cycles = (listOf(newer) + it.cycles).distinct()) }
         pickCycle(newer)
     }
+
+    private var lastContactPrompt = 0L
+
+    /**
+     * The contact address is optional but wanted (it goes into the User-Agent): without one, ask again at every launch and when the
+     * app comes back after more than 30 minutes. Never blocks; "Not now" simply closes it.
+     */
+    fun promptForContact() {
+        val now = System.currentTimeMillis()
+        if (isValidEmail(_state.value.settings.contactEmail) || now - lastContactPrompt < 30 * 60 * 1000 && lastContactPrompt != 0L) return
+        lastContactPrompt = now
+        update { it.copy(contactPrompt = true) }
+    }
+
+    fun dismissContactPrompt() = update { it.copy(contactPrompt = false) }
 
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
