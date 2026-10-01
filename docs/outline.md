@@ -58,7 +58,7 @@ Name and pricing; licence; distribution (F-Droid/GitHub only vs Play); alerts in
 | Repo layout, GPLv3 notice, README | Android / iOS app modules and Compose UI |
 | `core/`: blosc decode (lz4+zstd) ported from wxqt, dtype conversion, Lambert grid, rasteriser (blended / banded / paintball), C API | JNI / cinterop bindings, map line geometry |
 | Core unit tests incl. byte-identical decode vs libblosc - pass on Linux | Real-chunk fixtures and golden images |
-| `shared/` and `androidApp/` code written; shared tests pass on the JVM; the Android app has not been built yet | iOS app, JNI-on-device checks, golden images |
+| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass. Also done from v1.x: saved places, point-forecast strip, new-run banner, settings (Wi-Fi-only loops, data saver) | Running on a device / emulator, iOS app, loop export (WebP/MP4), threshold alerts, widget, GREFS/thunder, tablet layout, golden images |
 | CI: `core-tests` workflow; `android` skeleton | `android-ui`, `ios`, `release` workflows |
 
 Next: (1) fetch real chunks as fixtures and add golden tests, (2) Gradle Android + iOS targets and the JNI/cinterop hello app, (3) port SPC titles

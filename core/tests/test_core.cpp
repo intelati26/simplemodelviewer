@@ -85,7 +85,7 @@ static void testRender() {
     values[10 * SPC_GRID_COLUMNS + 20] = 45.0f;   // one cell at column 20, row 10 (from the south)
     const spc_stop stops[2] = {{10.0, 0, 0, 255}, {50.0, 255, 0, 0}};
     spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0};
-    spc_view view{0, 0, 40, 20, 1};
+    spc_view view{0, 0, 40, 20, 1, 1};
     std::vector<uint32_t> img(40 * 20, 0xDEADBEEF);
     spc_render(values.data(), &view, &style, img.data());
     // north at the top: row 10 of 20 shown rows is image row 20 - 1 - 10 = 9
@@ -94,7 +94,18 @@ static void testRender() {
     CHECK(((px >> 16) & 255) > 200 && (px & 255) < 60);   // 45 is mostly red on a blue-to-red ramp
     CHECK(img[0] == 0);                                    // NaN stays transparent
 
+    // data saver: every 2nd cell -> half-size picture (it samples the odd cells), so move the one value to column 21 / row 11
+    values[10 * SPC_GRID_COLUMNS + 20] = std::nanf("");
+    values[11 * SPC_GRID_COLUMNS + 21] = 45.0f;
+    spc_view half{0, 0, 40, 20, 1, 2};
+    std::vector<uint32_t> small(20 * 10, 0xDEADBEEF);
+    spc_render(values.data(), &half, &style, small.data());
+    int painted = 0;
+    for (uint32_t p : small) { CHECK(p != 0xDEADBEEF); painted += (p >> 24) == 0xFF; }
+    CHECK(painted == 1);
+
     // paintball: members 0 and 2 over the threshold
+    values[11 * SPC_GRID_COLUMNS + 21] = std::nanf("");
     values[10 * SPC_GRID_COLUMNS + 20] = 5.0f;
     const uint32_t members[3] = {0x000000, 0x00FF00, 0xFF0000};
     spc_style pb{SPC_PAINTBALL, nullptr, 0, 1.0, 0.0, -1e30, members, 3};

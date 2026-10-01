@@ -1,9 +1,12 @@
 package spcrefs
 
 /** A window of the grid: cells from (col0, row0) at the south-west, drawn `scale` pixels per cell. Row 0 is the south row. */
-data class View(val name: String, val col0: Int, val row0: Int, val cols: Int, val rows: Int, val scale: Int) {
-    val pixelWidth get() = cols * scale
-    val pixelHeight get() = rows * scale
+data class View(val name: String, val col0: Int, val row0: Int, val cols: Int, val rows: Int, val scale: Int, val step: Int = 1) {
+    val pixelWidth get() = cols * scale / step
+    val pixelHeight get() = rows * scale / step
+
+    /** The same window with every [n]-th cell drawn (data saver: ~4x less memory for n = 2). Only whole-grid views are decimated. */
+    fun decimated(n: Int) = if (n > 1 && scale == 1) copy(step = n) else this
 
     companion object {
         val CONUS = View("CONUS", 0, 0, GRID_COLUMNS, GRID_ROWS, 1)

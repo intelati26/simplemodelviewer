@@ -13,14 +13,14 @@ class NativeCore : Core {
     external override fun gridToLatLon(column: Double, row: Double): DoubleArray
 
     private external fun render(
-        values: FloatArray, col0: Int, row0: Int, cols: Int, rows: Int, scale: Int, kind: Int,
+        values: FloatArray, col0: Int, row0: Int, cols: Int, rows: Int, scale: Int, step: Int, kind: Int,
         stopValues: DoubleArray, stopRgb: IntArray, factor: Double, offset: Double, hideBelow: Double,
         memberRgb: IntArray, argb: IntArray,
     )
 
     override fun render(values: FloatArray, view: View, style: Style, memberRgb: IntArray, argb: IntArray) {
         render(
-            values, view.col0, view.row0, view.cols, view.rows, view.scale, style.kind.ordinal,
+            values, view.col0, view.row0, view.cols, view.rows, view.scale, view.step, style.kind.ordinal,
             DoubleArray(style.stops.size) { style.stops[it].value }, IntArray(style.stops.size) { style.stops[it].rgb },
             style.factor, style.offset, style.hideBelow, memberRgb, argb,
         )

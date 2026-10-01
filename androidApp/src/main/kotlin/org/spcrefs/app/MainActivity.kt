@@ -70,7 +70,15 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
+import spcrefs.Place
+import spcrefs.PointSeries
+import spcrefs.fixed
+import spcrefs.formatUtc
+import spcrefs.placeLabel
 import kotlinx.coroutines.launch
 import spcrefs.Cycle
 import spcrefs.Groups
@@ -103,6 +111,10 @@ private fun RefsScreen(vm: RefsViewModel) {
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    var places by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }
+    var savingPlace by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
 
     Scaffold(topBar = {
         TopAppBar(
@@ -121,7 +133,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                         context.startActivity(Intent.createChooser(send, "Share map"))
                     }
                 }, enabled = s.map != null) { Text("Share") }
-                TextButton(onClick = { about = true }) { Text("About") }
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             },
         )
     }) { padding ->
@@ -134,6 +146,19 @@ private fun RefsScreen(vm: RefsViewModel) {
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
 
+            s.newerCycle?.let {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("New run ${it.label} is available", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = vm::loadNewerCycle) { Text("Load") }
+                    TextButton(onClick = vm::dismissNewerCycle) { Text("Later") }
+                }
+            }
+            s.notice?.let {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = vm::dismissNotice) { Text("OK") }
+                }
+            }
             Text(
                 listOfNotNull(s.cycle?.let { "Run ${it.label}" }, s.validLabel.takeIf { it.isNotEmpty() }?.let { "Valid $it" },
                     s.forecastHour?.let { "f${it.toString().padStart(2, '0')}" }).joinToString("   "),
@@ -153,7 +178,16 @@ private fun RefsScreen(vm: RefsViewModel) {
             }
 
             s.readout?.let {
-                Text(it, Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp), style = MaterialTheme.typography.bodyMedium)
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp)) {
+                    Text(it, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                    s.tapLatLon?.let { (lat, lon) ->
+                        Row {
+                            TextButton(onClick = { vm.showPointForecast(placeLabel(lat, lon), lat, lon) }) { Text("Point forecast") }
+                            TextButton(onClick = { savingPlace = true }) { Text("Save place") }
+                            TextButton(onClick = vm::clearTap) { Text("Clear") }
+                        }
+                    }
+                }
             }
             s.style?.let { Legend(it, s.members) }
 
@@ -175,6 +209,24 @@ private fun RefsScreen(vm: RefsViewModel) {
     }
 
     if (picker) ProductPicker(s.products, s.product, s.favourites, onToggle = vm::toggleFavourite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
+    if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
+        var name by remember { mutableStateOf(placeLabel(lat, lon)) }
+        AlertDialog(
+            onDismissRequest = { savingPlace = false },
+            title = { Text("Save place") },
+            text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
+            confirmButton = { TextButton(onClick = { vm.savePlace(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
+        )
+    }
+    if (places) PlacesDialog(
+        s.places, onDismiss = { places = false },
+        onGo = { places = false; vm.goToPlace(it) },
+        onForecast = { places = false; vm.showPointForecast(it.name, it.lat, it.lon) },
+        onDelete = vm::deletePlace,
+    )
+    if (settings) SettingsDialog(s.settings, vm::setSettings) { settings = false }
+    s.strip?.let { PointStripSheet(it, s.product?.title ?: "", s.cycle?.label ?: "", vm::closePointForecast) }
     if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
@@ -337,4 +389,130 @@ private fun ProductRow(product: Product, selected: Boolean, favourite: Boolean, 
         TextButton(onClick = { onToggle(product) }) { Text(if (favourite) "★" else "☆", fontSize = 20.sp) }
     }
     HorizontalDivider()
+}
+
+@Composable
+private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) { Text("More") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
+            DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
+            DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
+        }
+    }
+}
+
+@Composable
+private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onForecast: (Place) -> Unit, onDelete: (Place) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Places") },
+        text = {
+            if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place.")
+            else LazyColumn {
+                items(places, key = { it.name }) { p ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text(p.name, fontWeight = FontWeight.Bold)
+                        Row {
+                            TextButton(onClick = { onGo(p) }) { Text("Show") }
+                            TextButton(onClick = { onForecast(p) }) { Text("Forecast") }
+                            TextButton(onClick = { onDelete(p) }) { Text("Delete") }
+                        }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        title = { Text("Settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SwitchRow("Download loops on Wi-Fi only", "Play will not start a loop on a metered connection (a loop is about 15 MB).", settings.wifiOnlyLoop) {
+                    onChange(settings.copy(wifiOnlyLoop = it))
+                }
+                SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
+                    onChange(settings.copy(dataSaver = it))
+                }
+                Column {
+                    Text("Cache size (applies on the next launch)")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (mb in listOf(50, 150, 300)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text("$mb MB") })
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun SwitchRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title)
+            Text(detail, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked, onChange)
+    }
+}
+
+/** Value at one place for every forecast hour: a bar chart plus the numbers. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PointStripSheet(strip: StripState, product: String, run: String, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            Text(strip.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("$product   run $run", style = MaterialTheme.typography.bodySmall)
+            when {
+                strip.error != null -> Text(strip.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
+                strip.series == null -> {
+                    Text("Loading every forecast hour...", Modifier.padding(top = 12.dp))
+                    LinearProgressIndicator(progress = { strip.progress }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+                else -> StripChart(strip.series)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StripChart(series: PointSeries) {
+    val max = series.max
+    val digits = series.digits
+    val unit = if (series.units.isEmpty()) "" else " ${series.units}"
+    if (max == null) { Text("No data at this point.", Modifier.padding(top = 12.dp)); return }
+    val peak = series.peakIndex
+    Text("Peak ${fixed(max, digits)}$unit at ${peak?.let { formatUtc(series.times[it]) } ?: ""}", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
+    val bar = MaterialTheme.colorScheme.primary
+    val peakColour = MaterialTheme.colorScheme.error
+    Canvas(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 8.dp)) {
+        val n = series.values.size
+        val top = maxOf(max, 1e-9)
+        val gap = 2.dp.toPx()
+        val w = (size.width - gap * (n - 1)) / n
+        series.values.forEachIndexed { i, v ->
+            if (v.isNaN()) return@forEachIndexed
+            val h = (maxOf(v, 0.0) / top * size.height).toFloat()
+            drawRect(if (i == peak) peakColour else bar, Offset(i * (w + gap), size.height - h), androidx.compose.ui.geometry.Size(w, h))
+        }
+    }
+    LazyColumn(Modifier.height(220.dp)) {
+        items(series.values.indices.toList()) { i ->
+            val v = series.values[i]
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(formatUtc(series.times[i]), style = MaterialTheme.typography.bodySmall)
+                Text(if (v.isNaN()) "-" else fixed(v, digits) + unit, style = MaterialTheme.typography.bodySmall, fontWeight = if (i == peak) FontWeight.Bold else FontWeight.Normal)
+            }
+        }
+    }
 }

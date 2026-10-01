@@ -28,8 +28,9 @@ void spc_latlon_to_grid(double lat, double lon, double * column, double * row);
 void spc_grid_to_latlon(double column, double row, double * lat, double * lon);
 
 /* A window of the grid: cells from col0 / row0 (south-west), `cols` x `rows` cells, drawn `scale` pixels per cell. */
+/* `step` > 1 (with scale 1) draws every step-th cell: a half-memory "data saver" picture, (cols/step) x (rows/step) pixels. */
 typedef struct {
-    int col0, row0, cols, rows, scale;
+    int col0, row0, cols, rows, scale, step;
 } spc_view;
 
 typedef struct {
@@ -49,7 +50,7 @@ typedef struct {
     int member_count;
 } spc_style;
 
-/* Renders `values` (SPC_GRID_COLUMNS x SPC_GRID_ROWS, row 0 = south) into `argb` (view.cols*scale x view.rows*scale, north up,
+/* Renders `values` (SPC_GRID_COLUMNS x SPC_GRID_ROWS, row 0 = south) into `argb` ((view.cols*scale/step) x (view.rows*scale/step), north up,
  * 0xAARRGGBB, transparent where nothing is shown). */
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb);
 

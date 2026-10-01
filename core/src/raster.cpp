@@ -68,14 +68,15 @@ namespace Raster {
     }
 
     void render(const float * values, const spc_view& view, const spc_style& style, uint32_t * out) {
-        const int scale = std::max(view.scale, 1);
-        const int outW = view.cols * scale;
-        const int outH = view.rows * scale;
+        const int step = std::max(view.step, 1);
+        const int scale = step > 1 ? 1 : std::max(view.scale, 1);
+        const int outW = view.cols * scale / step;
+        const int outH = view.rows * scale / step;
         const bool paintball = style.kind == SPC_PAINTBALL;
         for (int y = 0; y < outH; y += 1) {
-            const double row = view.row0 + view.rows - (y + 0.5) / scale - 0.5;   // north at the top
+            const double row = view.row0 + view.rows - (y + 0.5) * step / scale - 0.5;   // north at the top
             for (int x = 0; x < outW; x += 1) {
-                const double column = view.col0 + (x + 0.5) / scale - 0.5;
+                const double column = view.col0 + (x + 0.5) * step / scale - 0.5;
                 uint32_t & px = out[static_cast<size_t>(y) * outW + x];
                 px = 0;
                 if (paintball) {

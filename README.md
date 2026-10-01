@@ -12,7 +12,7 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 |---|---|
 | `core/` | C++ core with a C API: blosc (lz4 + zstd) decode, dtype conversion, Lambert grid, rasteriser. Builds and passes tests on Linux. |
 | `shared/` | Platform-independent Kotlin: cycle probing, Zarr metadata, ~120 SPC product titles and colour tables, repository, read-out text, sectors. Unit tests pass (`./gradlew :shared:jvmTest`). |
-| `androidApp/` | Jetpack Compose app + JNI bridge to the core: product picker with favourites and search, cycle / member / sector menus, time slider and loop with prefetch, pinch-zoom, tap for value, share as PNG. **Written but not yet built or run** - first CI run will show what needs fixing. |
+| `androidApp/` | Jetpack Compose app + JNI bridge to the core: product picker with favourites and search, cycle / member / sector menus, time slider and loop with prefetch, pinch-zoom, tap for value, share as PNG, saved places, a point-forecast strip (value at a place for every hour), a "new run available" banner, and settings (Wi-Fi-only loops, data-saver half-resolution, cache size). **Builds and passes lint in CI; not yet run on a device or emulator.** |
 | `iosApp/` | Not started. |
 | `.github/workflows/` | `core-tests` and `android` (debug APK as artifact; attached to a release on `v*` tags). |
 

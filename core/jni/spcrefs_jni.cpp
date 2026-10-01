@@ -72,11 +72,11 @@ JNIEXPORT jdoubleArray JNICALL Java_org_spcrefs_app_NativeCore_gridToLatLon(JNIE
 }
 
 JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_render(JNIEnv * env, jobject, jfloatArray values, jint col0, jint row0, jint cols,
-                                                              jint rows, jint scale, jint kind, jdoubleArray stopValues, jintArray stopRgb,
+                                                              jint rows, jint scale, jint step, jint kind, jdoubleArray stopValues, jintArray stopRgb,
                                                               jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,
                                                               jintArray argb) {
     const jsize n = env->GetArrayLength(values);
-    if (n < SPC_GRID_COLUMNS * SPC_GRID_ROWS || env->GetArrayLength(argb) < cols * scale * rows * scale) {
+    if (n < SPC_GRID_COLUMNS * SPC_GRID_ROWS || env->GetArrayLength(argb) < (cols * scale / (step > 1 ? step : 1)) * (rows * scale / (step > 1 ? step : 1))) {
         throwRuntime(env, "render buffers are too small");
         return;
     }
@@ -94,7 +94,7 @@ JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_render(JNIEnv * env, jobj
     for (jsize i = 0; i < memberCount; i += 1) {
         members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
     }
-    const spc_view view{col0, row0, cols, rows, scale};
+    const spc_view view{col0, row0, cols, rows, scale, step};
     const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size())};
     jint * out = env->GetIntArrayElements(argb, nullptr);
     spc_render(v, &view, &style, reinterpret_cast<uint32_t *>(out));
