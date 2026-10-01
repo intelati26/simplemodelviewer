@@ -8,11 +8,11 @@ plugins {
 base { archivesName.set("simplemodelview") }
 
 android {
-    namespace = "org.spcrefs.app"
+    namespace = "io.github.intelati26.simplemodelview"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.spcrefs.app"
+        applicationId = "io.github.intelati26.simplemodelview"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

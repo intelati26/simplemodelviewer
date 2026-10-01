@@ -1,3 +1,3 @@
 <resources>
-    <style name="Theme.SpcRefs" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.SimpleModelView" parent="android:Theme.Material.NoActionBar" />
 </resources>

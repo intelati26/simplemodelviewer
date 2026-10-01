@@ -77,3 +77,7 @@ and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
 - **Contact email (owner):** Settings has an optional email field; it is appended to the User-Agent (`simplemodelview/0.1 (...) contact: <email>`) so
   the data provider can reach the user. It is optional but a dialog asks for it at every launch (and after 30 min away) until one is saved; "Not now"
   closes it and the app works without. The dialog states that the address is sent to SPC's server. The address is stored only on the device.
+- **Name (owner): simplemodelview.** The app, application ID (`io.github.intelati26.simplemodelview`), packages, JNI library, workflows and artifacts use it.
+  Name check (2026-10-01): no app by this name was found; the exact name `SimpleModelView` is a small Unity UI package (EpistasisLab/SimpleModelView), a code
+  library in an unrelated domain, and "model viewer" mostly returns 3D-model viewers, so the name is not self-explanatory for weather: say "SPC REFS" in
+  the description. The SPC name is not used in the app's name or icon (no implied NOAA / NWS / SPC endorsement).

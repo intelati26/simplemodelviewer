@@ -1,4 +1,4 @@
-rootProject.name = "spcrefs"
+rootProject.name = "simplemodelview"
 
 pluginManagement {
     repositories {

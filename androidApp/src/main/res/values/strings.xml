@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">SPC REFS</string>
+    <string name="app_name">simplemodelview</string>
     <string name="widget_description">The latest SPC REFS picture of the product and area you looked at last. Experimental guidance, not a warning.</string>
 </resources>

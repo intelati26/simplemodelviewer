@@ -11,9 +11,9 @@ fail=0
 
 adb install -r "$APK" >/dev/null || { echo "install failed"; exit 1; }
 adb shell settings put global hide_error_dialogs 1       # a slow CI emulator can trip "System UI isn't responding"
-adb shell pm clear org.spcrefs.app >/dev/null 2>&1   # a fresh install state
+adb shell pm clear io.github.intelati26.simplemodelview >/dev/null 2>&1   # a fresh install state
 adb logcat -c
-adb shell am start -n org.spcrefs.app/.MainActivity >/dev/null
+adb shell am start -n io.github.intelati26.simplemodelview/.MainActivity >/dev/null
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1)
 W=${SIZE%x*}; H=${SIZE#*x}
 
@@ -61,7 +61,7 @@ tap 91 7;  sleep 3; shot more-menu
 if adb logcat -d -s AndroidRuntime:E | grep -q FATAL; then
   echo "FAIL: the app crashed"; adb logcat -d -s AndroidRuntime:E | head -30; fail=1
 fi
-if adb logcat -d | grep -q "ANR in org.spcrefs.app"; then
-  echo "FAIL: the app was not responding"; adb logcat -d | grep "ANR in org.spcrefs.app" | head -3; fail=1
+if adb logcat -d | grep -q "ANR in io.github.intelati26.simplemodelview"; then
+  echo "FAIL: the app was not responding"; adb logcat -d | grep "ANR in io.github.intelati26.simplemodelview" | head -3; fail=1
 fi
 exit $fail

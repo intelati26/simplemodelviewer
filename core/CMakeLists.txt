@@ -11,10 +11,10 @@ add_library(spcrefs_core STATIC
 target_include_directories(spcrefs_core PUBLIC include PRIVATE src)
 target_link_libraries(spcrefs_core PRIVATE zstd_decoder)
 
-# Android: the JNI bridge the app loads as libspcrefs_jni.so
+# Android: the JNI bridge the app loads as libsimplemodelview_jni.so
 if(ANDROID)
-    add_library(spcrefs_jni SHARED jni/spcrefs_jni.cpp)
-    target_link_libraries(spcrefs_jni PRIVATE spcrefs_core)
+    add_library(simplemodelview_jni SHARED jni/simplemodelview_jni.cpp)
+    target_link_libraries(simplemodelview_jni PRIVATE spcrefs_core)
 endif()
 
 # unit tests (host builds only, not the Android / iOS cross builds)
