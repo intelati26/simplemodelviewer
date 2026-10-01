@@ -83,6 +83,7 @@ import spcrefs.PointSeries
 import spcrefs.fixed
 import spcrefs.formatUtc
 import spcrefs.visibleFractions
+import spcrefs.globeForward
 import spcrefs.placeLabel
 import kotlinx.coroutines.launch
 import spcrefs.AlertRule
@@ -130,7 +131,7 @@ private fun RefsScreen(vm: RefsViewModel) {
         TopAppBar(
             title = { Text("SPC REFS") },
             actions = {
-                SectorMenu(s.sector, vm::pickSector)
+                SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
                 TextButton(onClick = { sharing = true }, enabled = s.map != null) { Text("Share") }
                 MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             },
@@ -170,7 +171,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                         Text(s.error!!, color = MaterialTheme.colorScheme.error)
                         Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                     }
-                    s.map != null -> MapView(s, vm)
+                    s.map != null || s.globe -> if (s.globe) GlobeView(s, vm) else MapView(s, vm)
                     else -> CircularProgressIndicator()
                 }
                 s.readout?.let {
@@ -255,7 +256,7 @@ private fun RefsScreen(vm: RefsViewModel) {
     if (settings) SettingsDialog(s.settings, vm::setSettings, s.rules.size, s.alertStatus, vm::checkAlertsNow) { settings = false }
     s.strip?.let { PointStripSheet(it, s.product?.title ?: "", s.cycle?.label ?: "", vm::closePointForecast) }
     if (sharing) ShareDialog(
-        canLoop = s.times.size > 1, current = s.sector.name, onDismiss = { sharing = false },
+        canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
         onShare = { area, loop ->
             sharing = false
             scope.launch {
@@ -302,6 +303,27 @@ private fun RefsScreen(vm: RefsViewModel) {
             )
         },
     )
+}
+
+/** The globe: drag to turn it, pinch to zoom, tap for a value. The picture is drawn by the core at the screen's pixel size. */
+@Composable
+private fun GlobeView(s: UiState, vm: RefsViewModel) {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    Box(
+        Modifier.fillMaxSize().onSizeChanged { size = it; vm.setGlobeSize(it.width, it.height) }
+            .pointerInput(Unit) { detectTransformGestures { _, pan, zoom, _ -> vm.globeGesture(pan.x, pan.y, zoom) } }
+            .pointerInput(Unit) { detectTapGestures { p -> vm.onGlobeTap(p.x, p.y) } },
+    ) {
+        s.map?.let { Image(it.asImageBitmap(), contentDescription = "SPC REFS globe", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
+        s.tapLatLon?.let { (lat, lon) ->
+            val p = globeForward(s.cam, size.width, size.height, lat, lon)
+            if (p != null) Canvas(Modifier.fillMaxSize()) {
+                val x = p[0].toFloat(); val y = p[1].toFloat(); val r = 10.dp.toPx(); val w = 1.5.dp.toPx()
+                drawLine(Color.Black, Offset(x - r, y), Offset(x + r, y), w * 2.4f); drawLine(Color.Black, Offset(x, y - r), Offset(x, y + r), w * 2.4f)
+                drawLine(Color.White, Offset(x - r, y), Offset(x + r, y), w); drawLine(Color.White, Offset(x, y - r), Offset(x, y + r), w)
+            }
+        }
+    }
 }
 
 /** The map picture with pinch-zoom, pan and tap-for-value. Tap positions are converted back through the zoom and pan. */
@@ -385,11 +407,12 @@ private fun Legend(style: Style, members: List<String>) {
 }
 
 @Composable
-private fun SectorMenu(current: Sector, onPick: (Sector) -> Unit) {
+private fun SectorMenu(current: String, onGlobe: () -> Unit, onPick: (Sector) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) { Text(current.name) }
+        TextButton(onClick = { open = true }) { Text(current) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Globe") }, onClick = { open = false; onGlobe() })
             for (sector in Sector.all) DropdownMenuItem(text = { Text(sector.name) }, onClick = { open = false; onPick(sector) })
         }
     }
@@ -612,8 +635,8 @@ private fun shareFile(context: android.content.Context, file: java.io.File, mime
 
 /** Choose what to export (this screen area, the whole map, or a meso sector) and in what form. */
 @Composable
-private fun ShareDialog(canLoop: Boolean, current: String, onDismiss: () -> Unit, onShare: (ShareArea, Boolean) -> Unit) {
-    var area by remember { mutableStateOf<ShareArea>(ShareArea.Screen) }
+private fun ShareDialog(canLoop: Boolean, current: String, globe: Boolean, onDismiss: () -> Unit, onShare: (ShareArea, Boolean) -> Unit) {
+    var area by remember { mutableStateOf<ShareArea>(if (globe) ShareArea.Globe else ShareArea.Screen) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Share") },
@@ -621,8 +644,12 @@ private fun ShareDialog(canLoop: Boolean, current: String, onDismiss: () -> Unit
             Column {
                 Text("Area", style = MaterialTheme.typography.labelLarge)
                 LazyColumn(Modifier.height(300.dp)) {
-                    item { AreaRow("This screen area", area == ShareArea.Screen) { area = ShareArea.Screen } }
-                    item { AreaRow("Whole map ($current)", area == ShareArea.Whole) { area = ShareArea.Whole } }
+                    if (globe) {
+                        item { AreaRow("The globe, as turned now", area == ShareArea.Globe) { area = ShareArea.Globe } }
+                    } else {
+                        item { AreaRow("This screen area", area == ShareArea.Screen) { area = ShareArea.Screen } }
+                        item { AreaRow("Whole map ($current)", area == ShareArea.Whole) { area = ShareArea.Whole } }
+                    }
                     item { Text("Meso areas", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge) }
                     items(Sector.all) { sector ->
                         AreaRow(sector.name, (area as? ShareArea.Meso)?.sector == sector) { area = ShareArea.Meso(sector) }

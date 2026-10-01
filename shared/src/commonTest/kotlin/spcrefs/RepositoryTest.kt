@@ -79,4 +79,6 @@ internal object StubCore : Core {
     override fun latLonToGrid(lat: Double, lon: Double) = doubleArrayOf(0.0, 0.0)
     override fun gridToLatLon(column: Double, row: Double) = doubleArrayOf(0.0, 0.0)
     override fun render(values: FloatArray, view: View, style: Style, memberRgb: IntArray, argb: IntArray) {}
+    override fun renderGlobe(values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
+                             domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray) {}
 }

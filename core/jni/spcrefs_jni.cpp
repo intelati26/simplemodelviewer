@@ -71,6 +71,40 @@ JNIEXPORT jdoubleArray JNICALL Java_org_spcrefs_app_NativeCore_gridToLatLon(JNIE
     return result;
 }
 
+JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_renderGlobe(JNIEnv * env, jobject, jfloatArray values, jint width, jint height,
+                                                                   jdouble radius, jdouble centerLat, jdouble centerLon, jint stride,
+                                                                   jint domainArgb, jint kind, jdoubleArray stopValues, jintArray stopRgb,
+                                                                   jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,
+                                                                   jintArray argb) {
+    if (env->GetArrayLength(values) < SPC_GRID_COLUMNS * SPC_GRID_ROWS || env->GetArrayLength(argb) < width * height) {
+        throwRuntime(env, "globe buffers are too small");
+        return;
+    }
+    jfloat * v = env->GetFloatArrayElements(values, nullptr);
+    const jsize stopCount = env->GetArrayLength(stopValues);
+    jdouble * sv = env->GetDoubleArrayElements(stopValues, nullptr);
+    jint * sc = env->GetIntArrayElements(stopRgb, nullptr);
+    std::vector<spc_stop> stops(static_cast<size_t>(stopCount));
+    for (jsize i = 0; i < stopCount; i += 1) {
+        stops[static_cast<size_t>(i)] = {sv[i], static_cast<uint8_t>(sc[i] >> 16), static_cast<uint8_t>(sc[i] >> 8), static_cast<uint8_t>(sc[i])};
+    }
+    const jsize memberCount = env->GetArrayLength(memberRgb);
+    jint * mr = env->GetIntArrayElements(memberRgb, nullptr);
+    std::vector<uint32_t> members(static_cast<size_t>(memberCount));
+    for (jsize i = 0; i < memberCount; i += 1) {
+        members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
+    }
+    const spc_globe globe{width, height, radius, centerLat, centerLon, stride, static_cast<uint32_t>(domainArgb)};
+    const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size())};
+    jint * out = env->GetIntArrayElements(argb, nullptr);
+    spc_render_globe(v, &globe, &style, reinterpret_cast<uint32_t *>(out));
+    env->ReleaseIntArrayElements(argb, out, 0);
+    env->ReleaseIntArrayElements(memberRgb, mr, JNI_ABORT);
+    env->ReleaseIntArrayElements(stopRgb, sc, JNI_ABORT);
+    env->ReleaseDoubleArrayElements(stopValues, sv, JNI_ABORT);
+    env->ReleaseFloatArrayElements(values, v, JNI_ABORT);
+}
+
 JNIEXPORT void JNICALL Java_org_spcrefs_app_NativeCore_render(JNIEnv * env, jobject, jfloatArray values, jint col0, jint row0, jint cols,
                                                               jint rows, jint scale, jint step, jint kind, jdoubleArray stopValues, jintArray stopRgb,
                                                               jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,

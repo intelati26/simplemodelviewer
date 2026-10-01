@@ -26,6 +26,23 @@ class NativeCore : Core {
         )
     }
 
+    private external fun renderGlobe(
+        values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int, domainArgb: Int,
+        kind: Int, stopValues: DoubleArray, stopRgb: IntArray, factor: Double, offset: Double, hideBelow: Double,
+        memberRgb: IntArray, argb: IntArray,
+    )
+
+    override fun renderGlobe(
+        values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
+        domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray,
+    ) {
+        renderGlobe(
+            values, width, height, radius, centerLat, centerLon, stride, domainArgb, style.kind.ordinal,
+            DoubleArray(style.stops.size) { style.stops[it].value }, IntArray(style.stops.size) { style.stops[it].rgb },
+            style.factor, style.offset, style.hideBelow, memberRgb, argb,
+        )
+    }
+
     companion object {
         init { System.loadLibrary("spcrefs_jni") }
     }

@@ -50,6 +50,20 @@ typedef struct {
     int member_count;
 } spc_style;
 
+/* An orthographic globe: `width` x `height` pixels, a sphere of `radius` pixels centred in the buffer, looking down on
+ * (center_lat, center_lon). Only pixels over the REFS grid are drawn (data colours, or `domain_argb` where there is nothing to
+ * show); everything else stays transparent (0) for the caller to paint. `stride` > 1 draws coarse stride x stride blocks (fast
+ * preview while dragging). */
+typedef struct {
+    int width, height;
+    double radius;
+    double center_lat, center_lon;
+    int stride;
+    uint32_t domain_argb;
+} spc_globe;
+
+void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb);
+
 /* Renders `values` (SPC_GRID_COLUMNS x SPC_GRID_ROWS, row 0 = south) into `argb` ((view.cols*scale/step) x (view.rows*scale/step), north up,
  * 0xAARRGGBB, transparent where nothing is shown). */
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb);

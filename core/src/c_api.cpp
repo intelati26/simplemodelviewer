@@ -59,6 +59,10 @@ void spc_grid_to_latlon(double column, double row, double * lat, double * lon) {
     grid().toLatLon(column, row, *lat, *lon);
 }
 
+void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb) {
+    Raster::renderGlobe(values, grid(), *globe, *style, argb);
+}
+
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb) {
     Raster::render(values, *view, *style, argb);
 }

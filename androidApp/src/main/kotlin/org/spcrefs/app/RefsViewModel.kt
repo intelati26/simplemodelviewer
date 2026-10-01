@@ -20,6 +20,8 @@ import spcrefs.Catalogue
 import spcrefs.Cycle
 import spcrefs.CycleStore
 import spcrefs.AlertRule
+import spcrefs.GlobeCamera
+import spcrefs.globeInverse
 import spcrefs.decodeRules
 import spcrefs.encodeRules
 import spcrefs.Place
@@ -47,6 +49,8 @@ sealed class ShareArea {
     object Screen : ShareArea()
     /** The whole picture currently selected (CONUS or the chosen sector). */
     object Whole : ShareArea()
+    /** The globe as it is turned now (only offered in globe mode). */
+    object Globe : ShareArea()
     /** A meso sector, whatever is shown now. */
     data class Meso(val sector: Sector) : ShareArea()
 }
@@ -80,6 +84,8 @@ data class UiState(
     val tapLatLon: Pair<Double, Double>? = null,
     val strip: StripState? = null,
     val newerCycle: Cycle? = null,
+    val globe: Boolean = false,
+    val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
     val rules: List<AlertRule> = emptyList(),
     val alertStatus: String = "",
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
@@ -94,7 +100,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.repo
-    private val renderer = MapRenderer(core, MapLines(app, core))
+    private val lines = MapLines(app, core)
+    private val renderer = MapRenderer(core, lines)
+    private val globeRenderer = GlobeRenderer(core, lines)
+    private var globeW = 0
+    private var globeH = 0
 
     private var store: CycleStore? = null
     private var values: FloatArray? = null
@@ -220,6 +230,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun rerender() {
+        if (_state.value.globe) { renderGlobeNow(1); return }
         val product = _state.value.product ?: return
         val data = values ?: return
         val sector = _state.value.sector
@@ -232,6 +243,81 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         view = v
         update { it.copy(map = bitmap, style = style, busy = false) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
+    }
+
+    // ---- the globe ----
+    /** Turns the globe view on or off (a sector choice turns it off). */
+    fun setGlobe(on: Boolean) {
+        if (_state.value.globe == on) return
+        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        if (values != null) viewModelScope.launch { rerender() }
+    }
+
+    /** The globe's drawing area in pixels; the first call also fits the globe to the screen. */
+    fun setGlobeSize(w: Int, h: Int) {
+        if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
+        val first = globeW == 0
+        globeW = w; globeH = h
+        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }   // the whole globe fits the screen
+        if (_state.value.globe && values != null) requestGlobe(coarse = false)
+    }
+
+    /** Drag ([dx], [dy] pixels) and pinch ([zoom] factor) on the globe: a coarse picture at once, the full one when the fingers rest. */
+    fun globeGesture(dx: Float, dy: Float, zoom: Float) {
+        val minR = 0.3 * minOf(globeW, globeH)
+        update { it.copy(cam = it.cam.dragged(dx.toDouble(), dy.toDouble()).zoomed(zoom.toDouble(), minR, minR * 60)) }
+        requestGlobe(coarse = true)
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
+    }
+
+    fun onGlobeTap(px: Float, py: Float) {
+        val product = _state.value.product ?: return
+        val data = values ?: return
+        val ll = globeInverse(_state.value.cam, globeW, globeH, px.toDouble(), py.toDouble())
+        if (ll == null) { clearTap(); return }
+        val (c, r) = core.latLonToGrid(ll[0], ll[1])
+        val column = Math.round(c).toInt()
+        val row = Math.round(r).toInt()
+        if (column !in 0 until spcrefs.GRID_COLUMNS || row !in 0 until spcrefs.GRID_ROWS) {
+            update { it.copy(tapLatLon = ll[0] to ll[1], readout = "%.2f%s %.2f%s   outside the REFS area".format(
+                kotlin.math.abs(ll[0]), if (ll[0] >= 0) "N" else "S", kotlin.math.abs(ll[1]), if (ll[1] < 0) "W" else "E")) }
+            return
+        }
+        update { it.copy(readout = readout(core, product, data, it.members, column, row), tapLatLon = ll[0] to ll[1]) }
+    }
+
+    private var settleJob: Job? = null
+    private var globeBusy = false
+    private var globeDirty = false
+    private var globeCoarse = false
+
+    /** One render at a time; while one runs, further requests collapse into a single follow-up with the newest camera. */
+    private fun requestGlobe(coarse: Boolean) {
+        globeDirty = true
+        globeCoarse = coarse
+        if (globeBusy) return
+        globeBusy = true
+        viewModelScope.launch {
+            try {
+                while (globeDirty) {
+                    globeDirty = false
+                    renderGlobeNow(if (globeCoarse) 4 else 1)
+                }
+            } finally { globeBusy = false }
+        }
+    }
+
+    private suspend fun renderGlobeNow(stride: Int) {
+        val product = _state.value.product ?: return
+        val data = values ?: return
+        if (globeW == 0) return
+        val st = _state.value
+        val (bitmap, style) = withContext(Dispatchers.Default) {
+            val style = withAutoStops(product.style, data)
+            globeRenderer.render(data, style, st.members, st.cam, globeW, globeH, stride, dark) to style
+        }
+        update { it.copy(map = bitmap, style = style, busy = false) }
     }
 
     /** A tap on the picture, given as fractions of its width and height. */
@@ -430,6 +516,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The grid window an export covers, drawn at a resolution that suits its size (about 1800 px wide, at most 8 px per cell). */
     private fun resolveView(area: ShareArea): View = when (area) {
+        ShareArea.Globe -> view   // (the globe is drawn by buildArea, not as a grid window)
         ShareArea.Whole -> if (view.step > 1) View.CONUS else view
         is ShareArea.Meso -> if (area.sector.name == "CONUS") View.CONUS else area.sector.view(core)
         ShareArea.Screen -> {
@@ -466,7 +553,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             for (t in 0 until n) {
                 val data = repo.readFrame(s, product, t, st.member)
                 val style = withAutoStops(product.style, data)
-                val map = renderer.render(product, style, data, st.members, v, dark = false)
+                val map = areaBitmap(area, product, style, data, st, v)
                 val hour = (st.times[t] - cycle.epochSeconds) / 3600
                 val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
                 var picture = renderer.shareImage(map, product, style, header, st.members)
@@ -483,6 +570,14 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The map picture of an export: a flat grid window, or the globe as turned now at export size. */
+    private fun areaBitmap(area: ShareArea, product: Product, style: Style, data: FloatArray, st: UiState, v: View = resolveView(area)): Bitmap =
+        if (area == ShareArea.Globe && globeW > 0) {
+            val size = 1500
+            val h = size * globeH / globeW
+            globeRenderer.render(data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
+        } else renderer.render(product, style, data, st.members, v, dark = false)
+
     /** Writes the shareable picture (header, map, colour key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
         val st = _state.value
@@ -490,7 +585,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val data = values ?: return@withContext null
         val cycle = st.cycle ?: return@withContext null
         val style = withAutoStops(product.style, data)
-        val map = renderer.render(product, style, data, st.members, resolveView(area), dark = false)
+        val map = areaBitmap(area, product, style, data, st)
         val header = "Run ${cycle.label}   Valid ${st.validLabel}" + (st.forecastHour?.let { "  (f${it.toString().padStart(2, '0')})" } ?: "") +
             "   Data: NOAA/NWS Storm Prediction Center (experimental)"
         val image = renderer.shareImage(map, product, style, header, st.members)

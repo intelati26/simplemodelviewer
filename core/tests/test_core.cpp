@@ -80,6 +80,31 @@ static void testLambert() {
     CHECK(std::fabs(col - 900.0) < 1e-6);
 }
 
+static void testGlobe() {
+    // a uniform field over the whole grid, viewed from above Kansas: the centre pixel is inside the grid and coloured
+    std::vector<float> values(static_cast<size_t>(SPC_GRID_COLUMNS) * SPC_GRID_ROWS, 40.0f);
+    const spc_stop stops[2] = {{10.0, 0, 0, 255}, {50.0, 255, 0, 0}};
+    spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0};
+    spc_globe globe{200, 200, 90.0, 38.5, -98.0, 1, 0x40FFFFFFu};
+    std::vector<uint32_t> img(200 * 200, 0xDEADBEEF);
+    spc_render_globe(values.data(), &globe, &style, img.data());
+    CHECK((img[100 * 200 + 100] >> 24) == 0xFF);        // centre: data
+    CHECK(img[2 * 200 + 2] == 0);                       // corner: outside the sphere
+    for (uint32_t p : img) { CHECK(p != 0xDEADBEEF); }
+    // looking at the far side of the earth: nothing over the grid
+    spc_globe away{200, 200, 90.0, -38.5, 82.0, 1, 0x40FFFFFFu};
+    spc_render_globe(values.data(), &away, &style, img.data());
+    CHECK(img[100 * 200 + 100] == 0);
+    // coarse preview fills the same pixels in blocks
+    spc_globe coarse{200, 200, 90.0, 38.5, -98.0, 4, 0x40FFFFFFu};
+    spc_render_globe(values.data(), &coarse, &style, img.data());
+    CHECK(img[100 * 200 + 100] == img[101 * 200 + 101]);
+    // NaN data inside the grid -> the domain colour
+    std::vector<float> none(values.size(), std::nanf(""));
+    spc_render_globe(none.data(), &globe, &style, img.data());
+    CHECK(img[100 * 200 + 100] == 0x40FFFFFFu);
+}
+
 static void testRender() {
     std::vector<float> values(static_cast<size_t>(SPC_GRID_COLUMNS) * SPC_GRID_ROWS, std::nanf(""));
     values[10 * SPC_GRID_COLUMNS + 20] = 45.0f;   // one cell at column 20, row 10 (from the south)
@@ -118,6 +143,7 @@ int main() {
     testDtypes();
     testLambert();
     testRender();
+    testGlobe();
 #ifdef HAVE_LIBBLOSC
     for (const char * codec : {"lz4", "zstd"}) {
         testBloscRoundTrip(codec, 2);

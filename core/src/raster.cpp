@@ -5,6 +5,7 @@
 #include "raster.h"
 #include <algorithm>
 #include <cmath>
+#include "lambert_grid.h"
 
 namespace Raster {
     namespace {
@@ -67,38 +68,96 @@ namespace Raster {
         return static_cast<float>((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy);
     }
 
+    uint32_t shade(const float * values, double column, double row, bool smooth, const spc_style& style) {
+        if (style.kind == SPC_PAINTBALL) {
+            const float raw = sampleAt(values, column, row, false);
+            const int mask = std::isnan(raw) ? 0 : static_cast<int>(raw);
+            if (mask == 0) {
+                return 0;
+            }
+            double r = 255, g = 255, b = 255;
+            const double alpha = 0.55;   // each member paints over the ones before it
+            for (int bit = 0; bit < 10; bit += 1) {
+                if (mask & (1 << bit)) {
+                    const uint32_t c = bit < style.member_count && style.member_rgb ? style.member_rgb[bit] : 0x808080u;
+                    r = r * (1 - alpha) + ((c >> 16) & 255) * alpha;
+                    g = g * (1 - alpha) + ((c >> 8) & 255) * alpha;
+                    b = b * (1 - alpha) + (c & 255) * alpha;
+                }
+            }
+            return argb(static_cast<int>(r), static_cast<int>(g), static_cast<int>(b));
+        }
+        const float raw = sampleAt(values, column, row, smooth);
+        return colourFor(style, std::isnan(raw) ? std::nan("") : raw * style.factor + style.offset);
+    }
+
     void render(const float * values, const spc_view& view, const spc_style& style, uint32_t * out) {
         const int step = std::max(view.step, 1);
         const int scale = step > 1 ? 1 : std::max(view.scale, 1);
         const int outW = view.cols * scale / step;
         const int outH = view.rows * scale / step;
-        const bool paintball = style.kind == SPC_PAINTBALL;
         for (int y = 0; y < outH; y += 1) {
             const double row = view.row0 + view.rows - (y + 0.5) * step / scale - 0.5;   // north at the top
             for (int x = 0; x < outW; x += 1) {
                 const double column = view.col0 + (x + 0.5) * step / scale - 0.5;
-                uint32_t & px = out[static_cast<size_t>(y) * outW + x];
-                px = 0;
-                if (paintball) {
-                    const float raw = sampleAt(values, column, row, false);
-                    const int mask = std::isnan(raw) ? 0 : static_cast<int>(raw);
-                    if (mask == 0) {
-                        continue;
+                out[static_cast<size_t>(y) * outW + x] = shade(values, column, row, scale > 1, style);
+            }
+        }
+    }
+
+    void renderGlobe(const float * values, const LambertGrid& grid, const spc_globe& globe, const spc_style& style, uint32_t * out) {
+        const double pi = 3.14159265358979323846;
+        const double lat0 = globe.center_lat * pi / 180.0;
+        const double lon0 = globe.center_lon * pi / 180.0;
+        const double sinLat0 = std::sin(lat0);
+        const double cosLat0 = std::cos(lat0);
+        const double cx = globe.width / 2.0;
+        const double cy = globe.height / 2.0;
+        const int stride = std::max(globe.stride, 1);   // >1: coarse preview while the globe is being dragged (stride x stride blocks)
+        const int blocksX = (globe.width + stride - 1) / stride;
+        const int blocksY = (globe.height + stride - 1) / stride;
+        for (int by = 0; by < blocksY; by += 1) {
+            for (int bx = 0; bx < blocksX; bx += 1) {
+                const double px = bx * stride + stride / 2.0;
+                const double py = by * stride + stride / 2.0;
+                const double x = (px - cx) / globe.radius;
+                const double y = (cy - py) / globe.radius;
+                const double rho2 = x * x + y * y;
+                uint32_t colour = 0;
+                if (rho2 <= 1.0) {
+                    const double rho = std::sqrt(rho2);
+                    const double c = std::asin(rho);
+                    const double sinC = std::sin(c);
+                    const double cosC = std::cos(c);
+                    double lat = lat0;
+                    double lon = lon0;
+                    if (rho > 1e-12) {
+                        lat = std::asin(cosC * sinLat0 + y * sinC * cosLat0 / rho);
+                        lon = lon0 + std::atan2(x * sinC, rho * cosLat0 * cosC - y * sinLat0 * sinC);
                     }
-                    double r = 255, g = 255, b = 255;
-                    const double alpha = 0.55;   // each member paints over the ones before it
-                    for (int bit = 0; bit < 10; bit += 1) {
-                        if (mask & (1 << bit)) {
-                            const uint32_t c = bit < style.member_count && style.member_rgb ? style.member_rgb[bit] : 0x808080u;
-                            r = r * (1 - alpha) + ((c >> 16) & 255) * alpha;
-                            g = g * (1 - alpha) + ((c >> 8) & 255) * alpha;
-                            b = b * (1 - alpha) + (c & 255) * alpha;
+                    const double latDeg = lat * 180.0 / pi;
+                    if (latDeg > 15.0 && latDeg < 60.0) {   // quick reject before the Lambert projection
+                        double lonDeg = std::fmod(lon * 180.0 / pi + 540.0, 360.0) - 180.0;
+                        if (lonDeg > -140.0 && lonDeg < -55.0) {
+                            double column = 0.0, row = 0.0;
+                            grid.toGrid(latDeg, lonDeg, column, row);
+                            if (column >= 0.0 && column <= SPC_GRID_COLUMNS - 1 && row >= 0.0 && row <= SPC_GRID_ROWS - 1) {
+                                colour = shade(values, column, row, true, style);
+                                if (colour == 0) {
+                                    colour = globe.domain_argb;   // inside the REFS grid but nothing to show
+                                }
+                            }
                         }
                     }
-                    px = argb(static_cast<int>(r), static_cast<int>(g), static_cast<int>(b));
-                } else {
-                    const float raw = sampleAt(values, column, row, scale > 1);
-                    px = colourFor(style, std::isnan(raw) ? std::nan("") : raw * style.factor + style.offset);
+                }
+                for (int dy = 0; dy < stride; dy += 1) {
+                    const int yy = by * stride + dy;
+                    if (yy >= globe.height) break;
+                    for (int dx = 0; dx < stride; dx += 1) {
+                        const int xx = bx * stride + dx;
+                        if (xx >= globe.width) break;
+                        out[static_cast<size_t>(yy) * globe.width + xx] = colour;
+                    }
                 }
             }
         }
