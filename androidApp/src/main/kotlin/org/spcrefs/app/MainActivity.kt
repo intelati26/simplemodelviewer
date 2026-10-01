@@ -25,6 +25,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -137,7 +141,10 @@ private fun RefsScreen(vm: RefsViewModel) {
             },
         )
     }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.padding(padding).fillMaxSize()) {
+            // tablets / landscape: controls on the left, the map filling the right
+            val wide = maxWidth >= 720.dp && maxWidth > maxHeight
+            val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             // product / cycle / member
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(onClick = { picker = true }, label = { Text(s.product?.title ?: "Product", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -165,7 +172,9 @@ private fun RefsScreen(vm: RefsViewModel) {
                 Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
             )
 
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            }
+            val mapArea: @Composable (Modifier) -> Unit = { modifier ->
+            Box(modifier, contentAlignment = Alignment.Center) {
                 when {
                     s.error != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                         Text(s.error!!, color = MaterialTheme.colorScheme.error)
@@ -189,6 +198,8 @@ private fun RefsScreen(vm: RefsViewModel) {
                 if (s.busy && s.map != null) CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(12.dp).size(22.dp), strokeWidth = 2.dp)
             }
 
+            }
+            val foot: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             s.style?.let { Legend(it, s.members) }
 
             if (s.times.size > 1) {
@@ -205,6 +216,15 @@ private fun RefsScreen(vm: RefsViewModel) {
                 "Data: NOAA/NWS Storm Prediction Center. Experimental guidance, not a warning or decision-support tool.",
                 Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall,
             )
+            }
+            if (wide) {
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState())) { head(); foot() }
+                    mapArea(Modifier.weight(1f).fillMaxHeight())
+                }
+            } else {
+                Column(Modifier.fillMaxSize()) { head(); mapArea(Modifier.weight(1f).fillMaxWidth()); foot() }
+            }
         }
     }
 
@@ -359,7 +379,7 @@ private fun MapView(s: UiState, vm: RefsViewModel) {
     ) {
         val aspect = bitmap.width.toFloat() / bitmap.height
         Box(
-            Modifier.fillMaxWidth().aspectRatio(aspect)
+            Modifier.aspectRatio(aspect)
                 .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
                 .pointerInput(bitmap) {
                     detectTapGestures { p -> vm.onTap(p.x / this.size.width, p.y / this.size.height) }
