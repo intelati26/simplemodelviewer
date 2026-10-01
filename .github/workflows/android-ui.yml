@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - name: Free disk space (the emulator wants several GB for its data partition)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" || true
+          df -h /
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
@@ -29,6 +33,7 @@ jobs:
           target: google_apis
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disk-size: 3072M
           disable-animations: true
           script: ./scripts/ui_smoke.sh screenshots
       - uses: actions/upload-artifact@v4
