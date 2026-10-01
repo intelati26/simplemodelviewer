@@ -100,7 +100,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.repo
-    private val lines = MapLines(app, core)
+    private val lines = AppContainer.lines
     private val renderer = MapRenderer(core, lines)
     private val globeRenderer = GlobeRenderer(core, lines)
     private var globeW = 0

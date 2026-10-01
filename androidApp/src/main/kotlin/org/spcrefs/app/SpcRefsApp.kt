@@ -18,5 +18,6 @@ object AppContainer {
 
     val prefs by lazy { app.getSharedPreferences("spcrefs", Context.MODE_PRIVATE) }
     val core by lazy { NativeCore() }
+    val lines by lazy { MapLines(app, core) }
     val repo by lazy { RefsRepository(OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()), core) }   // a new cache size applies on the next launch
 }

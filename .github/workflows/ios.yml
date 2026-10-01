@@ -1,0 +1,22 @@
+# iOS is best effort (no Apple Developer membership): this proves the shared C++ core builds for the iOS Simulator and passes its
+# tests on macOS. There is no iOS app target yet; see docs/outline.md.
+name: ios
+on:
+  workflow_dispatch:
+  push:
+    paths: ['core/**', '.github/workflows/ios.yml']
+jobs:
+  core:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core tests on macOS
+        run: |
+          cmake -S core -B build-mac -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-mac -j
+          ctest --test-dir build-mac --output-on-failure
+      - name: Core static library for the iOS Simulator (arm64)
+        run: |
+          cmake -S core -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build-ios --config Release --target spcrefs_core -- -quiet
+          find build-ios -name 'libspcrefs_core.a' | head
