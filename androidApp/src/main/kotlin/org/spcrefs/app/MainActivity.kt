@@ -174,21 +174,21 @@ private fun RefsScreen(vm: RefsViewModel) {
                     s.map != null -> MapView(s, vm)
                     else -> CircularProgressIndicator()
                 }
-                if (s.busy && s.map != null) CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(12.dp).size(22.dp), strokeWidth = 2.dp)
-            }
-
-            s.readout?.let {
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp)) {
-                    Text(it, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                    s.tapLatLon?.let { (lat, lon) ->
-                        Row {
-                            TextButton(onClick = { vm.showPointForecast(placeLabel(lat, lon), lat, lon) }) { Text("Point forecast") }
-                            TextButton(onClick = { savingPlace = true }) { Text("Save place") }
-                            TextButton(onClick = vm::clearTap) { Text("Clear") }
+                s.readout?.let {
+                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f)).padding(horizontal = 8.dp)) {
+                        Text(it, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                        s.tapLatLon?.let { (lat, lon) ->
+                            Row {
+                                TextButton(onClick = { vm.showPointForecast(placeLabel(lat, lon), lat, lon) }) { Text("Point forecast") }
+                                TextButton(onClick = { savingPlace = true }) { Text("Save place") }
+                                TextButton(onClick = vm::clearTap) { Text("Clear") }
+                            }
                         }
                     }
                 }
+                if (s.busy && s.map != null) CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(12.dp).size(22.dp), strokeWidth = 2.dp)
             }
+
             s.style?.let { Legend(it, s.members) }
 
             if (s.times.size > 1) {
@@ -196,7 +196,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                     TextButton(onClick = vm::togglePlay) { Text(if (s.playing) "Pause" else "Play") }
                     Slider(
                         value = s.timeIndex.toFloat(), onValueChange = { vm.pickTime(it.toInt()) },
-                        valueRange = 0f..(s.times.size - 1).toFloat(), steps = (s.times.size - 2).coerceAtLeast(0), modifier = Modifier.weight(1f),
+                        valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f),
                     )
                 }
             }

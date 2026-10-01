@@ -1,5 +1,11 @@
 package spcrefs
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+
 /** One opened cycle: its arrays, the displayable products and the small coordinate arrays (times, members). */
 class CycleStore(
     val cycle: Cycle,
@@ -72,14 +78,19 @@ class RefsRepository(private val http: Http, private val core: Core) {
         validTimes[key]?.let { return it }
         val chunk = maxOf(1, array.chunks.firstOrNull() ?: 1)
         val count = array.shape.firstOrNull() ?: 0
-        val values = ArrayList<Long>()
-        var i = 0
-        while (i * chunk < count) {
-            val raw = fetchChunk(store.cycle, array, listOf(i)) ?: throw RefsException("no time chunk $name/$i")
-            val bytes = if (array.compressed) core.inflate(raw) else raw
-            val take = minOf(chunk, count - i * chunk)
-            for (k in 0 until take) values += readTime(bytes, k * 8, array.dtype)
-            i += 1
+        // every time value is its own tiny file: fetch them a few at a time instead of one after another
+        val gate = Semaphore(6)
+        val chunks = (0 until (count + chunk - 1) / chunk)
+        val values = coroutineScope {
+            chunks.map { i ->
+                async {
+                    gate.withPermit {
+                        val raw = fetchChunk(store.cycle, array, listOf(i)) ?: throw RefsException("no time chunk $name/$i")
+                        val bytes = if (array.compressed) core.inflate(raw) else raw
+                        (0 until minOf(chunk, count - i * chunk)).map { k -> readTime(bytes, k * 8, array.dtype) }
+                    }
+                }
+            }.awaitAll().flatten()
         }
         validTimes[key] = values
         return values
