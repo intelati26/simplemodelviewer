@@ -149,27 +149,35 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         store = opened
         val last = prefs.getString("product", null)
         val product = opened.products.firstOrNull { it.id == last }
-            ?: opened.products.firstOrNull { it.id == "uh25_04h_max_overlap_max" } ?: opened.products.first()
+            ?: opened.products.firstOrNull { it.id == "cref_max" } ?: opened.products.first()   // (starts at F000 / F001, unlike the 4-h products)
         val members = repo.members(opened)
-        update { it.copy(cycle = cycle, products = opened.products, members = members, member = it.member.coerceIn(0, maxOf(0, members.size - 1))) }
-        selectProductInternal(product)
+        // a (new) run always opens at its earliest time step: F000 / F001, not wherever the previous run's slider was
+        update { it.copy(cycle = cycle, products = opened.products, members = members, member = it.member.coerceIn(0, maxOf(0, members.size - 1)), timeIndex = 0) }
+        selectProductInternal(product, keepHour = false)
     }
 
     fun pickProduct(product: Product) {
         stopPlaying()
         viewModelScope.launch {
             update { it.copy(busy = true, error = null) }
-            try { selectProductInternal(product) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            try { selectProductInternal(product, keepHour = true) } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(busy = false, error = e.message) }
             }
         }
     }
 
-    private suspend fun selectProductInternal(product: Product) {
+    /**
+     * Opens [product] at a sensible time: the same forecast hour as before when [keepHour] and the new product has it, otherwise
+     * its earliest time step (F000 / F001 for most products).
+     */
+    private suspend fun selectProductInternal(product: Product, keepHour: Boolean) {
         val s = store ?: return
         prefs.edit().putString("product", product.id).apply()
         val times = repo.validTimes(s, product)
-        update { it.copy(product = product, times = times, timeIndex = it.timeIndex.coerceIn(0, maxOf(0, times.size - 1))) }
+        val before = _state.value
+        val hour = if (keepHour) before.forecastHour else null
+        val index = if (hour == null) 0 else times.indexOfFirst { (it - s.cycle.epochSeconds) / 3600 == hour.toLong() }.coerceAtLeast(0)
+        update { it.copy(product = product, times = times, timeIndex = index) }
         loadFrame()
     }
 
