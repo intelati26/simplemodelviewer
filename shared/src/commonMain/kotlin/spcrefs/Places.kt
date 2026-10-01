@@ -21,39 +21,3 @@ fun decodePlaces(text: String): List<Place> = text.lines().mapNotNull { line ->
 /** "39.10N 97.20W" */
 fun placeLabel(lat: Double, lon: Double) =
     "${fixed(abs(lat), 2)}${if (lat >= 0) "N" else "S"} ${fixed(abs(lon), 2)}${if (lon < 0) "W" else "E"}"
-
-/** The product's value at a point for every forecast time, in shown units (NaN where there is none; member count for paintball). */
-class PointSeries(val times: List<Long>, val values: List<Double>, val units: String, val digits: Int) {
-    val finite get() = values.filter { !it.isNaN() }
-    val max get() = finite.maxOrNull()
-    val peakIndex get() = values.indices.filter { !values[it].isNaN() }.maxByOrNull { values[it] }
-}
-
-/**
- * Walks every forecast time of [product] at (lat, lon). Each time is one chunk download + decode (the HTTP cache makes a
- * second pass cheap). [onProgress] gets 0..1.
- */
-suspend fun RefsRepository.pointSeries(
-    store: CycleStore, product: Product, memberIndex: Int, lat: Double, lon: Double, core: Core, maxHours: Int? = null, onProgress: (Float) -> Unit = {},
-): PointSeries {
-    val allTimes = validTimes(store, product)
-    // alerts only look a limited number of hours ahead (less data per check)
-    val times = if (maxHours == null) allTimes else allTimes.filter { it - store.cycle.epochSeconds <= maxHours * 3600L }
-    val (c, r) = core.latLonToGrid(lat, lon)
-    val column = c.roundToInt()
-    val row = r.roundToInt()
-    if (column !in 0 until GRID_COLUMNS || row !in 0 until GRID_ROWS) throw RefsException("That place is outside the REFS grid")
-    val style = product.style
-    val out = ArrayList<Double>(times.size)
-    for (t in times.indices) {
-        val frame = readFrame(store, product, t, memberIndex)
-        val raw = frame[row * GRID_COLUMNS + column]
-        out += when {
-            raw.isNaN() -> Double.NaN
-            style.kind == Kind.Paintball -> (0 until 10).count { raw.toInt() and (1 shl it) != 0 }.toDouble()
-            else -> raw * style.factor + style.offset
-        }
-        onProgress((t + 1f) / times.size)
-    }
-    return PointSeries(times, out, if (style.kind == Kind.Paintball) "members" else style.units, if (style.kind == Kind.Paintball) 0 else style.digits)
-}

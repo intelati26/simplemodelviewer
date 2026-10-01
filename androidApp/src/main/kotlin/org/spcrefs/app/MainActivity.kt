@@ -1,13 +1,10 @@
 package org.spcrefs.app
 
-import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -83,14 +80,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.Switch
 import androidx.compose.material3.FilterChip
 import spcrefs.Place
-import spcrefs.PointSeries
 import spcrefs.fixed
 import spcrefs.formatUtc
 import spcrefs.visibleFractions
 import spcrefs.globeForward
 import spcrefs.placeLabel
 import kotlinx.coroutines.launch
-import spcrefs.AlertRule
 import spcrefs.Cycle
 import spcrefs.Groups
 import spcrefs.Kind
@@ -126,9 +121,7 @@ private fun RefsScreen(vm: RefsViewModel) {
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var alertFor by remember { mutableStateOf<Place?>(null) }
     var sharing by remember { mutableStateOf(false) }
-    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
 
     Scaffold(topBar = {
@@ -188,7 +181,6 @@ private fun RefsScreen(vm: RefsViewModel) {
                         Text(it, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
                         s.tapLatLon?.let { (lat, lon) ->
                             Row {
-                                TextButton(onClick = { vm.showPointForecast(placeLabel(lat, lon), lat, lon) }) { Text("Point forecast") }
                                 TextButton(onClick = { savingPlace = true }) { Text("Save place") }
                                 TextButton(onClick = vm::clearTap) { Text("Clear") }
                             }
@@ -242,39 +234,9 @@ private fun RefsScreen(vm: RefsViewModel) {
     if (places) PlacesDialog(
         s.places, onDismiss = { places = false },
         onGo = { places = false; vm.goToPlace(it) },
-        onForecast = { places = false; vm.showPointForecast(it.name, it.lat, it.lon) },
         onDelete = vm::deletePlace,
-        rules = s.rules, productTitle = s.product?.title.orEmpty(),
-        onAlert = { alertFor = it },
-        onDeleteRule = vm::deleteRule,
     )
-    alertFor?.let { place ->
-        var level by remember(place) { mutableStateOf(fixed(vm.suggestedThreshold(), 2).trimEnd('0').trimEnd('.')) }
-        AlertDialog(
-            onDismissRequest = { alertFor = null },
-            title = { Text("Alert for ${place.name}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Notify me when a new run reaches this level in the next 24 hours:")
-                    Text(s.product?.title.orEmpty(), fontWeight = FontWeight.Bold)
-                    OutlinedTextField(level, { level = it }, singleLine = true, label = { Text("Level (${s.style?.units.orEmpty()})") })
-                    Text("Checked about once per new run, in the background, only on a new run. Experimental guidance: not a warning service.", style = MaterialTheme.typography.bodySmall)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    level.toDoubleOrNull()?.let {
-                        vm.addRule(place, it)
-                        if (!Notifier.canNotify(context) && Build.VERSION.SDK_INT >= 33) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                    alertFor = null
-                }) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { alertFor = null }) { Text("Cancel") } },
-        )
-    }
-    if (settings) SettingsDialog(s.settings, vm::setSettings, s.rules.size, s.alertStatus, vm::checkAlertsNow) { settings = false }
-    s.strip?.let { PointStripSheet(it, s.product?.title ?: "", s.cycle?.label ?: "", vm::closePointForecast) }
+    if (settings) SettingsDialog(s.settings, vm::setSettings) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
         onShare = { area, loop ->
@@ -516,30 +478,19 @@ private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
 }
 
 @Composable
-private fun PlacesDialog(
-    places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onForecast: (Place) -> Unit, onDelete: (Place) -> Unit,
-    rules: List<AlertRule>, productTitle: String, onAlert: (Place) -> Unit, onDeleteRule: (AlertRule) -> Unit,
-) {
+private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
         title = { Text("Places") },
         text = {
-            if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place.")
+            if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place; Show jumps back to it.")
             else LazyColumn {
                 items(places, key = { it.name }) { p ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(p.name, fontWeight = FontWeight.Bold)
-                        rules.filter { it.placeName == p.name }.forEach { r ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Alert: ${r.productTitle} >= ${fixed(r.threshold, 2).trimEnd('0').trimEnd('.')}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                                TextButton(onClick = { onDeleteRule(r) }) { Text("Remove") }
-                            }
-                        }
                         Row {
                             TextButton(onClick = { onGo(p) }) { Text("Show") }
-                            TextButton(onClick = { onForecast(p) }) { Text("Forecast") }
-                            TextButton(onClick = { onAlert(p) }) { Text("Alert") }
                             TextButton(onClick = { onDelete(p) }) { Text("Delete") }
                         }
                     }
@@ -551,7 +502,7 @@ private fun PlacesDialog(
 }
 
 @Composable
-private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, ruleCount: Int, alertStatus: String, onCheckNow: () -> Unit, onDismiss: () -> Unit) {
+private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
@@ -563,11 +514,6 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, rul
                 }
                 SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
                     onChange(settings.copy(dataSaver = it))
-                }
-                Column {
-                    Text("Alerts: $ruleCount rule(s)")
-                    Text(alertStatus.ifEmpty { "Set one from Places > Alert." }, style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onCheckNow, enabled = ruleCount > 0) { Text("Check now") }
                 }
                 Column {
                     Text("Cache size (applies on the next launch)")
@@ -588,58 +534,6 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onChange:
             Text(detail, style = MaterialTheme.typography.bodySmall)
         }
         Switch(checked, onChange)
-    }
-}
-
-/** Value at one place for every forecast hour: a bar chart plus the numbers. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PointStripSheet(strip: StripState, product: String, run: String, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-            Text(strip.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("$product   run $run", style = MaterialTheme.typography.bodySmall)
-            when {
-                strip.error != null -> Text(strip.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
-                strip.series == null -> {
-                    Text("Loading every forecast hour...", Modifier.padding(top = 12.dp))
-                    LinearProgressIndicator(progress = { strip.progress }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                }
-                else -> StripChart(strip.series)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StripChart(series: PointSeries) {
-    val max = series.max
-    val digits = series.digits
-    val unit = if (series.units.isEmpty()) "" else " ${series.units}"
-    if (max == null) { Text("No data at this point.", Modifier.padding(top = 12.dp)); return }
-    val peak = series.peakIndex
-    Text("Peak ${fixed(max, digits)}$unit at ${peak?.let { formatUtc(series.times[it]) } ?: ""}", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
-    val bar = MaterialTheme.colorScheme.primary
-    val peakColour = MaterialTheme.colorScheme.error
-    Canvas(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 8.dp)) {
-        val n = series.values.size
-        val top = maxOf(max, 1e-9)
-        val gap = 2.dp.toPx()
-        val w = (size.width - gap * (n - 1)) / n
-        series.values.forEachIndexed { i, v ->
-            if (v.isNaN()) return@forEachIndexed
-            val h = (maxOf(v, 0.0) / top * size.height).toFloat()
-            drawRect(if (i == peak) peakColour else bar, Offset(i * (w + gap), size.height - h), androidx.compose.ui.geometry.Size(w, h))
-        }
-    }
-    LazyColumn(Modifier.height(220.dp)) {
-        items(series.values.indices.toList()) { i ->
-            val v = series.values[i]
-            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatUtc(series.times[i]), style = MaterialTheme.typography.bodySmall)
-                Text(if (v.isNaN()) "-" else fixed(v, digits) + unit, style = MaterialTheme.typography.bodySmall, fontWeight = if (i == peak) FontWeight.Bold else FontWeight.Normal)
-            }
-        }
     }
 }
 

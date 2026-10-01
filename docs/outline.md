@@ -58,7 +58,7 @@ Name and pricing; licence; distribution (F-Droid/GitHub only vs Play); alerts in
 | Repo layout, GPLv3 notice, README | Android / iOS app modules and Compose UI |
 | `core/`: blosc decode (lz4+zstd) ported from wxqt, dtype conversion, Lambert grid, rasteriser (blended / banded / paintball), C API | JNI / cinterop bindings, map line geometry |
 | Core unit tests incl. byte-identical decode vs libblosc - pass on Linux | Real-chunk fixtures and golden images |
-| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass. Also done from v1.x: saved places, point-forecast strip, new-run banner, settings (Wi-Fi-only loops, data saver) | Running on a device / emulator, iOS app, loop export (WebP/MP4), threshold alerts, widget, GREFS/thunder, tablet layout, golden images |
+| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass; run on an emulator against live data. Done beyond v1: globe, export (screen area / meso sector / globe, PNG or MP4 loop), widget, saved places, new-run banner, settings, tablet layout | iOS app, GREFS / REFSCT stores, golden images, accessibility pass |
 | CI: `core-tests` workflow; `android` skeleton | `android-ui`, `ios`, `release` workflows |
 
 Next: (1) fetch real chunks as fixtures and add golden tests, (2) Gradle Android + iOS targets and the JNI/cinterop hello app, (3) port SPC titles
@@ -69,3 +69,5 @@ and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
   grids: a server-side C++ renderer returns finished map pictures per request (product, time, centre, zoom, pixel size). It is
   a rendering service for their page, not an API, and gives no values to tap. Real MRMS values are `.grib2.gz` on NCEP's server
   and the `noaa-mrms-pds` AWS bucket (needs a gunzip + GRIB2 decoder; radar is out of scope for v1). Not pursued.
+- **Decision (owner): no location-based alerts or point forecasts.** A saved-place point-forecast strip and threshold notifications were built and
+  verified on the emulator, then removed; saved places remain as map bookmarks. Products (including GREFS / thunder probability later) are not affected.

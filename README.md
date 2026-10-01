@@ -12,9 +12,10 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 |---|---|
 | `core/` | C++ core with a C API: blosc (lz4 + zstd) decode, dtype conversion, Lambert grid, rasteriser. Builds and passes tests on Linux. |
 | `shared/` | Platform-independent Kotlin: cycle probing, Zarr metadata, ~120 SPC product titles and colour tables, repository, read-out text, sectors. Unit tests pass (`./gradlew :shared:jvmTest`). |
-| `androidApp/` | Jetpack Compose app + JNI bridge to the core: product picker with favourites and search, cycle / member / sector menus, time slider and loop with prefetch, pinch-zoom, tap for value, share as PNG, saved places, a point-forecast strip (value at a place for every hour), a "new run available" banner, and settings (Wi-Fi-only loops, data-saver half-resolution, cache size). **Builds and passes lint in CI; not yet run on a device or emulator.** |
+| `androidApp/` | Jetpack Compose app + JNI bridge to the core: product picker (search, favourites), cycle / member / sector menus, **globe view** (drag to turn, pinch to zoom), time slider and loop with prefetch, pinch-zoom, tap for value, saved places (bookmarks), **export** of the screen area, the whole map, any meso sector or the globe as a PNG or MP4 loop, home-screen widget, a "new run available" banner, two-pane tablet layout, settings (Wi-Fi-only loops, data saver, cache size). Builds and lints in CI; exercised on an emulator against live SPC data. |
 | `iosApp/` | Not started. |
-| `.github/workflows/` | `core-tests` and `android` (debug APK as artifact; attached to a release on `v*` tags). |
+| `.github/workflows/` | `core-tests`, `android` (debug APK as artifact; attached to a release on `v*` tags), `android-ui` (emulator smoke test with screenshots), `ios` (core on macOS + iOS Simulator). |
+| `scripts/` | `emu.sh` (drive an emulator with adb), `ui_smoke.sh` (the CI smoke test). |
 
 ## Build and test the core
 ```

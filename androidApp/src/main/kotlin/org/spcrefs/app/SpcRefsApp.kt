@@ -9,6 +9,9 @@ class SpcRefsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContainer.init(this)
+        // location-based alerts were removed: drop any job a development build scheduled
+        androidx.work.WorkManager.getInstance(this).cancelUniqueWork("alerts")
+        AppContainer.prefs.edit().remove("rules").remove("alert_status").apply()
     }
 }
 

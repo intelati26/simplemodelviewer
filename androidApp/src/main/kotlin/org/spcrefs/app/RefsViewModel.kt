@@ -19,18 +19,13 @@ import kotlinx.coroutines.withContext
 import spcrefs.Catalogue
 import spcrefs.Cycle
 import spcrefs.CycleStore
-import spcrefs.AlertRule
 import spcrefs.GlobeCamera
 import spcrefs.globeInverse
-import spcrefs.decodeRules
-import spcrefs.encodeRules
 import spcrefs.Place
-import spcrefs.PointSeries
 import spcrefs.Product
 import spcrefs.decodePlaces
 import spcrefs.encodePlaces
 import spcrefs.placeLabel
-import spcrefs.pointSeries
 import spcrefs.RefsException
 import spcrefs.RefsRepository
 import spcrefs.Sector
@@ -57,9 +52,6 @@ sealed class ShareArea {
 
 data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150)
 
-/** The point-forecast sheet: one place, every forecast time. */
-data class StripState(val label: String, val series: PointSeries? = null, val progress: Float = 0f, val error: String? = null)
-
 data class UiState(
     val busy: Boolean = true,
     val error: String? = null,
@@ -82,12 +74,9 @@ data class UiState(
     val settings: Settings = Settings(),
     val places: List<Place> = emptyList(),
     val tapLatLon: Pair<Double, Double>? = null,
-    val strip: StripState? = null,
     val newerCycle: Cycle? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
-    val rules: List<AlertRule> = emptyList(),
-    val alertStatus: String = "",
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
 ) {
     val validLabel: String
@@ -119,8 +108,6 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(),
             settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150)),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
-            rules = decodeRules(prefs.getString("rules", "").orEmpty()),
-            alertStatus = prefs.getString("alert_status", "").orEmpty(),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
         )
     )
@@ -339,7 +326,6 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             .putInt("cache_mb", settings.cacheMegabytes).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver
         update { it.copy(settings = settings) }
-        AlertScheduler.sync(getApplication(), _state.value.rules.isNotEmpty(), settings.wifiOnlyLoop)
         if (redraw && values != null) viewModelScope.launch { rerender() }
     }
 
@@ -370,67 +356,6 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val fx = ((c - view.col0 + 0.5) / view.cols).toFloat()
         val fy = ((view.row0 + view.rows - r - 0.5) / view.rows).toFloat()
         onTap(fx, fy)
-    }
-
-    private var stripJob: Job? = null
-
-    fun showPointForecast(label: String, lat: Double, lon: Double) {
-        val s = store ?: return
-        val st = _state.value
-        val product = st.product ?: return
-        stripJob?.cancel()
-        update { it.copy(strip = StripState(label)) }
-        stripJob = viewModelScope.launch {
-            try {
-                val series = repo.pointSeries(s, product, st.member, lat, lon, core) { p -> update { cur -> cur.copy(strip = cur.strip?.copy(progress = p)) } }
-                update { it.copy(strip = StripState(label, series, 1f)) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                update { it.copy(strip = StripState(label, error = e.message ?: "Could not load the point forecast")) }
-            }
-        }
-    }
-
-    fun closePointForecast() { stripJob?.cancel(); update { it.copy(strip = null) } }
-
-    // ---- threshold alerts ----
-    /** A default alert level for the current product: a mid-table value in shown units. */
-    fun suggestedThreshold(): Double {
-        val style = _state.value.product?.style ?: return 50.0
-        return when {
-            style.kind == spcrefs.Kind.Paintball -> 3.0
-            style.stops.isEmpty() -> 50.0
-            else -> style.stops[minOf(2, style.stops.size - 1)].value
-        }
-    }
-
-    fun addRule(place: Place, threshold: Double) {
-        val product = _state.value.product ?: return
-        val rule = AlertRule(place.name, place.lat, place.lon, product.id, product.title, threshold)
-        val rules = _state.value.rules.filter { it.key != rule.key } + rule
-        saveRules(rules)
-    }
-
-    fun deleteRule(rule: AlertRule) = saveRules(_state.value.rules - rule)
-
-    private fun saveRules(rules: List<AlertRule>) {
-        prefs.edit().putString("rules", encodeRules(rules)).apply()
-        update { it.copy(rules = rules) }
-        AlertScheduler.sync(getApplication(), rules.isNotEmpty(), _state.value.settings.wifiOnlyLoop)
-    }
-
-    fun checkAlertsNow() {
-        prefs.edit().putString("alert_status", "Checking...").apply()
-        update { it.copy(alertStatus = "Checking...") }
-        AlertScheduler.checkNow(getApplication())
-        viewModelScope.launch {   // the worker writes its result to the preferences; show it when it lands
-            repeat(60) {
-                delay(2000)
-                val status = prefs.getString("alert_status", "").orEmpty()
-                if (status.isNotEmpty() && status != "Checking...") { update { it.copy(alertStatus = status) }; return@launch }
-            }
-        }
     }
 
     // ---- a newer run on the server? ----
