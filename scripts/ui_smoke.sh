@@ -44,14 +44,14 @@ wait_for_picture() {   # $1 = name, $2 = seconds to wait
 echo "waiting for the map (up to 6 min)"
 wait_for_picture map 360 || { echo "FAIL: the map never appeared"; fail=1; }
 
-tap 40 15; sleep 4; shot product-picker       # product chip
+tap 40 7;  sleep 4; shot product-picker       # product chip
 adb shell input keyevent 4; sleep 2
-tap 62 9;  sleep 3; shot sector-menu            # sector menu
-tap 62 15                                       # first item: Globe
+tap 77 11; sleep 3; shot sector-menu            # sector menu
+tap 77 17                                       # first item: Globe
 wait_for_picture globe 180 || { echo "FAIL: the globe never appeared"; fail=1; }
-tap 78 9;  sleep 3; shot share-dialog           # Share
+tap 92 11; sleep 3; shot share-dialog           # Share
 adb shell input keyevent 4; sleep 2
-tap 92 9;  sleep 3; shot more-menu
+tap 91 7;  sleep 3; shot more-menu
 
 if adb logcat -d -s AndroidRuntime:E | grep -q FATAL; then
   echo "FAIL: the app crashed"; adb logcat -d -s AndroidRuntime:E | head -30; fail=1

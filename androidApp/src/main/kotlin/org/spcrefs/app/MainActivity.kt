@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -16,7 +17,10 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -99,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             val dark = isSystemInDarkTheme()
             LaunchedEffect(dark) { viewModel.setDark(dark) }
@@ -124,25 +129,22 @@ private fun RefsScreen(vm: RefsViewModel) {
     var sharing by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); onPauseOrDispose { } }
 
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("SPC REFS") },
-            actions = {
-                SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
-                TextButton(onClick = { sharing = true }, enabled = s.map != null) { Text("Share") }
-                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
-            },
-        )
-    }) { padding ->
-        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.padding(padding).fillMaxSize()) {
-            // tablets / landscape: controls on the left, the map filling the right
-            val wide = maxWidth >= 720.dp && maxWidth > maxHeight
-            val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
-            // product / cycle / member
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val dark = isSystemInDarkTheme()
+    val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)     // the map picture's own background: no dead white around it
+    val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+
+    // The map fills the whole screen (under the system bars); the controls are two thin translucent strips floating over the empty
+    // bands above and below it. Tablets / landscape: controls in a column on the left, the map filling the rest.
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(mapBackground)) {
+        val wide = maxWidth >= 720.dp && maxWidth > maxHeight
+        val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+          // compact header: chips and buttons are 32 dp tall instead of being padded out to the 48 dp touch-target minimum
+          androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 0.dp) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 AssistChip(onClick = { picker = true }, label = { Text(s.product?.title ?: "Product", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.weight(1f))
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
 
@@ -159,14 +161,19 @@ private fun RefsScreen(vm: RefsViewModel) {
                     TextButton(onClick = vm::dismissNotice) { Text("OK") }
                 }
             }
-            Text(
-                listOfNotNull(s.cycle?.let { "Run ${it.label}" }, s.validLabel.takeIf { it.isNotEmpty() }?.let { "Valid $it" },
-                    s.forecastHour?.let { "f${it.toString().padStart(2, '0')}" }).joinToString("   "),
-                Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
-            )
-
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    listOfNotNull(s.cycle?.let { "Run ${it.label}" }, s.validLabel.takeIf { it.isNotEmpty() }?.let { "Valid $it" },
+                        s.forecastHour?.let { "f${it.toString().padStart(2, '0')}" }).joinToString("   "),
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
+                SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
+                TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
             }
-            val mapArea: @Composable (Modifier) -> Unit = { modifier ->
+          }
+        }
+        val mapArea: @Composable (Modifier) -> Unit = { modifier ->
             Box(modifier, contentAlignment = Alignment.Center) {
                 when {
                     s.error != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
@@ -176,47 +183,37 @@ private fun RefsScreen(vm: RefsViewModel) {
                     s.map != null || s.globe -> if (s.globe) GlobeView(s, vm) else MapView(s, vm)
                     else -> CircularProgressIndicator()
                 }
-                s.readout?.let {
-                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f)).padding(horizontal = 8.dp)) {
-                        Text(it, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                        s.tapLatLon?.let { (lat, lon) ->
-                            Row {
-                                TextButton(onClick = { savingPlace = true }) { Text("Save place") }
-                                TextButton(onClick = vm::clearTap) { Text("Clear") }
-                            }
-                        }
-                    }
+            }
+        }
+        val foot: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+            s.readout?.let {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    if (s.tapLatLon != null) TextButton(onClick = { savingPlace = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Save") }
+                    TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
-                if (s.busy && s.map != null) CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(12.dp).size(22.dp), strokeWidth = 2.dp)
             }
-
-            }
-            val foot: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             s.style?.let { Legend(it, s.members) }
-
             if (s.times.size > 1) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = vm::togglePlay) { Text(if (s.playing) "Pause" else "Play") }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     Slider(
                         value = s.timeIndex.toFloat(), onValueChange = { vm.pickTime(it.toInt()) },
-                        valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f),
+                        valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
             }
-            s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) }
-            Text(
-                "Data: NOAA/NWS Storm Prediction Center. Experimental guidance, not a warning or decision-support tool.",
-                Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall,
-            )
+            s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+        }
+        if (wide) {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.width(380.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())) { head(); foot() }
+                mapArea(Modifier.weight(1f).fillMaxHeight())
             }
-            if (wide) {
-                Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState())) { head(); foot() }
-                    mapArea(Modifier.weight(1f).fillMaxHeight())
-                }
-            } else {
-                Column(Modifier.fillMaxSize()) { head(); mapArea(Modifier.weight(1f).fillMaxWidth()); foot() }
-            }
+        } else {
+            mapArea(Modifier.fillMaxSize())
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { foot() }
         }
     }
 
@@ -344,7 +341,20 @@ private fun MapView(s: UiState, vm: RefsViewModel) {
             Modifier.aspectRatio(aspect)
                 .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
                 .pointerInput(bitmap) {
-                    detectTapGestures { p -> vm.onTap(p.x / this.size.width, p.y / this.size.height) }
+                    detectTapGestures(
+                        onTap = { p -> vm.onTap(p.x / this.size.width, p.y / this.size.height) },
+                        // zoom in on that spot (the wide US map leaves room above and below it), or back out
+                        onDoubleTap = { q ->
+                            if (scale > 1.05f) { scale = 1f; offset = Offset.Zero } else {
+                                val target = 2.5f
+                                val t = (q - Offset(this.size.width / 2f, this.size.height / 2f)) * (1f - target)   // keeps that point under the finger
+                                val maxX = size.width * (target - 1f) / 2f
+                                val maxY = size.height * (target - 1f) / 2f
+                                scale = target
+                                offset = Offset(t.x.coerceIn(-maxX, maxX), t.y.coerceIn(-maxY, maxY))
+                            }
+                        },
+                    )
                 },
         ) {
             Image(image, contentDescription = "SPC REFS map", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
@@ -366,7 +376,7 @@ private fun MapView(s: UiState, vm: RefsViewModel) {
 
 @Composable
 private fun Legend(style: Style, members: List<String>) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
         if (style.kind == Kind.Paintball) {
             Row(Modifier.fillMaxWidth()) {
                 for (i in 0 until 10) Box(
@@ -392,7 +402,7 @@ private fun Legend(style: Style, members: List<String>) {
 private fun SectorMenu(current: String, onGlobe: () -> Unit, onPick: (Sector) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) { Text(current) }
+        TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(current) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Globe") }, onClick = { open = false; onGlobe() })
             for (sector in Sector.all) DropdownMenuItem(text = { Text(sector.name) }, onClick = { open = false; onPick(sector) })
@@ -468,7 +478,7 @@ private fun ProductRow(product: Product, selected: Boolean, favourite: Boolean, 
 private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) { Text("More") }
+        TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
@@ -521,6 +531,7 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                         for (mb in listOf(50, 150, 300)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text("$mb MB") })
                     }
                 }
+                Disclaimer()
             }
         },
     )
@@ -569,6 +580,7 @@ private fun ShareDialog(canLoop: Boolean, current: String, globe: Boolean, onDis
                         AreaRow(sector.name, (area as? ShareArea.Meso)?.sector == sector) { area = ShareArea.Meso(sector) }
                     }
                 }
+                Disclaimer(Modifier.padding(top = 8.dp))
             }
         },
         confirmButton = {
@@ -588,3 +600,9 @@ private fun AreaRow(text: String, selected: Boolean, onClick: () -> Unit) {
         Text(text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
     }
 }
+
+private const val DISCLAIMER = "Data: NOAA/NWS Storm Prediction Center. Experimental guidance, not a warning or decision-support tool."
+
+@Composable
+private fun Disclaimer(modifier: Modifier = Modifier) =
+    Text(DISCLAIMER, modifier, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
