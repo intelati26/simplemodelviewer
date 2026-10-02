@@ -74,6 +74,9 @@ emu_tap_text "Composite Reflectivity"; sleep 2; emu_tap_text "Rotation Track, 1 
 wait_for_picture mrms-rotation 120 || { echo "FAIL: the MRMS rotation map never appeared"; fail=1; }
 emu_tap_text "Rotation Track, 1 h (0-2 km)"; sleep 2; emu_tap_text "24 h Rainfall (multi-sensor, best)"
 wait_for_picture mrms-rainfall 120 || { echo "FAIL: the MRMS rainfall map never appeared"; fail=1; }
+# a 32-bit (RGBA-PNG) product found through the search box
+emu_tap_text "24 h Rainfall (multi-sensor, best)"; sleep 2; emu_tap_text "Search products"; sleep 1; adb shell input text "hydrophobic"; sleep 2; emu_tap_text "Streamflow (hydrophobic)"
+wait_for_picture mrms-streamflow 120 || { echo "FAIL: the MRMS 32-bit product never appeared"; fail=1; }
 emu_tap_text "CONUS ▾"; sleep 2; emu_tap_text "South Central"
 wait_for_picture mrms-meso 120 || { echo "FAIL: the MRMS meso-sector map never appeared"; fail=1; }
 tap 50 48; sleep 2; shot mrms-readout

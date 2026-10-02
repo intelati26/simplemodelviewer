@@ -183,9 +183,12 @@ static const Fixture fixtures[] = {
     {"MergedReflectivityQCComposite_00.50", -90.0, 0, true},   // dBZ: -999 no coverage, -99 no echo
     {"RotationTrack60min_00.50", -0.5, 0, false},              // 8-bit PNG
     {"MultiSensor_QPE_24H_Pass2_00.00", -0.5, 1, true},        // mm: -3 no coverage
+    {"FLASH_QPE_FFG01H_00.00", -500.0, 0, true},               // 24 bits: an 8-bit RGB PNG
+    {"FLASH_HP_MAXSTREAMFLOW_00.00", -500.0, 1, true},         // 32 bits: an 8-bit RGBA PNG
 };
 
-static bool near(float a, float b) { return std::fabs(a - b) <= 1e-4 + 1e-6 * std::fabs(b); }
+// (GDAL does the scaling in float32, so with a large offset such as -9999 its values are off by up to about 1e-3)
+static bool near(float a, float b) { return std::fabs(a - b) <= 2e-3 + 1e-6 * std::fabs(b); }
 
 static void testMrmsFixture(const Fixture& fx) {
     const std::string base = std::string(FIXTURE_DIR) + "/" + fx.name;

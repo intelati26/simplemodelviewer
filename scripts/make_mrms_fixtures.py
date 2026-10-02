@@ -37,7 +37,12 @@ def main(outdir, paths):
         di, dj = struct.unpack('>II', b[p3 + 63:p3 + 71])
         R = struct.unpack('>f', b[p5 + 11:p5 + 15])[0]; E, D = struct.unpack('>hh', b[p5 + 15:p5 + 19]); bits = b[p5 + 19]
         png = Image.open(io.BytesIO(b[p7 + 5:p7 + n7]))
-        raw = np.asarray(png).astype(np.int64)
+        arr = np.asarray(png).astype(np.int64)
+        if arr.ndim == 3:       # 24 / 32 bit products: an 8-bit RGB / RGBA PNG whose pixel bytes, in order, are the sample
+            raw = np.zeros(arr.shape[:2], dtype=np.int64)
+            for c in range(arr.shape[2]): raw = (raw << 8) | arr[..., c]
+        else:
+            raw = arr
         assert raw.shape == (nj, ni)
         # GDAL's decode of the whole file is the reference
         with tempfile.TemporaryDirectory() as t:
@@ -46,7 +51,7 @@ def main(outdir, paths):
             gd = np.fromfile(out, dtype='<f4').reshape(nj, ni)
         mine = ((R + raw * 2.0 ** E) / 10.0 ** D).astype(np.float32)
         # (GDAL does the arithmetic in float32: results can differ from the exact decimal by one float32 step)
-        assert np.allclose(mine, gd, rtol=1e-6, atol=1e-4), 'the formula does not reproduce GDAL on the full file'
+        assert np.allclose(mine, gd, rtol=1e-6, atol=2e-3), 'the formula does not reproduce GDAL on the full file'
         # the busiest window: most distinct values over a coarse search
         best, at = -1, (0, 0)
         for y in range(0, nj - H, max(H, nj // 40)):
@@ -64,7 +69,11 @@ def main(outdir, paths):
         struct.pack_into('>ii', s3, 55, la1 - (y + H - 1) * dj, lo1 + (x + W - 1) * di)
         s5 = bytearray(b[p5:p5 + n5]); struct.pack_into('>I', s5, 5, W * H)
         buf = io.BytesIO()
-        Image.fromarray(win.astype(np.uint16 if bits == 16 else np.uint8)).save(buf, 'PNG', optimize=True)
+        if bits in (24, 32):
+            planes = [((win >> (8 * (bits // 8 - 1 - c))) & 255).astype(np.uint8) for c in range(bits // 8)]
+            Image.fromarray(np.stack(planes, axis=-1)).save(buf, 'PNG', optimize=True)
+        else:
+            Image.fromarray(win.astype(np.uint16 if bits == 16 else np.uint8)).save(buf, 'PNG', optimize=True)
         s7 = struct.pack('>IB', 5 + len(buf.getvalue()), 7) + buf.getvalue()
         body = b[p1:p1 + n1] + bytes(s3) + b[p4:p4 + n4] + bytes(s5) + b[p6:p6 + n6] + s7 + b'7777'
         head = b[:8] + struct.pack('>Q', 16 + len(body))

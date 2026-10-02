@@ -18,58 +18,6 @@ data class MrmsProduct(
     val group: String,
 )
 
-object MrmsCatalogue {
-    const val BUCKET = "https://noaa-mrms-pds.s3.amazonaws.com"
-    const val REFLECTIVITY = "Reflectivity"
-    const val ROTATION = "Rotation"
-    const val PRECIP = "Precipitation"
-
-    /** The NWS radar colour table (5 dBZ steps); below 5 dBZ nothing is drawn. */
-    private val reflectivity = Style(
-        Kind.Banded,
-        bands((5..75 step 5).toList(), listOf(0x04e9e7, 0x019ff4, 0x0300f4, 0x02fd02, 0x01c501, 0x008e00, 0xfdf802, 0xe5bc00, 0xfd9500, 0xfd0000,
-            0xd40000, 0xbc0000, 0xf800fd, 0x9854c6, 0xfdfdfd)),
-        units = "dBZ", digits = 1,
-    )
-
-    /** Azimuthal-shear tracks in 0.001 / s: values below 2 are noise and stay transparent. */
-    private val rotation = Style(
-        Kind.Banded,
-        bands(listOf(2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30),
-            listOf(0x9fd3ff, 0x4aa8ff, 0x2c6cf0, 0x25c25a, 0xa7e03a, 0xffe600, 0xffa000, 0xff4a00, 0xd01010, 0xc000c0, 0x5a2a8c)),
-        units = "x10^-3 /s", digits = 0,
-    )
-
-    /** Accumulations are stored in mm and shown in inches. */
-    private val rainfall = Style(Kind.Banded, Palettes.qpf, factor = 1.0 / 25.4, units = "in", digits = 2)
-
-    private fun reflectivity(id: String, title: String, frames: Int = 30) =
-        MrmsProduct(id, title, Pool.Max, -90.0, reflectivity, 2, frames, 0.01, REFLECTIVITY)
-
-    private fun rotation(id: String, title: String, cadence: Int) =
-        MrmsProduct(id, title, Pool.Max, -0.5, rotation, cadence, if (cadence <= 2) 30 else 12, 0.005, ROTATION)
-
-    private fun qpe(id: String, title: String) = MrmsProduct(id, title, Pool.Mean, -0.5, rainfall, 60, 12, 0.01, PRECIP)
-
-    val all = listOf(
-        reflectivity("MergedReflectivityQCComposite_00.50", "Composite Reflectivity"),
-        reflectivity("MergedBaseReflectivityQC_00.50", "Base Reflectivity (lowest tilt)"),
-        rotation("RotationTrack60min_00.50", "Rotation Track, 1 h (0-2 km)", 2),
-        rotation("RotationTrack30min_00.50", "Rotation Track, 30 min (0-2 km)", 2),
-        rotation("RotationTrack120min_00.50", "Rotation Track, 2 h (0-2 km)", 2),
-        rotation("RotationTrack360min_00.50", "Rotation Track, 6 h (0-2 km)", 2),
-        rotation("RotationTrack1440min_00.50", "Rotation Track, 24 h (0-2 km)", 30),
-        qpe("MultiSensor_QPE_24H_Pass2_00.00", "24 h Rainfall (multi-sensor, best)"),
-        qpe("MultiSensor_QPE_24H_Pass1_00.00", "24 h Rainfall (multi-sensor, quicker)"),
-        qpe("RadarOnly_QPE_24H_00.00", "24 h Rainfall (radar only)"),
-    )
-
-    val default = all.first()
-    val groups = listOf(REFLECTIVITY, ROTATION, PRECIP)
-
-    fun byId(id: String?) = all.firstOrNull { it.id == id }
-}
-
 /** One file on the server: its key, the scan's valid time and when it was uploaded (the bucket's LastModified), epoch seconds. */
 data class MrmsFile(val key: String, val validTime: Long, val uploaded: Long?, val size: Long) {
     val url: String get() = MrmsCatalogue.BUCKET + "/" + key

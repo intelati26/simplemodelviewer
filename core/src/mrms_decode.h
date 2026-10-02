@@ -11,7 +11,8 @@
 #include "spcrefs_core.h"
 
 // MRMS products are GRIB2 files (usually gzip-compressed) holding one field on a regular latitude / longitude grid, packed with GRIB2
-// data representation template 5.41: the data section is an embedded 8- or 16-bit grayscale PNG whose samples X give the value
+// data representation template 5.41: the data section is an embedded PNG (8 / 16 bit grayscale, or 8-bit RGB / RGBA for the files
+// that say 24 / 32 bits per value, the sample being the pixel's bytes in order) whose samples X give the value
 // (R + X * 2^E) / 10^D. There is no bitmap: "no coverage" / "no echo" are stored codes (-999, -99, -3, ...).
 // Only what the MRMS files use is supported (grid template 3.0 scanning north to south and west to east, template 5.41, no bitmap).
 namespace Mrms {

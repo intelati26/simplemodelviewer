@@ -143,8 +143,10 @@ namespace Mrms {
                         depth = body[8];
                         const int colourType = body[9];
                         const int interlace = body[12];
-                        if (colourType != 0 || (depth != 8 && depth != 16) || interlace != 0) {
-                            error = "unsupported PNG (need a plain 8 or 16 bit grayscale image)";
+                        // grayscale 8 / 16 bit, or 8-bit RGB / RGBA (the files' 24 and 32 bit samples are the pixel's bytes, in order)
+                        channels = colourType == 0 ? 1 : colourType == 2 ? 3 : colourType == 6 ? 4 : 0;
+                        if (channels == 0 || (depth != 8 && !(depth == 16 && channels == 1)) || interlace != 0) {
+                            error = "unsupported PNG (need a plain 8 / 16 bit grayscale or 8-bit RGB / RGBA image)";
                             return false;
                         }
                         header = true;
@@ -156,8 +158,8 @@ namespace Mrms {
                     pos += 12 + length;
                 }
                 if (!header || chunks.empty()) { error = "the PNG has no image data"; return false; }
-                if (width != expectColumns || height != expectRows || depth != expectBits) { error = "the PNG does not match the GRIB grid"; return false; }
-                bytesPerPixel = depth / 8;
+                if (width != expectColumns || height != expectRows || depth * channels != expectBits) { error = "the PNG does not match the GRIB grid"; return false; }
+                bytesPerPixel = depth / 8 * channels;
                 rowBytes = static_cast<size_t>(width) * bytesPerPixel;
                 previous.assign(rowBytes, 0);
                 current.assign(rowBytes + 1, 0);
@@ -192,7 +194,7 @@ namespace Mrms {
                 return previous.data();
             }
 
-            int width = 0, height = 0, depth = 0;
+            int width = 0, height = 0, depth = 0, channels = 1;
 
         private:
             void unfilter() {
@@ -260,7 +262,7 @@ namespace Mrms {
         PngRows png;
         if (!png.open(info.png, info.pngSize, info.columns, info.rows, info.bitDepth, error)) return false;
 
-        const bool wide = info.bitDepth == 16;
+        const int bytes = info.bitDepth / 8;   // 1, 2, 3 or 4 bytes per sample, big-endian
         const double missingAt = req.missing_at_or_below;
         const bool mean = req.pool == 1;
         out.assign(static_cast<size_t>(outCols) * outRows, std::numeric_limits<float>::quiet_NaN());
@@ -279,8 +281,10 @@ namespace Mrms {
             for (long ox = 0; ox < outCols; ox += 1) {
                 for (long sx = 0; sx < step; sx += 1) {
                     const long x = x0 + ox * step + sx;
-                    const int sample = wide ? be16(row + 2 * x) : row[x];
-                    const double value = info.reference + sample * info.scale;
+                    const uint8_t * px = row + bytes * x;
+                    uint32_t sample = px[0];
+                    for (int b = 1; b < bytes; b += 1) sample = (sample << 8) | px[b];
+                    const double value = info.reference + static_cast<double>(sample) * info.scale;
                     if (value <= missingAt) continue;
                     const float v = static_cast<float>(value);
                     if (mean) acc[static_cast<size_t>(ox)] += v;
