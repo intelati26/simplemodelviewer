@@ -24,6 +24,7 @@ import simplemodelview.Grid
 import simplemodelview.globeInverse
 import simplemodelview.BackupPlace
 import simplemodelview.Place
+import simplemodelview.VideoSize
 import simplemodelview.SettingsBackup
 import simplemodelview.isValidEmail
 import simplemodelview.Product
@@ -460,6 +461,18 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissContactPrompt() = update { it.copy(contactPrompt = false) }
 
+    /** Estimated size of a loop video of the current product and area, for the share dialog. */
+    fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
+        val v = resolveView(area)
+        val pictureW = if (area == ShareArea.Globe && globeW > 0) 1500 else v.pixelWidth
+        val pictureH = if (area == ShareArea.Globe && globeW > 0) 1500 * globeH / globeW else v.pixelHeight
+        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, _state.value.times.size)   // + header and legend
+    }
+
+    var videoSize: VideoSize
+        get() = VideoSize.byName(prefs.getString("video_size", null))
+        set(value) { prefs.edit().putString("video_size", value.name).apply() }
+
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
     fun dismissNotice() = update { it.copy(notice = null) }
@@ -543,7 +556,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
      * Renders every forecast time of the current product / sector into an MP4 and returns the file. [onProgress] gets (done, total).
      * Frames come from the HTTP cache when the loop has been played.
      */
-    suspend fun buildLoopFile(area: ShareArea, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
+    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val s = store ?: return@withContext null
         val st = _state.value
         val product = st.product ?: return@withContext null
@@ -563,8 +576,9 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
                 val hour = (st.times[t] - cycle.epochSeconds) / 3600
                 val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
                 var picture = renderer.shareImage(map, product, style, header, st.members)
-                if (picture.width > 1280) picture = Bitmap.createScaledBitmap(picture, 1280, picture.height * 1280 / picture.width, true)
-                if (exporter == null) exporter = LoopExporter(file, picture.width, picture.height)
+                val (sw, sh) = size.scaled(picture.width, picture.height)
+                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
+                if (exporter == null) exporter = LoopExporter(file, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
                 exporter.add(picture, last = t == n - 1)
                 onProgress(t + 1, n)
             }

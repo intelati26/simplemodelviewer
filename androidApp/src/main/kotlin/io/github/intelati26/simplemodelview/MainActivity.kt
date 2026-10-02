@@ -87,6 +87,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.FilterChip
 import simplemodelview.Place
 import simplemodelview.fixed
+import simplemodelview.VideoSize
 import simplemodelview.formatAge
 import simplemodelview.epochSeconds
 import simplemodelview.formatClock
@@ -252,7 +253,10 @@ private fun RefsScreen(vm: RefsViewModel) {
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
-        onShare = { area, loop ->
+        initialSize = vm.videoSize,
+        estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
+        onShare = { area, loop, size ->
+            vm.videoSize = size
             sharing = false
             scope.launch {
                 if (!loop) {
@@ -261,7 +265,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                 } else {
                     loopProgress = 0 to s.times.size
                     try {
-                        val file = vm.buildLoopFile(area) { done, total -> loopProgress = done to total }
+                        val file = vm.buildLoopFile(area, size) { done, total -> loopProgress = done to total }
                         loopProgress = null
                         if (file != null) shareFile(context, file, "video/mp4", "Share loop")
                     } catch (e: Exception) {
@@ -610,8 +614,12 @@ private fun shareFile(context: android.content.Context, file: java.io.File, mime
 
 /** Choose what to export (this screen area, the whole map, or a meso sector) and in what form. */
 @Composable
-private fun ShareDialog(canLoop: Boolean, current: String, globe: Boolean, onDismiss: () -> Unit, onShare: (ShareArea, Boolean) -> Unit) {
+private fun ShareDialog(
+    canLoop: Boolean, current: String, globe: Boolean, initialSize: VideoSize, estimate: (ShareArea, VideoSize) -> Double,
+    onDismiss: () -> Unit, onShare: (ShareArea, Boolean, VideoSize) -> Unit,
+) {
     var area by remember { mutableStateOf<ShareArea>(if (globe) ShareArea.Globe else ShareArea.Screen) }
+    var size by remember { mutableStateOf(initialSize) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Share") },
@@ -630,13 +638,23 @@ private fun ShareDialog(canLoop: Boolean, current: String, globe: Boolean, onDis
                         AreaRow(sector.name, (area as? ShareArea.Meso)?.sector == sector) { area = ShareArea.Meso(sector) }
                     }
                 }
+                if (canLoop) {
+                    Text("Loop video size", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (option in VideoSize.entries) {
+                            val mb = estimate(area, option)
+                            FilterChip(size == option, { size = option }, label = { Text("${option.label} ~${if (mb < 10) fixed(mb, 1) else mb.toInt().toString()} MB") })
+                        }
+                    }
+                }
                 Disclaimer(Modifier.padding(top = 8.dp))
             }
         },
         confirmButton = {
             Row {
-                TextButton(onClick = { onShare(area, false) }) { Text("Picture") }
-                if (canLoop) TextButton(onClick = { onShare(area, true) }) { Text("Loop video") }
+                TextButton(onClick = { onShare(area, false, size) }) { Text("Picture") }
+                if (canLoop) TextButton(onClick = { onShare(area, true, size) }) { Text("Loop video") }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

@@ -13,7 +13,7 @@ import java.io.File
  * Encodes rendered pictures into an H.264 MP4 (what messaging apps play inline). Frames are drawn onto the encoder's input
  * surface; every frame is shown for [frameMillis], the last one [lastMillis] longer so a loop reads as a loop.
  */
-class LoopExporter(private val file: File, width: Int, height: Int, private val frameMillis: Int = 250, private val lastMillis: Int = 1200) {
+class LoopExporter(private val file: File, width: Int, height: Int, private val bitrate: Int, private val frameMillis: Int = 250, private val lastMillis: Int = 1200) {
     // encoders want dimensions that are multiples of 16; the picture is drawn at the top left on white
     val width = (width + 15) / 16 * 16
     val height = (height + 15) / 16 * 16
@@ -28,9 +28,16 @@ class LoopExporter(private val file: File, width: Int, height: Int, private val 
     init {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, this.width, this.height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, 1000 / frameMillis)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // a keyframe costs several times a normal frame and the picture changes little between frames' backgrounds: one every 5 s, not 1 s
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5)
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+            // High profile saves roughly 10-15% at the same quality where the device offers it
+            val high = try {
+                codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).profileLevels.any { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
+            } catch (e: Exception) { false }
+            if (high) setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
         }
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         surface = codec.createInputSurface()
