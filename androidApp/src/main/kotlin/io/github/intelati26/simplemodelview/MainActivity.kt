@@ -170,7 +170,8 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
                 AssistChip(onClick = { picker = true }, label = { Text(s.product?.title ?: "Product", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.weight(1f))
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
-                MoreMenu(onMrms = onMrms, onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
+                TextButton(onClick = onMrms, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("MRMS") }
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
 
@@ -341,6 +342,18 @@ internal fun Legend(style: Style, members: List<String>) {
             return
         }
         if (style.stops.isEmpty()) return
+        if (style.kind == Kind.Categorical) {      // a swatch and name per category
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                style.stops.forEachIndexed { i, stop ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(12.dp).background(Color(0xFF000000.toInt() or stop.rgb)))
+                        Text(" " + style.labels.getOrElse(i) { "" }, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            return
+        }
         Row(Modifier.fillMaxWidth()) {
             for (stop in style.stops) Box(Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or stop.rgb)))
         }
@@ -445,12 +458,11 @@ private fun ProductRow(product: Product, selected: Boolean, favourite: Boolean, 
 }
 
 @Composable
-private fun MoreMenu(onMrms: () -> Unit, onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("MRMS radar") }, onClick = { open = false; onMrms() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
@@ -483,7 +495,10 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
 }
 
 @Composable
-internal fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit, onDismiss: () -> Unit) {
+internal fun SettingsDialog(
+    settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
+    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
@@ -500,6 +515,18 @@ internal fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, on
                     Text("Cache size (applies on the next launch)")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (mb in listOf(50, 150, 300)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text("$mb MB") })
+                    }
+                }
+                if (units != null) Column {      // (the MRMS page only: SPC's fields have their own fixed units)
+                    Text("Units (MRMS page)")
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(!units.metricLength, { onUnits(units.copy(metricLength = false)) }, label = { Text("Rain: in") })
+                        FilterChip(units.metricLength, { onUnits(units.copy(metricLength = true)) }, label = { Text("mm") })
+                        FilterChip(!units.celsius, { onUnits(units.copy(celsius = false)) }, label = { Text("Temp: \u00B0F") })
+                        FilterChip(units.celsius, { onUnits(units.copy(celsius = true)) }, label = { Text("\u00B0C") })
+                        FilterChip(!units.kilometres, { onUnits(units.copy(kilometres = false)) }, label = { Text("Height: kft") })
+                        FilterChip(units.kilometres, { onUnits(units.copy(kilometres = true)) }, label = { Text("km") })
                     }
                 }
                 var email by remember { mutableStateOf(settings.contactEmail) }
@@ -520,7 +547,7 @@ internal fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, on
                         TextButton(onClick = onImport) { Text("Import") }
                     }
                 }
-                Disclaimer()
+                Disclaimer(text = disclaimer)
             }
         },
     )

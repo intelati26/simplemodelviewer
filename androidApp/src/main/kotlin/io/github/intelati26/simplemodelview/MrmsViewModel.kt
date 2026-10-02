@@ -30,6 +30,8 @@ import simplemodelview.Product
 import simplemodelview.Sector
 import simplemodelview.SettingsBackup
 import simplemodelview.Style
+import simplemodelview.Units
+import simplemodelview.styleIn
 import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
@@ -67,6 +69,8 @@ data class MrmsState(
     val places: List<Place> = emptyList(),
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
+    val units: Units = Units(),
+    val live: Boolean = false,                   // the page is on screen and checks for newer scans by itself
 ) {
     val file: MrmsFile? get() = files.getOrNull(index)
 }
@@ -100,6 +104,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             settings = readSettings(),
+            units = readUnits(),
         )
     )
     val state: StateFlow<MrmsState> = _state
@@ -109,6 +114,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun readSettings() = Settings(
         prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(),
     )
+
+    private fun readUnits() = Units(prefs.getBoolean("u_metric_length", false), prefs.getBoolean("u_celsius", false), prefs.getBoolean("u_km", false))
+
+    private fun styleOf(product: MrmsProduct) = product.styleIn(_state.value.units)
+
+    /** Switches rain / hail (in or mm), temperature (F or C) and height (kft or km) units; the picture is redrawn from the cached data. */
+    fun setUnits(units: Units) {
+        prefs.edit().putBoolean("u_metric_length", units.metricLength).putBoolean("u_celsius", units.celsius).putBoolean("u_km", units.kilometres).apply()
+        update { it.copy(units = units) }
+        if (shown != null) showFrame()
+    }
 
     private val dataSaver get() = prefs.getBoolean("data_saver", false)
     private val wifiOnlyLoop get() = prefs.getBoolean("wifi_only", false)
@@ -151,18 +167,41 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      * keep the file being looked at.
      */
     fun refreshIfStale() {
+        if (System.currentTimeMillis() - lastLoad < 3 * 60 * 1000) return
+        viewModelScope.launch { checkForNewer() }
+    }
+
+    /** One look at the server: if a newer scan exists, add it (and follow it when the newest was on screen). Never shows an error. */
+    private suspend fun checkForNewer() {
         val st = _state.value
-        if (st.playing || st.busy || st.error != null || st.files.isEmpty() || System.currentTimeMillis() - lastLoad < 3 * 60 * 1000) return
-        viewModelScope.launch {
-            try {
-                val files = repo.listFiles(st.product, System.currentTimeMillis() / 1000)
-                lastLoad = System.currentTimeMillis()
-                if (files.isEmpty() || files.last().key == st.files.last().key) return@launch
-                val atNewest = st.index == st.files.size - 1
-                val keep = st.file?.key
-                update { it.copy(files = files, index = if (atNewest) files.size - 1 else files.indexOfFirst { f -> f.key == keep }.coerceAtLeast(0)) }
-                if (atNewest) showFrame()
-            } catch (e: CancellationException) { throw e } catch (_: Exception) { /* a failed check is not an error to show */ }
+        if (st.playing || st.busy || st.error != null || st.files.isEmpty()) return
+        try {
+            val files = repo.listFiles(st.product, System.currentTimeMillis() / 1000)
+            lastLoad = System.currentTimeMillis()
+            if (files.isEmpty() || files.last().key == st.files.last().key || _state.value.product.id != st.product.id) return
+            val atNewest = st.index == st.files.size - 1
+            val keep = st.file?.key
+            update { it.copy(files = files, index = if (atNewest) files.size - 1 else files.indexOfFirst { f -> f.key == keep }.coerceAtLeast(0)) }
+            if (atNewest) showFrame()
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { /* a failed check is not an error to show */ }
+    }
+
+    private var liveJob: Job? = null
+
+    /**
+     * While the page is on screen, look for newer scans by itself: about every half cadence, at least once a minute and at most every five
+     * (a 2-minute product is checked each minute, an hourly one every five), so a viewer left open follows the radar.
+     */
+    fun setLive(on: Boolean) {
+        liveJob?.cancel()
+        liveJob = null
+        update { it.copy(live = on) }
+        if (!on) return
+        liveJob = viewModelScope.launch {
+            while (true) {
+                delay((_state.value.product.cadenceMinutes * 30L).coerceIn(60L, 300L) * 1000)
+                checkForNewer()
+            }
         }
     }
 
@@ -237,7 +276,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             shownGrid = frame.window.grid
             shown = synthetic(product, frame.window.grid) to frame.window.values
-            update { it.copy(style = product.style, cellKilometres = frame.window.sourceCellDegrees * globeStep(product) * 111.0) }
+            update { it.copy(style = styleOf(product), cellKilometres = frame.window.sourceCellDegrees * globeStep(product) * 111.0) }
             if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
             return
         }
@@ -248,16 +287,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val grid = window.grid
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, product.style, window.values, emptyList(), v, dark) }
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
-        update { it.copy(map = bitmap, style = product.style, busy = false, cellKilometres = window.sourceCellDegrees * step * 111.0) }
+        update { it.copy(map = bitmap, style = synthetic.style, busy = false, cellKilometres = window.sourceCellDegrees * step * 111.0) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
     private fun synthetic(product: MrmsProduct, grid: Grid) =
-        Product(product.id, product.title, product.group, product.style, hasMembers = false, timeDimension = null, grid = grid)
+        Product(product.id, product.title, product.group, styleOf(product), hasMembers = false, timeDimension = null, grid = grid)
 
     /** Whole pixels per cell: as large as keeps the picture under about 6 million pixels (and at most 4). */
     private fun pixelScale(grid: Grid): Int {
@@ -357,7 +396,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
         val bitmap = withContext(Dispatchers.Default) {
-            globeRenderer.render(product.grid, values, st.product.style, emptyList(), st.cam, globeW, globeH, stride, dark)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -519,7 +558,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile): Pair<Bitmap, Style> {
         val st = _state.value
-        val style = product.style
+        val style = styleOf(product)
         if (area == ShareArea.Globe && globeW > 0) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             val size = 1500

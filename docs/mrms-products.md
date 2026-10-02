@@ -2,7 +2,7 @@
 
 Surveyed 2026-10-02 from the newest real file of each directory of `noaa-mrms-pds/CONUS/` (243 directories; the 99 per-level 3D-mosaic ones
 `MergedReflectivityQC_*`, `MergedRhoHV_*`, `MergedZdr_*` and the `ANC_*` ones, which had no files, are not offered). The app's catalogue
-(`shared/.../MrmsCatalogue.kt`) holds 135 products in nine buckets. Every one decodes with the same core decoder
+(`shared/.../MrmsCatalogue.kt`) holds 136 products in nine buckets. Every one decodes with the same core decoder
 (`core/src/mrms_decode.cpp`); the 24 / 32 bit ones were checked bit for bit against GDAL on the full files.
 
 ## File format facts
@@ -38,14 +38,21 @@ multi-sensor, and 1.4 h for the model fields.
 - **Hail (9):** MESH (shown in inches), hail swaths 30 min to 24 h, probability of severe hail, severe hail index.
 - **Lightning (6):** NLDN cloud-to-ground density 1 / 5 / 15 / 30 min, lightning probability next 30 / 60 min. (The lightning-jump grids and the `scale_1`
   naming of the probability directories are as the bucket has them.)
-- **Rainfall (24):** precipitation rate, radar-only QPE (15 min, 1 / 3 / 6 / 12 / 24 / 48 / 72 h, since 12Z), multi-sensor QPE 1-72 h, Pass 2 (best) and Pass 1 (quicker).
+- **Rainfall (25):** precipitation type (seven categories, codes 96 / 91 / 10 / 7 / 6 / 3 / 1 and NSSL's colours), precipitation rate, radar-only QPE (15 min, 1 / 3 / 6 / 12 / 24 / 48 / 72 h, since 12Z), multi-sensor QPE 1-72 h, Pass 2 (best) and Pass 1 (quicker).
 - **Flash flooding (19):** QPE / flash-flood-guidance ratio, return period (30 min to 24 h, maximum), streamflow and unit streamflow (CREST, SAC-SMA, hydrophobic), soil saturation (CREST, SAC-SMA).
 - **Quality (22):** radar quality index, accumulation quality 1-72 h, gauge influence 1-72 h (Pass 1 / 2).
 - **Model and heights (8):** freezing level, surface and wet-bulb temperature (shown in F), warm rain probability, bright band top / bottom, heights of composite reflectivity.
 
+## Categories, units and refreshing
+- **Precipitation type** (`PrecipFlag`) is drawn with the core's categorical mode: a cell takes the colour of the stop with exactly its code (never blended or
+  smoothed), and a decimated view uses the most common code of each block (pool "mode"). Codes: 1 warm stratiform, 3 snow, 6 convective, 7 hail, 10 cool stratiform,
+  91 tropical stratiform, 96 tropical convective; 0 is "none" and stays transparent. The legend and read-out use the category names.
+- **Units:** Settings has Rain / hail in or mm, Temperature F or C, Height kft or km (MRMS page only). A style is converted by an affine map of its thresholds, factor
+  and offset, with the thresholds rounded to readable values.
+- **Live:** the page checks for a newer scan about every half cadence (at least a minute, at most five) while it is on screen, and follows it when the newest frame is shown.
+
 ## Not offered (yet)
-- **Categorical fields:** `PrecipFlag` (surface precipitation type) and `SyntheticPrecipRateID` hold flag codes (0 none, 1 warm stratiform, 3 snow, 6 convective, 7 hail, ...) and need a
-  labelled legend and read-out.
+- **`SyntheticPrecipRateID`** (method ids of the precipitation-rate blend): a second categorical field, not offered.
 - **Lightning jump** (`LtgJumpGrid_*`, a non-dimensional change index) and **`ANC_*`** (empty at survey time).
 - **3D mosaic levels** (reflectivity, ZDR, RhoHV at 33 heights each): a level picker would suit them better than 99 list entries.
 - Palettes for the FLASH, quality and a few other families are first guesses (thresholds chosen from today's value ranges); tune them when there is a case to look at.

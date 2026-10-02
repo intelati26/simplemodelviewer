@@ -64,6 +64,8 @@ import simplemodelview.formatAge
 import simplemodelview.formatClock
 import simplemodelview.formatPlus
 
+private const val MRMS_DISCLAIMER = "Data: NOAA/NSSL MRMS. Experimental viewer, not a warning or decision-support tool."
+
 /** The MRMS page: composite reflectivity, rotation tracks and 24 h rainfall (and variants) over the same map machinery as the REFS page. */
 @Composable
 internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
@@ -83,7 +85,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
     }
-    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); vm.setLive(true); onPauseOrDispose { vm.setLive(false) } }
     val dark = isSystemInDarkTheme()
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
@@ -123,7 +125,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        s.file?.let { "Valid ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}   frame ${s.index + 1}/${s.files.size}" } ?: "",
+                        s.file?.let { "Valid ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}   frame ${s.index + 1}/${s.files.size}" + if (s.live && s.index == s.files.size - 1) "   \u25CF live" else "" } ?: "",
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
@@ -177,7 +179,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace)
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
-        onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+        onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, units = s.units, onUnits = vm::setUnits, disclaimer = MRMS_DISCLAIMER,
     ) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.files.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
@@ -202,7 +204,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 }
             }
         },
-        disclaimer = "Data: NOAA/NSSL MRMS. Experimental viewer, not a warning or decision-support tool.",
+        disclaimer = MRMS_DISCLAIMER,
     )
     loopProgress?.let { (done, total) ->
         AlertDialog(

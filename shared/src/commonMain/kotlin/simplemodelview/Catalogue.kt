@@ -1,7 +1,7 @@
 package simplemodelview
 
-/** How a field is drawn; ordinals match the core's SPC_BLENDED / SPC_BANDED / SPC_PAINTBALL. */
-enum class Kind { Blended, Banded, Paintball }
+/** How a field is drawn; ordinals match the core's SPC_BLENDED / SPC_BANDED / SPC_PAINTBALL / SPC_CATEGORICAL. */
+enum class Kind { Blended, Banded, Paintball, Categorical }
 
 /** Colours, units and the stored-to-shown conversion (shown = stored * factor + offset). */
 data class Style(
@@ -12,6 +12,8 @@ data class Style(
     val hideBelow: Double = -1e30,
     val units: String = "",
     val digits: Int = 1,
+    /** Categorical fields: the name of each stop's code (parallel to [stops]). */
+    val labels: List<String> = emptyList(),
 )
 
 /** An SPC REFS product: an array in the store plus how to show it. */

@@ -16,6 +16,7 @@ data class MrmsProduct(
     val frames: Int,                // how many of the newest files the slider covers
     val cellDegrees: Double,        // the files' cell size
     val group: String,
+    val quantity: Quantity = Quantity.None,   // what [style] measures, so its unit can be switched
 )
 
 /** One file on the server: its key, the scan's valid time and when it was uploaded (the bucket's LastModified), epoch seconds. */

@@ -265,9 +265,12 @@ namespace Mrms {
         const int bytes = info.bitDepth / 8;   // 1, 2, 3 or 4 bytes per sample, big-endian
         const double missingAt = req.missing_at_or_below;
         const bool mean = req.pool == 1;
+        const bool mode = req.pool == 2;
         out.assign(static_cast<size_t>(outCols) * outRows, std::numeric_limits<float>::quiet_NaN());
         std::vector<float> acc(static_cast<size_t>(outCols));
         std::vector<int> count(static_cast<size_t>(outCols));
+        // category codes: keep the block's values and take the most common one
+        std::vector<float> block(mode ? static_cast<size_t>(outCols) * step * step : 0, std::numeric_limits<float>::quiet_NaN());
         const long lastRow = y0 + outRows * step;   // rows read: y0 .. lastRow - 1
         for (long y = 0; y < lastRow; y += 1) {
             const uint8_t * row = png.next();
@@ -285,8 +288,15 @@ namespace Mrms {
                     uint32_t sample = px[0];
                     for (int b = 1; b < bytes; b += 1) sample = (sample << 8) | px[b];
                     const double value = info.reference + static_cast<double>(sample) * info.scale;
-                    if (value <= missingAt) continue;
+                    if (value <= missingAt) {
+                        if (mode) block[(static_cast<size_t>(ox) * step + inBlock) * step + sx] = std::numeric_limits<float>::quiet_NaN();
+                        continue;
+                    }
                     const float v = static_cast<float>(value);
+                    if (mode) {
+                        block[(static_cast<size_t>(ox) * step + inBlock) * step + sx] = v;
+                        continue;
+                    }
                     if (mean) acc[static_cast<size_t>(ox)] += v;
                     else if (v > acc[static_cast<size_t>(ox)]) acc[static_cast<size_t>(ox)] = v;
                     count[static_cast<size_t>(ox)] += 1;
@@ -296,6 +306,19 @@ namespace Mrms {
                 const long northRow = (y - y0) / step;
                 float * dest = out.data() + static_cast<size_t>(outRows - 1 - northRow) * outCols;   // row 0 = south
                 for (long ox = 0; ox < outCols; ox += 1) {
+                    if (mode) {
+                        const float * cell = block.data() + static_cast<size_t>(ox) * step * step;
+                        int bestCount = 0;
+                        float best = 0;
+                        for (long i = 0; i < step * step; i += 1) {
+                            if (std::isnan(cell[i])) continue;
+                            int c = 0;
+                            for (long j = 0; j < step * step; j += 1) c += cell[j] == cell[i];
+                            if (c > bestCount || (c == bestCount && cell[i] > best)) { bestCount = c; best = cell[i]; }
+                        }
+                        if (bestCount > 0) dest[ox] = best;
+                        continue;
+                    }
                     const int n = count[static_cast<size_t>(ox)];
                     if (n > 0) dest[ox] = mean ? acc[static_cast<size_t>(ox)] / n : acc[static_cast<size_t>(ox)];
                 }

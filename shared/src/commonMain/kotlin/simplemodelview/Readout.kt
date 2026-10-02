@@ -37,6 +37,10 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
         return where + "$count of 10 members" + if (names.isEmpty()) "" else ": " + names.joinToString(", ")
     }
     val shown = raw * style.factor + style.offset
+    if (style.kind == Kind.Categorical) {
+        val i = style.stops.indexOfFirst { kotlin.math.abs(it.value - shown) < 0.5 }
+        return where + (if (i >= 0) style.labels.getOrNull(i) ?: "code ${shown.toInt()}" else if (shown.toInt() == 0) "none" else "code ${shown.toInt()}")
+    }
     return where + fixed(shown, style.digits) + if (style.units.isEmpty()) "" else " " + style.units
 }
 

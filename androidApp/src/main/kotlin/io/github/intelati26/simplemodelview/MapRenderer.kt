@@ -62,6 +62,20 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         val stops = style.stops
         if (stops.isEmpty()) return
+        if (style.kind == Kind.Categorical) {      // swatches with the category names, two lines if needed
+            val per = (stops.size + 1) / 2
+            val cellW = w / per
+            for ((i, stop) in stops.withIndex()) {
+                val row = i / per
+                val col = i % per
+                val top = y + h * (0.1f + 0.45f * row)
+                paint.color = 0xFF000000.toInt() or stop.rgb
+                canvas.drawRect(x + col * cellW, top, x + col * cellW + textSize, top + textSize, paint)
+                paint.color = Color.BLACK
+                canvas.drawText(style.labels.getOrElse(i) { "" }, x + col * cellW + textSize * 1.3f, top + textSize * 0.9f, paint)
+            }
+            return
+        }
         val cell = w / stops.size
         for ((i, stop) in stops.withIndex()) {
             paint.color = 0xFF000000.toInt() or stop.rgb

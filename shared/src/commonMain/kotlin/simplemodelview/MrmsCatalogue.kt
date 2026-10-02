@@ -47,7 +47,7 @@ object MrmsCatalogue {
     private val rainRate = Style(Kind.Banded, bands(listOf(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6), Palettes.qpf.map { it.rgb }),
         factor = 1.0 / 25.4, units = "in/hr", digits = 2)
 
-    private const val KFT_PER_KM = 3.28084
+    private const val KFT_PER_KM = 1.0 / 0.3048
     private val echoTopColours = listOf(0xb4e6ff, 0x82c8ff, 0x4fa3ff, 0x2d78e6, 0x1a9a3c, 0x6cc24a, 0xd4e62f, 0xffd400, 0xffa500, 0xff6a00,
         0xe62020, 0xb01010, 0xd020c0, 0x7a2aa8)
     private val echoTopThresholds = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70)
@@ -71,8 +71,16 @@ object MrmsCatalogue {
     private val unitStreamflow = banded(listOf(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10), ramp(9, 0xbfe3ff, 0x2c6cf0, 0xe03020, 0x7a1fa8), "m3/s/km2", 2)
 
     private val quality = banded(listOf(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0), ramp(10, 0xd02020, 0xffe14a, 0x2e9e2e), "", 2)
-    private val heightKft = Style(Kind.Blended, Palettes.rainbow(0.0, 20.0), factor = 3.28084e-3, units = "kft", digits = 1, hideBelow = 0.05)
+    private val heightKft = Style(Kind.Blended, Palettes.rainbow(0.0, 20.0), factor = KFT_PER_KM / 1000.0, units = "kft", digits = 1, hideBelow = 0.05)
     private val temperature = Style(Kind.Blended, Palettes.temperature(true), factor = 1.8, offset = 32.0, units = "F", digits = 0)
+
+    /** Surface precipitation type: the seven categories of NSSL's own legend (codes 96, 91, 10, 7, 6, 3, 1); 0 is "none" and stays transparent. */
+    private val precipType = Style(
+        Kind.Categorical,
+        listOf(Stop(96.0, 0x009700), Stop(91.0, 0x00f900), Stop(10.0, 0x6effff), Stop(7.0, 0x960096), Stop(6.0, 0xff3232), Stop(3.0, 0xb0c4ff), Stop(1.0, 0x0450a4)),
+        labels = listOf("Tropical convective", "Tropical stratiform", "Cool stratiform", "Hail", "Convective", "Snow", "Warm stratiform"),
+        digits = 0,
+    )
 
     // ---- the products ----
     // frames: how many of the newest files the slider covers
@@ -80,7 +88,8 @@ object MrmsCatalogue {
 
     private fun product(
         id: String, title: String, group: String, style: Style, cadence: Int = 2, pool: Pool = Pool.Max, missing: Double = -0.5, cell: Double = 0.01,
-    ) = MrmsProduct(id, title, pool, missing, style, cadence, framesFor(cadence), cell, group)
+        quantity: Quantity = Quantity.None,
+    ) = MrmsProduct(id, title, pool, missing, style, cadence, framesFor(cadence), cell, group, quantity)
 
     private val list = ArrayList<MrmsProduct>()
     private fun add(p: MrmsProduct) { list += p }
@@ -142,6 +151,7 @@ object MrmsCatalogue {
             add(product("LightningProbabilityNext${m}minGrid_scale_1", "Lightning Probability, next $m min", LIGHTNING, probability, 2, missing = -50.0))
 
         // rainfall
+        add(product("PrecipFlag_00.00", "Precipitation Type", PRECIP, precipType, 2, Pool.Mode))
         add(product("PrecipRate_00.00", "Precipitation Rate", PRECIP, rainRate, 2, Pool.Mean))
         add(product("RadarOnly_QPE_15M_00.00", "15 min Rainfall (radar only)", PRECIP, rainfall, 15, Pool.Mean))
         add(product("RadarOnly_QPE_01H_00.00", "1 h Rainfall (radar only)", PRECIP, rainfall, 2, Pool.Mean))
@@ -185,7 +195,15 @@ object MrmsCatalogue {
         add(product("HeightLowLevelCompositeReflectivity_00.50", "Height of low-level composite reflectivity", MODEL, heightKft))
     }
 
-    val all: List<MrmsProduct> = list
+    // which products measure a length / height / temperature (so their units can be switched)
+    private fun quantityOf(p: MrmsProduct) = when (p.style) {
+        rainfall, rainRate, hailInches -> Quantity.Length
+        echoTopKm, echoTopKft, heightKft -> Quantity.Height
+        temperature -> Quantity.Temperature
+        else -> Quantity.None
+    }
+
+    val all: List<MrmsProduct> = list.map { it.copy(quantity = quantityOf(it)) }
 
     val default = all.first()
 

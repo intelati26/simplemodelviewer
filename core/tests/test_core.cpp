@@ -185,6 +185,7 @@ static const Fixture fixtures[] = {
     {"MultiSensor_QPE_24H_Pass2_00.00", -0.5, 1, true},        // mm: -3 no coverage
     {"FLASH_QPE_FFG01H_00.00", -500.0, 0, true},               // 24 bits: an 8-bit RGB PNG
     {"FLASH_HP_MAXSTREAMFLOW_00.00", -500.0, 1, true},         // 32 bits: an 8-bit RGBA PNG
+    {"PrecipFlag_00.00", -0.5, 2, false},                      // category codes (1, 3, 6, 7, 10, 91, 96): pooled by the most common value
 };
 
 // (GDAL does the scaling in float32, so with a large offset such as -9999 its values are off by up to about 1e-3)
@@ -243,14 +244,19 @@ static void testMrmsFixture(const Fixture& fx) {
         for (int oy = 0; oy < rr.rows; oy += 1) {
             for (int ox = 0; ox < rr.columns; ox += 1) {
                 double best = -1e30, sum = 0; int n = 0;
+                int modeCount = 0; double modeValue = 0;
                 for (int dy = 0; dy < step; dy += 1) for (int dx = 0; dx < step; dx += 1) {
                     const float e = expected[static_cast<size_t>(oy * step + dy) * 120 + ox * step + dx];
                     if (e <= fx.missingAtOrBelow) continue;
                     best = std::max<double>(best, e); sum += e; n += 1;
+                    int same = 0;
+                    for (int ey = 0; ey < step; ey += 1) for (int ex = 0; ex < step; ex += 1)
+                        same += expected[static_cast<size_t>(oy * step + ey) * 120 + ox * step + ex] == e;
+                    if (same > modeCount || (same == modeCount && e > modeValue)) { modeCount = same; modeValue = e; }
                 }
                 const float v = o[static_cast<size_t>(rr.rows - 1 - oy) * rr.columns + ox];
                 if (n == 0) { if (!std::isnan(v)) bad += 1; }
-                else if (!near(v, static_cast<float>(fx.pool == 1 ? sum / n : best))) bad += 1;
+                else if (!near(v, static_cast<float>(fx.pool == 1 ? sum / n : fx.pool == 2 ? modeValue : best))) bad += 1;
             }
         }
         CHECK(bad == 0);
@@ -290,6 +296,26 @@ static void testMrmsFixture(const Fixture& fx) {
         if (!std::isnan(out[i]) && out[i] >= 0.0f) wanted += 1;
     }
     CHECK(coloured == wanted && coloured > 0);
+}
+
+// category codes are drawn exactly (never blended) in the colour of the stop with that value
+static void testCategorical() {
+    const spc_stop stops[3] = {{1.0, 10, 20, 30}, {6.0, 200, 0, 0}, {91.0, 0, 255, 0}};
+    const spc_style style{SPC_CATEGORICAL, stops, 3, 1.0, 0.0, -1e30, nullptr, 0};
+    const float values[8] = {0.0f, 1.0f, 6.0f, 91.0f, 3.0f, std::nanf(""), 6.0f, 1.0f};   // 4 x 2
+    const int grid = spc_define_latlon_grid(4, 2, 30.0, -100.0, 0.01, 0.01);
+    const spc_view view{grid, 0, 0, 4, 2, 3, 1};   // 3 pixels per cell: a smoothing renderer would blend the codes
+    std::vector<uint32_t> argb(12 * 6);
+    spc_render(values, &view, &style, argb.data());
+    auto at = [&](int cx, int cyFromSouth) { return argb[static_cast<size_t>(5 - (cyFromSouth * 3 + 1)) * 12 + cx * 3 + 1]; };
+    CHECK(at(0, 0) == 0);                          // code 0: not in the legend
+    CHECK(at(1, 0) == 0xFF0A141Eu);                // code 1
+    CHECK(at(2, 0) == 0xFFC80000u);                // code 6
+    CHECK(at(3, 0) == 0xFF00FF00u);                // code 91
+    CHECK(at(0, 1) == 0);                          // code 3: not in the legend, and not blended from its neighbours
+    CHECK(at(1, 1) == 0);                          // NaN
+    CHECK(at(2, 1) == 0xFFC80000u && at(3, 1) == 0xFF0A141Eu);
+    for (uint32_t c : argb) CHECK(c == 0 || c == 0xFF0A141Eu || c == 0xFFC80000u || c == 0xFF00FF00u);   // no in-between colours anywhere
 }
 
 static void testMrmsErrors() {
@@ -334,6 +360,7 @@ int main() {
     testRender();
     testGlobe();
     testMrms();
+    testCategorical();
 #ifdef HAVE_LIBBLOSC
     for (const char * codec : {"lz4", "zstd"}) {
         testBloscRoundTrip(codec, 2);

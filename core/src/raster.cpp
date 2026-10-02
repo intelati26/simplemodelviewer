@@ -67,6 +67,19 @@ namespace Raster {
     }
 
     uint32_t shade(const float * values, int w, int h, double column, double row, bool smooth, const spc_style& style) {
+        if (style.kind == SPC_CATEGORICAL) {
+            const float raw = sampleAt(values, w, h, column, row, false);   // category codes are never interpolated
+            if (std::isnan(raw) || style.stops == nullptr) {
+                return 0;
+            }
+            const double shown = raw * style.factor + style.offset;
+            for (int i = 0; i < style.stop_count; i += 1) {
+                if (std::fabs(shown - style.stops[i].value) < 0.5) {
+                    return argb(style.stops[i].r, style.stops[i].g, style.stops[i].b);
+                }
+            }
+            return 0;
+        }
         if (style.kind == SPC_PAINTBALL) {
             const float raw = sampleAt(values, w, h, column, row, false);
             const int mask = std::isnan(raw) ? 0 : static_cast<int>(raw);

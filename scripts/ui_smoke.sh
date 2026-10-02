@@ -66,9 +66,9 @@ tap 92 11; sleep 3; shot share-dialog           # Share
 adb shell input keyevent 4; sleep 2
 tap 91 7;  sleep 3; shot more-menu
 
-# the MRMS page (live radar from NOAA's AWS bucket): open it from the menu, then the three first products
+# the MRMS page (live radar from NOAA's AWS bucket): open it with the header button, then the three first products
 adb shell input keyevent 4; sleep 2     # close the menu if it is still open
-emu_tap_text "MRMS radar" 2>/dev/null || { tap 91 7; sleep 2; emu_tap_text "MRMS radar"; }
+emu_tap_text "MRMS"
 wait_for_picture mrms-reflectivity 240 || { echo "FAIL: the MRMS reflectivity map never appeared"; fail=1; }
 emu_tap_text "Composite Reflectivity"; sleep 2; emu_tap_text "Rotation Track, 1 h (0-2 km)"
 wait_for_picture mrms-rotation 120 || { echo "FAIL: the MRMS rotation map never appeared"; fail=1; }

@@ -18,8 +18,8 @@ data class View(
     }
 }
 
-/** How MRMS cells are combined when a window is decimated: the maximum of the valid cells, or their mean. */
-enum class Pool { Max, Mean }
+/** How MRMS cells are combined when a window is decimated: the maximum of the valid cells, their mean, or the most common value (category codes). */
+enum class Pool { Max, Mean, Mode }
 
 /** A decoded MRMS window: [values] fill [grid] (row 0 = south, NaN where there is no value). */
 class MrmsWindow(val grid: Grid, val values: FloatArray, val validTime: Long, val sourceCellDegrees: Double)

@@ -45,10 +45,11 @@ typedef struct {
     uint8_t r, g, b;
 } spc_stop;
 
-enum { SPC_BLENDED = 0, SPC_BANDED = 1, SPC_PAINTBALL = 2 };
+/* SPC_CATEGORICAL: the stored values are category codes: a cell is drawn in the colour of the stop whose value equals its (shown) value, else transparent; never blended or smoothed. */
+enum { SPC_BLENDED = 0, SPC_BANDED = 1, SPC_PAINTBALL = 2, SPC_CATEGORICAL = 3 };
 
 typedef struct {
-    int kind;                 /* SPC_BLENDED / SPC_BANDED / SPC_PAINTBALL */
+    int kind;                 /* SPC_BLENDED / SPC_BANDED / SPC_PAINTBALL / SPC_CATEGORICAL */
     const spc_stop * stops;   /* ignored for paintball */
     int stop_count;
     double factor, offset;    /* shown = stored * factor + offset */
@@ -85,7 +86,7 @@ int spc_define_latlon_grid(int columns, int rows, double south_lat, double west_
 typedef struct {
     double west, south, east, north;   /* the box to cut out (degrees, west-negative) */
     int step;                          /* >= 1: every step-th cell in each direction, cells combined by `pool` */
-    int pool;                          /* 0 = maximum of the valid cells (reflectivity, rotation), 1 = mean of the valid cells (accumulations) */
+    int pool;                          /* 0 = maximum of the valid cells (reflectivity, rotation), 1 = mean of the valid cells (accumulations), 2 = the most common valid value, ties to the larger (category codes) */
     double missing_at_or_below;        /* stored values <= this (the files' -999 / -99 / -3 codes) become NaN */
 } spc_mrms_request;
 
