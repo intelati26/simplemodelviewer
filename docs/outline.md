@@ -88,3 +88,4 @@ and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
 - **GREFS grid correction:** the GREFS and REFSCT stores share NCEP grid 212 (Lambert, parallel 25, central meridian 265 E, 40.635 km). The GREFS store's own latitude /
   longitude arrays are inconsistent with its data (correlation with storm reflectivity 0.08 vs 0.37 on the grid-212 mapping), so the app uses the grid-212 parameters and
   ignores that store's coordinate arrays. GREFS values are in percent already (not fractions).
+- **Later (owner holding off, 2026-10-02):** NOMADS `spc_post` publishes SPC products as small GRIB2 files (JPEG2000 packed); see `docs/nomads-spc-post.md`.
