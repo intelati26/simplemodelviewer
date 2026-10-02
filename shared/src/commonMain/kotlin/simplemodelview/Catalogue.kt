@@ -25,29 +25,45 @@ data class Product(
     val grid: Grid = Grid.REFS,
 )
 
+/** The buckets of SPC's own REFS viewer menu, in its order (the viewer's "Overlays" and "Member Viewer" aside from the last, which holds single-member fields). */
 object Groups {
-    const val SEVERE = "Severe storms"
-    const val GREFS = "Calibrated severe probabilities (GREFS)"
-    const val INSTABILITY = "Instability and shear"
+    const val GUIDANCE = "Guidance"
+    const val SYNOPTIC = "Synoptic"
+    const val SEVERE = "Severe"
+    const val WINTER = "Winter"
+    const val FIRE = "Fire"
     const val PRECIP = "Precipitation"
-    const val SURFACE = "Surface and upper air"
-    const val FIRE = "Fire weather"
+    const val STORM = "Storm Attributes"
+    const val MEMBERS = "Member Viewer"
     const val OTHER = "Other fields"
-    val ordered = listOf(SEVERE, GREFS, INSTABILITY, PRECIP, SURFACE, FIRE, OTHER)
+    val ordered = listOf(GUIDANCE, SYNOPTIC, SEVERE, WINTER, FIRE, PRECIP, STORM, MEMBERS, OTHER)
+
+    /** The bucket a product belongs to, matching the site's menu. [hasMembers]: a single-member (4-D) field. */
+    fun of(id: String, hasMembers: Boolean): String = when {
+        id.startsWith("grefs-") -> GUIDANCE
+        hasMembers -> MEMBERS
+        id.startsWith("s10m_01h") || id.startsWith("rh2m") || id.startsWith("fosberg") || id.startsWith("gust") -> FIRE
+        listOf("z500", "z700", "z850", "t500", "t700", "t850", "t2m", "td2m", "pmsl", "cld_", "pwat").any { id.startsWith(it) } -> SYNOPTIC
+        listOf("sbcape", "mucape", "sbcinh", "srh", "shrmag", "stp").any { id.startsWith(it) } -> SEVERE
+        id.startsWith("snow") || id.startsWith("frzr") -> WINTER
+        id.startsWith("qpf") -> PRECIP
+        listOf("cref", "maxref", "uh25", "uh03", "wmax", "s10m").any { id.startsWith(it) } -> STORM
+        else -> OTHER
+    }
 }
 
 object Catalogue {
     /** GREFS: SPC's calibrated 4-h and 24-h probabilities of tornadoes, damaging wind and severe hail (a coarse 42 km grid). */
     private val grefsList = listOf(
-        Triple("grefs-4hr/tor_prob", "4-h Tornado Probability (GREFS)", Groups.GREFS),
-        Triple("grefs-4hr/wind_prob", "4-h Damaging Wind Probability (GREFS)", Groups.GREFS),
-        Triple("grefs-4hr/hail_prob", "4-h Severe Hail Probability (GREFS)", Groups.GREFS),
-        Triple("grefs-24hr/tor_prob", "24-h Tornado Probability (GREFS)", Groups.GREFS),
-        Triple("grefs-24hr/wind_prob", "24-h Damaging Wind Probability (GREFS)", Groups.GREFS),
-        Triple("grefs-24hr/hail_prob", "24-h Severe Hail Probability (GREFS)", Groups.GREFS),
+        "grefs-4hr/tor_prob" to "4-h Tornado Probability (GREFS)",
+        "grefs-4hr/wind_prob" to "4-h Damaging Wind Probability (GREFS)",
+        "grefs-4hr/hail_prob" to "4-h Severe Hail Probability (GREFS)",
+        "grefs-24hr/tor_prob" to "24-h Tornado Probability (GREFS)",
+        "grefs-24hr/wind_prob" to "24-h Damaging Wind Probability (GREFS)",
+        "grefs-24hr/hail_prob" to "24-h Severe Hail Probability (GREFS)",
     )
     private val allCurated = curatedList + grefsList
-    private val curated = allCurated.associate { it.first to (it.second to it.third) }
+    private val curated = allCurated.toMap()
     private val curatedOrder = allCurated.mapIndexed { i, t -> t.first to i }.toMap()
 
     /** Colours and units from the array's name and its `units` attribute (ported from the desktop viewer). */
@@ -105,7 +121,8 @@ object Catalogue {
     }
 
     fun describe(array: ArrayInfo): Product {
-        val (title, group) = curated[array.name] ?: (array.name.replace('_', ' ') to Groups.OTHER)
+        val title = curated[array.name] ?: array.name.replace('_', ' ')
+        val group = Groups.of(array.name, array.dims.size == 4)
         return Product(array.name, title, group, styleFor(array.name, array.units), array.dims.size == 4,
             if (array.dims.size >= 3) array.kind.prefix + array.dims[array.dims.size - 3] else null, array.grid ?: Grid.REFS)
     }

@@ -65,15 +65,15 @@ class MetaTest {
         val products = Catalogue.build(all.values)
         val p = products.first { it.id == "grefs-4hr/tor_prob" }
         assertEquals("4-h Tornado Probability (GREFS)", p.title)
-        assertEquals(Groups.GREFS, p.group)
+        assertEquals(Groups.GUIDANCE, p.group)
         assertEquals(Grid.GREFS, p.grid)
         assertEquals("grefs-4hr/valid_time", p.timeDimension)
         assertEquals(Kind.Banded, p.style.kind)
         assertEquals(100.0, p.style.factor)
         assertEquals(2.0, p.style.hideBelow)                        // tornado probabilities start at 2%
         assertEquals(5.0, products.first { it.id == "grefs-4hr/wind_prob" }.style.hideBelow)
-        // GREFS comes right after "Severe storms" in the menu
-        assertEquals(listOf(Groups.SEVERE, Groups.GREFS), products.map { it.group }.distinct().take(2))
+        // buckets follow the site's menu order: Guidance (GREFS) comes first
+        assertEquals(Groups.GUIDANCE, products.first().group)
     }
 
     @Test fun storeUrlsPerKind() {

@@ -439,6 +439,9 @@ private fun MemberMenu(members: List<String>, current: Int, onPick: (Int) -> Uni
     }
 }
 
+private const val FAVOURITES = "Favourites"
+
+/** The product list in collapsible buckets like SPC's own menu (Guidance, Synoptic, Severe, ...), with Favourites first. All start collapsed. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProductPicker(
@@ -446,30 +449,43 @@ private fun ProductPicker(
     onToggle: (Product) -> Unit, onPick: (Product) -> Unit, onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var open by remember { mutableStateOf(setOf<String>()) }        // buckets the user has expanded
     val words = query.split(' ').filter { it.isNotBlank() }
+    val searching = words.isNotEmpty()
     val shown = products.filter { p -> words.all { p.title.contains(it, ignoreCase = true) } }
+    // while searching, every bucket with a match is open; otherwise only the ones the user opened
+    val buckets: List<Pair<String, List<Product>>> =
+        listOf(FAVOURITES to shown.filter { it.id in favourites }) + Groups.ordered.map { g -> g to shown.filter { it.group == g } }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true, label = { Text("Search products") })
         LazyColumn(Modifier.fillMaxWidth()) {
-            val favs = shown.filter { it.id in favourites }
-            if (favs.isNotEmpty()) {
-                item { GroupHeader("Favourites") }
-                items(favs, key = { "f" + it.id }) { ProductRow(it, it.id == current?.id, true, onToggle, onPick) }
-            }
-            for (group in Groups.ordered) {
-                val inGroup = shown.filter { it.group == group }
-                if (inGroup.isEmpty()) continue
-                item { GroupHeader(group) }
-                items(inGroup, key = { it.id }) { ProductRow(it, it.id == current?.id, it.id in favourites, onToggle, onPick) }
+            for ((name, list) in buckets) {
+                if (list.isEmpty() && (name != FAVOURITES || searching)) continue
+                val expanded = if (searching) true else name in open
+                item(key = "h-$name") {
+                    BucketHeader(name, list.size, expanded) { if (!searching) open = if (expanded) open - name else open + name }
+                }
+                if (!expanded) continue
+                if (list.isEmpty()) {
+                    item(key = "e-$name") { Text("Tap the star on a product to keep it here.", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
+                } else {
+                    items(list, key = { "$name/${it.id}" }) { ProductRow(it, it.id == current?.id, it.id in favourites, onToggle, onPick) }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun GroupHeader(text: String) {
-    Text(text, Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 16.dp, vertical = 6.dp),
-        style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+private fun BucketHeader(name: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (expanded) "\u25BE" else "\u25B8", Modifier.padding(end = 10.dp), fontSize = 16.sp)
+        Text(name, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        Text(count.toString(), style = MaterialTheme.typography.labelMedium)
+    }
 }
 
 @Composable
