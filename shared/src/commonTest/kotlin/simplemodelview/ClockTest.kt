@@ -23,10 +23,13 @@ class ClockTest {
         assertEquals("<1 min", formatAge(-50))
     }
 
-    @Test fun delayText() {
-        assertEquals("+1 h 56 min", formatDelay(1 * 3600 + 56 * 60))
-        assertEquals("+3 h 51 min", formatDelay(3 * 3600 + 51 * 60 + 33))
-        assertEquals("+<1 min", formatDelay(-5))
+    @Test fun plusFromAValidOrCycleTime() {
+        val v13 = Cycle(2026, 10, 1, 13).epochSeconds
+        assertEquals("13Z+1:05", formatPlus(v13, 65 * 60))
+        assertEquals("12Z+4:36", formatPlus(Cycle(2026, 10, 1, 12).epochSeconds, 4 * 3600 + 36 * 60 + 20))
+        assertEquals("10Z-36:51", formatPlus(Cycle(2026, 10, 3, 10).epochSeconds, -(36 * 3600 + 51 * 60)))   // uploaded before a future valid time
+        assertEquals("00Z+0:00", formatPlus(Cycle(2026, 10, 2, 0).epochSeconds, 0))
+        assertEquals("09Z+10:05", formatPlus(Cycle(2026, 10, 2, 9).epochSeconds, 10 * 3600 + 5 * 60))
     }
 
     @Test fun frameCarriesTheFileTimeAndMetadataTimeIsKept() = runTest {

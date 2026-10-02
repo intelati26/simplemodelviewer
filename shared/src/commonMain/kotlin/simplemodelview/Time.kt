@@ -64,5 +64,12 @@ fun formatAge(seconds: Long): String {
     }
 }
 
-/** "+1 h 56 min": how long after its cycle (init) time something appeared. A file stamped before the cycle time shows as "+<1 min". */
-fun formatDelay(seconds: Long): String = "+" + formatAge(seconds)
+/**
+ * "13Z+1:05": [deltaSeconds] after (or, negative, before) the UTC hour of [baseEpochSeconds]. Used for how long after a frame's valid time
+ * its file appeared ("13Z+1:05"; "10Z-36:51" when the file was uploaded before a future valid time) and after a run's cycle time ("12Z+4:36").
+ */
+fun formatPlus(baseEpochSeconds: Long, deltaSeconds: Long): String {
+    val hour = (floorMod(baseEpochSeconds, 86400L) / 3600).toInt()
+    val d = kotlin.math.abs(deltaSeconds)
+    return "${two(hour)}Z${if (deltaSeconds < 0) "-" else "+"}${d / 3600}:${two((d % 3600 / 60).toInt())}"
+}

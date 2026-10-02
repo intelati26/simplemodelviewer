@@ -88,7 +88,7 @@ import simplemodelview.fixed
 import simplemodelview.formatAge
 import simplemodelview.epochSeconds
 import simplemodelview.formatClock
-import simplemodelview.formatDelay
+import simplemodelview.formatPlus
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
 import simplemodelview.visibleFractions
@@ -176,7 +176,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                 SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
                 TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
             }
-            TimesLine(s.fileTime, s.runComplete, s.cycle)
+            TimesLine(s.fileTime, s.runComplete, s.cycle, s.times.getOrNull(s.timeIndex))
           }
         }
         val mapArea: @Composable (Modifier) -> Unit = { modifier ->
@@ -653,10 +653,10 @@ private fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit) {
 
 /**
  * The UTC clock, always visible, next to when the shown frame's file was uploaded and when the run finished, for comparison; and
- * how long after the run's cycle time (init) each of those was, for any run.
+ * the delays after the frame's valid time and the run's cycle time, for any run.
  */
 @Composable
-private fun TimesLine(fileTime: Long?, runComplete: Long?, cycle: Cycle?) {
+private fun TimesLine(fileTime: Long?, runComplete: Long?, cycle: Cycle?, validTime: Long?) {
     var now by remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis() / 1000; kotlinx.coroutines.delay(10_000) } }
     val style = MaterialTheme.typography.labelSmall
@@ -669,13 +669,13 @@ private fun TimesLine(fileTime: Long?, runComplete: Long?, cycle: Cycle?) {
         },
         pad, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
-    if (cycle != null && (fileTime != null || runComplete != null)) {
-        val init = cycle.epochSeconds
+    if (fileTime != null || runComplete != null) {
+        // how long after the frame's valid time its file appeared, and after the run's cycle time the run was complete
         Text(
             buildString {
-                append("After the ").append(cycle.hour.toString().padStart(2, '0')).append("Z run:")
-                if (fileTime != null) append(" this file ").append(formatDelay(fileTime - init))
-                if (runComplete != null) append(" \u00B7 run done ").append(formatDelay(runComplete - init))
+                append("Delay")
+                if (fileTime != null && validTime != null) append(": file ").append(formatPlus(validTime, fileTime - validTime))
+                if (cycle != null && runComplete != null) append(" \u00B7 run done ").append(formatPlus(cycle.epochSeconds, runComplete - cycle.epochSeconds))
             },
             pad, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
