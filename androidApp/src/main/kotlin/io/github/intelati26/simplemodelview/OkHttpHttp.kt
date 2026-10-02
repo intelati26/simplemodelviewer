@@ -39,7 +39,7 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val conta
     override suspend fun get(url: String): HttpResult = withContext(Dispatchers.IO) {
         try {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                HttpResult(response.code, response.body?.bytes() ?: ByteArray(0))
+                HttpResult(response.code, response.body?.bytes() ?: ByteArray(0), response.headers.getDate("Last-Modified")?.time?.div(1000))
             }
         } catch (e: IOException) {
             HttpResult(0, ByteArray(0))

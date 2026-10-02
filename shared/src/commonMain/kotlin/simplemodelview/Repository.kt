@@ -11,7 +11,12 @@ class CycleStore(
     val cycle: Cycle,
     val arrays: Map<String, ArrayInfo>,
     val products: List<Product>,
+    /** When the run's metadata file was last written on the server: the run is complete about then (epoch seconds). */
+    val metadataTime: Long? = null,
 )
+
+/** A decoded frame and when its file was uploaded (null for a chunk the server never wrote). */
+class Frame(val values: FloatArray, val fileTime: Long?)
 
 class RefsException(message: String) : Exception(message)
 
@@ -56,17 +61,21 @@ class RefsRepository(private val http: Http, private val core: Core) {
         }
         val products = Catalogue.build(arrays.values)
         if (products.isEmpty()) throw RefsException("no products found in ${cycle.label}")
-        return CycleStore(cycle, arrays, products)
+        return CycleStore(cycle, arrays, products, result.lastModified)
     }
 
     /** Downloads and decodes one frame: field values on the grid (NaN where the server has no chunk). */
-    suspend fun readFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int): FloatArray {
+    suspend fun readFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int): FloatArray =
+        readFrameTimed(store, product, timeIndex, memberIndex).values
+
+    /** Like [readFrame], with the time the server says the frame's file was uploaded. */
+    suspend fun readFrameTimed(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int): Frame {
         val array = store.arrays.getValue(product.id)
         val index = if (product.hasMembers) listOf(memberIndex, timeIndex, 0, 0) else listOf(timeIndex, 0, 0)
         val cells = product.grid.cells
-        val raw = fetchChunk(store.cycle, array, index) ?: return FloatArray(cells) { Float.NaN }
+        val fetched = fetchChunk(store.cycle, array, index) ?: return Frame(FloatArray(cells) { Float.NaN }, null)
         return try {
-            core.decodeFloats(raw, array.dtype, array.compressed, cells)
+            Frame(core.decodeFloats(fetched.body, array.dtype, array.compressed, cells), fetched.lastModified)
         } catch (e: Exception) {
             throw RefsException("could not decode ${product.id}: ${e.message}")
         }
@@ -93,7 +102,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
             chunks.map { i ->
                 async {
                     gate.withPermit {
-                        val raw = fetchChunk(store.cycle, array, listOf(i)) ?: throw RefsException("no time chunk $name/$i")
+                        val raw = fetchChunk(store.cycle, array, listOf(i))?.body ?: throw RefsException("no time chunk $name/$i")
                         val bytes = if (array.compressed) core.inflate(raw) else raw
                         (0 until minOf(chunk, count - i * chunk)).map { k -> readTime(bytes, k * 8, array.dtype) }
                     }
@@ -109,7 +118,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
         val array = store.arrays["member"] ?: return emptyList()
         val key = store.cycle.storeUrl
         memberNames[key]?.let { return it }
-        val raw = fetchChunk(store.cycle, array, listOf(0)) ?: return emptyList()
+        val raw = fetchChunk(store.cycle, array, listOf(0))?.body ?: return emptyList()
         val bytes = if (array.compressed) core.inflate(raw) else raw
         val chars = array.dtype.drop(2).toIntOrNull() ?: return emptyList()
         val names = (0 until array.shape[0]).map { m ->
@@ -128,12 +137,14 @@ class RefsRepository(private val http: Http, private val core: Core) {
     }
 
     /** Chunk bytes, or null for a chunk the server never wrote (404 / 403: treated as the fill value). */
-    private suspend fun fetchChunk(cycle: Cycle, array: ArrayInfo, index: List<Int>): ByteArray? {
+    private class Fetched(val body: ByteArray, val lastModified: Long?)
+
+    private suspend fun fetchChunk(cycle: Cycle, array: ArrayInfo, index: List<Int>): Fetched? {
         val url = "${cycle.storeUrl(array.kind)}/${array.path}/${chunkKey(index)}"
         var result = http.get(url)
         if (result.status != 200 && result.status != 404 && result.status != 403) result = http.get(url)   // one retry
         return when (result.status) {
-            200 -> if (result.body.isEmpty()) throw RefsException("empty chunk ${array.name}/${chunkKey(index)}") else result.body
+            200 -> if (result.body.isEmpty()) throw RefsException("empty chunk ${array.name}/${chunkKey(index)}") else Fetched(result.body, result.lastModified)
             404, 403 -> null
             else -> throw RefsException("chunk ${array.name}/${chunkKey(index)} could not be downloaded (HTTP ${result.status})")
         }

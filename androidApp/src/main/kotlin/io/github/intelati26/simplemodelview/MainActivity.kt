@@ -85,6 +85,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.FilterChip
 import simplemodelview.Place
 import simplemodelview.fixed
+import simplemodelview.formatAge
+import simplemodelview.formatClock
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
 import simplemodelview.visibleFractions
@@ -172,6 +174,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                 SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
                 TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
             }
+            TimesLine(s.fileTime, s.runComplete)
           }
         }
         val mapArea: @Composable (Modifier) -> Unit = { modifier ->
@@ -643,5 +646,21 @@ private fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = { onSave(email.trim()) }, enabled = isValidEmail(email)) { Text("Save") } },
         dismissButton = { TextButton(onClick = onNotNow) { Text("Not now") } },
+    )
+}
+
+/** The UTC clock, always visible, next to when the shown frame's file was uploaded and when the run finished, for comparison. */
+@Composable
+private fun TimesLine(fileTime: Long?, runComplete: Long?) {
+    var now by remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis() / 1000; kotlinx.coroutines.delay(10_000) } }
+    Text(
+        buildString {
+            append("Now ").append(formatClock(now))
+            if (fileTime != null) append(" \u00B7 File ").append(formatClock(fileTime, now)).append(" (").append(formatAge(now - fileTime)).append(" ago)")
+            if (runComplete != null) append(" \u00B7 Done ").append(formatClock(runComplete, now))
+        },
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, bottom = 3.dp),
+        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
 }

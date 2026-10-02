@@ -79,6 +79,8 @@ data class UiState(
     val newerCycle: Cycle? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val fileTime: Long? = null,                  // when the shown frame's file was uploaded (server Last-Modified, epoch s)
+    val runComplete: Long? = null,               // when the run's metadata was last written: the run is complete about then
     val contactPrompt: Boolean = false,          // the "please enter your email" dialog is showing
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
 ) {
@@ -223,7 +225,9 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return
         update { it.copy(busy = true, error = null) }
-        values = repo.readFrame(s, product, st.timeIndex, st.member)
+        val frame = repo.readFrameTimed(s, product, st.timeIndex, st.member)
+        values = frame.values
+        update { it.copy(fileTime = frame.fileTime, runComplete = s.metadataTime) }
         rerender()
     }
 

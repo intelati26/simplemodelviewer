@@ -33,3 +33,33 @@ fun formatUtc(epochSeconds: Long): String {
 
 private fun floorDiv(a: Long, b: Long): Long { val q = a / b; return if ((a % b != 0L) && ((a < 0) != (b < 0))) q - 1 else q }
 private fun floorMod(a: Long, b: Long): Long = a - floorDiv(a, b) * b
+
+private fun two(n: Int) = n.toString().padStart(2, '0')
+
+/** "19:56Z" for an epoch second count (UTC). When [now] is given and the date differs from today's, the date is added: "10-01 19:56Z". */
+fun formatClock(epochSeconds: Long, now: Long? = null): String {
+    val secs = floorMod(epochSeconds, 86400L)
+    val clock = "${two((secs / 3600).toInt())}:${two((secs % 3600 / 60).toInt())}Z"
+    if (now == null || floorDiv(epochSeconds, 86400L) == floorDiv(now, 86400L)) return clock
+    val z = floorDiv(epochSeconds, 86400L) + 719468            // civil date from days (Howard Hinnant)
+    val era = floorDiv(z, 146097L)
+    val doe = z - era * 146097
+    val yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    val mp = (5 * doy + 2) / 153
+    val day = (doy - (153 * mp + 2) / 5 + 1).toInt()
+    val month = (if (mp < 10) mp + 3 else mp - 9).toInt()
+    return "${two(month)}-${two(day)} $clock"
+}
+
+/** "4 h 04 min", "12 min" or "<1 min" for a span in seconds (never negative). */
+fun formatAge(seconds: Long): String {
+    val s = maxOf(seconds, 0L)
+    val h = s / 3600
+    val m = s % 3600 / 60
+    return when {
+        h > 0 -> "$h h ${two(m.toInt())} min"
+        m > 0 -> "$m min"
+        else -> "<1 min"
+    }
+}

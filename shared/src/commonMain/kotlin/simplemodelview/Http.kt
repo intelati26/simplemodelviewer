@@ -1,7 +1,7 @@
 package simplemodelview
 
-/** HTTP status and body. [status] 0 means no response (network error). */
-class HttpResult(val status: Int, val body: ByteArray)
+/** HTTP status, body and the server's Last-Modified time (when the file was uploaded). [status] 0 means no response (network error). */
+class HttpResult(val status: Int, val body: ByteArray, val lastModified: Long? = null)   // lastModified: epoch seconds
 
 /** The platform's HTTP client (OkHttp on Android). Implementations should cache and send a descriptive User-Agent. */
 interface Http {
