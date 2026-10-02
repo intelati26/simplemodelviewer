@@ -77,11 +77,11 @@ class MrmsTest {
     }
 
     @Test fun listAcrossMidnightNamesThePreviousDay() = runTest {
-        var url = ""
-        val http = object : Http { override suspend fun get(url0: String): HttpResult { if (url.isEmpty()) url = url0; return HttpResult(200, listing().encodeToByteArray()) } }
+        var first = ""
+        val http = object : Http { override suspend fun get(url: String): HttpResult { if (first.isEmpty()) first = url; return HttpResult(200, listing().encodeToByteArray()) } }
         val now = epochOf(2026, 10, 2, 0, 20, 0)
         MrmsRepository(http, StubCore).listFiles(cref, now)
-        assertTrue("start-after=CONUS/${cref.id}/20261001/MRMS_${cref.id}_20261001-23" in url, url)
+        assertTrue("start-after=CONUS/${cref.id}/20261001/MRMS_${cref.id}_20261001-23" in first, first)
     }
 
     @Test fun emptyListingTriesAWiderWindowThenGivesUp() = runTest {

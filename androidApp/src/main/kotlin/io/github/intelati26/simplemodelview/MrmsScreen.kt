@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -66,7 +65,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
     val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(mapBackground)) {
+    Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val bitmap = s.map
