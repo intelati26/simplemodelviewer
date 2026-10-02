@@ -75,6 +75,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
+    var overlayDialog by remember { mutableStateOf(false) }
     var overlayPicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
@@ -147,10 +148,10 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 }
             }
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
-            OverlayRow(s.overlay, s.overlayStyle, s.overlayIndex, onPick = { overlayPicker = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
-            s.overlayStyle?.let { st -> if (s.overlay != null) {
-                Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())
-                s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            OverlayRow(s.overlays, s.overlayStyles, onPick = { overlayDialog = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
+            s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
+                Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
+                s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             } }
             s.style?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
@@ -229,11 +230,15 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
             },
         )
     }
+    if (overlayDialog) OverlayDialog(
+        current = s.overlayName, onNone = { overlayDialog = false; vm.pickOverlay(null) },
+        onNest = { overlayDialog = false; vm.pickOverlayPreset(simplemodelview.OverlayPresets.LIGHTNING_NEST) },
+        onProduct = { overlayDialog = false; overlayPicker = true }, onDismiss = { overlayDialog = false },
+    )
     if (overlayPicker) ProductPicker(
-        products, products.firstOrNull { it.id == s.overlay?.id }, s.favorites, onToggle = vm::toggleFavorite,
+        products, products.firstOrNull { it.id == s.overlays.singleOrNull()?.product?.id }, s.favorites, onToggle = vm::toggleFavorite,
         onPick = { picked -> overlayPicker = false; MrmsCatalog.byId(picked.id)?.let(vm::pickOverlay) }, onDismiss = { overlayPicker = false },
         groups = MrmsCatalog.groups,
-        topItem = { TextButton(onClick = { overlayPicker = false; vm.pickOverlay(null) }, Modifier.padding(horizontal = 8.dp)) { Text(if (s.overlay == null) "No overlay (selected)" else "No overlay") } },
     )
     if (about) AlertDialog(
         onDismissRequest = { about = false },
@@ -263,15 +268,17 @@ private fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
     }
 }
 
-/** "Overlay: none" or the overlay product with its minimum value and a clear button: a second field (lightning, rotation, ...) drawn over the first. */
+/** "Overlay: none", or its name with (for a single product) its minimum value, and a clear button. Overlays: other fields (lightning, rotation, ...) drawn over the first. */
 @Composable
-private fun OverlayRow(overlay: MrmsProduct?, style: simplemodelview.Style?, index: Int, onPick: () -> Unit, onThreshold: (Int) -> Unit, onClear: () -> Unit) {
+private fun OverlayRow(layers: List<simplemodelview.OverlayLayer>, styles: List<simplemodelview.Style>, onPick: () -> Unit, onThreshold: (Int) -> Unit, onClear: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onPick, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.weight(1f, fill = false)) {
-            Text(if (overlay == null) "Overlay: none" else "Overlay: ${overlay.displayTitle}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (layers.isEmpty()) "Overlay: none" else "Overlay: ${simplemodelview.overlayName(layers)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (overlay != null && style != null) {
+        val style = styles.singleOrNull()
+        if (layers.size == 1 && style != null) {
             val choices = overlayThresholdChoices(style)
+            val index = layers[0].thresholdIndex
             if (choices.isNotEmpty()) {
                 var open by remember { mutableStateOf(false) }
                 Box {
@@ -281,9 +288,33 @@ private fun OverlayRow(overlay: MrmsProduct?, style: simplemodelview.Style?, ind
                     }
                 }
             }
-            TextButton(onClick = onClear, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u2715") }
         }
+        if (layers.isNotEmpty()) TextButton(onClick = onClear, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u2715") }
     }
+}
+
+/** What to draw over the map: nothing, the lightning nest (strikes by recency), or one product of your choice. */
+@Composable
+private fun OverlayDialog(current: String, onNone: () -> Unit, onNest: () -> Unit, onProduct: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Overlay") },
+        text = {
+            Column {
+                @Composable fun choice(title: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
+                    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp)) {
+                        Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 16.sp)
+                        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    HorizontalDivider()
+                }
+                choice("No overlay", null, current.isEmpty(), onNone)
+                choice("Lightning nest", "Strikes by recency: the last minute solid, the last 5 minutes at 50 %, the last 30 minutes as a 20 % shadow", current == "Lightning nest", onNest)
+                choice("Choose a product\u2026", "Rotation tracks (with a minimum value), strikes, hail size, any other field", current.isNotEmpty() && current != "Lightning nest", onProduct)
+            }
+        },
+    )
 }
 
 /** The height of a 3D mosaic field: - / + buttons and a slider over its levels (loading starts when the slider is let go) with the height in km and kft. */

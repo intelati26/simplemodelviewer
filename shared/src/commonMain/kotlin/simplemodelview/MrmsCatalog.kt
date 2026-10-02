@@ -63,7 +63,7 @@ object MrmsCatalog {
         listOf(0x9be39b, 0x4fc34f, 0x2e9e2e, 0xffe14a, 0xffb02e, 0xff7a1a, 0xff3b1a, 0xd1131a, 0xa00a3a, 0xc000c0, 0x7a1fa8, 0x4b1480), "in", 2, factor = 1.0 / 25.4)
     private val shi = banded(listOf(10, 25, 50, 75, 100, 150, 200, 300, 400, 500, 650, 800), ramp(12, 0x9be39b, 0xffe14a, 0xd1131a, 0x4b1480), "index", 0)
     private val probability = banded(listOf(10, 20, 30, 40, 50, 60, 70, 80, 90), Palettes.probability.map { it.rgb }, "%", 0)
-    private val lightningDensity = banded(listOf(0.01, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6), ramp(8, 0xfff3a0, 0xffa500, 0xd02020, 0x7a1fa8), "fl/km2/min", 2)
+    private val lightningDensity = banded(listOf(0.01, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6), ramp(8, 0xff9500, 0xe02020, 0x7a1fa8), "fl/km2/min", 2)
 
     private val ffgRatio = banded(listOf(0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 5, 10), ramp(10, 0x9be39b, 0xffe14a, 0xe03020, 0x7a1fa8), "ratio", 2)
     private val ari = banded(listOf(1, 2, 5, 10, 25, 50, 100, 200, 500, 1000), ramp(10, 0x9be39b, 0xffe14a, 0xe03020, 0x7a1fa8), "years", 0)

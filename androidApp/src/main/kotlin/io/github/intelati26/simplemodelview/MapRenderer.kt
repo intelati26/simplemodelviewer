@@ -14,11 +14,11 @@ import simplemodelview.View
 import simplemodelview.fixed
 
 /** A second field drawn over the data (under the map lines): [bitmap] has one pixel per cell of its own window and is stretched onto [dst], in pixels of the base picture. */
-class Overlay(val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean)
+class Overlay(val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean, val marker: Boolean = false, val markerScale: Float = 1f)
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlay: Overlay? = null): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList()): Bitmap {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
@@ -28,7 +28,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
         canvas.drawBitmap(Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, null)
-        if (overlay != null) {
+        for (overlay in overlays) {
+            if (overlay.marker) { drawMarkers(canvas, overlay, w); continue }
             val paint = Paint().apply { isFilterBitmap = false }       // cells stay crisp
             canvas.drawBitmap(overlay.bitmap, null, overlay.dst, paint)
             if (overlay.bold) for ((dx, dy) in listOf(-1f to 0f, 1f to 0f, 0f to -1f, 0f to 1f)) {   // a pixel of weight for single cells (a strike, a thin track)
@@ -38,6 +39,30 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         lines.draw(canvas, view, dark)
         return bitmap
+    }
+
+    /** One dot per non-empty cell (strikes): a cell is far too small to see at map scale. The dot keeps the cell's color and opacity and has a thin dark rim. */
+    private fun drawMarkers(canvas: Canvas, overlay: Overlay, pictureWidth: Int) {
+        val bw = overlay.bitmap.width
+        val bh = overlay.bitmap.height
+        val pixels = IntArray(bw * bh)
+        overlay.bitmap.getPixels(pixels, 0, bw, 0, 0, bw, bh)
+        val radius = maxOf(3f, pictureWidth / 450f) * overlay.markerScale
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = maxOf(1f, radius / 4f); color = Color.BLACK }
+        val cw = overlay.dst.width() / bw
+        val ch = overlay.dst.height() / bh
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            val alpha = c ushr 24
+            if (alpha == 0) continue
+            val x = overlay.dst.left + (i % bw + 0.5f) * cw
+            val y = overlay.dst.top + (i / bw + 0.5f) * ch
+            fill.color = c
+            rim.alpha = maxOf(alpha * 2 / 5, 70)         // (even a 20 % shadow gets a visible rim)
+            canvas.drawCircle(x, y, radius, fill)
+            canvas.drawCircle(x, y, radius, rim)
+        }
     }
 
     /** The picture to share: a header (product / run / valid time), the map and a color key. */

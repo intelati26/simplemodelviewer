@@ -266,4 +266,46 @@ class MrmsTest {
         assertTrue(files.isNotEmpty() && files.all { it.validTime >= since - 60 && it.validTime <= 1790946300L })
         assertTrue("prefix=CONUS/${product.id}/" in url && "start-after=CONUS/${product.id}/" in url, url)
     }
+
+    @Test fun theLightningNestStacksStrikesByRecency() {
+        val nest = OverlayPresets.lightningNest
+        assertEquals(listOf(0.2, 0.5, 1.0), nest.map { it.opacity })                    // 30 min faint, 5 min half, 1 min solid
+        assertTrue(nest.map { it.opacity } == nest.map { it.opacity }.sorted())         // drawn in order: the freshest strikes end up on top
+        assertEquals(listOf(30, 5, 1), nest.map { Regex("""(\d+)min""").find(it.id)!!.groupValues[1].toInt() })
+        for (spec in nest) assertTrue(MrmsCatalog.byId(spec.id) != null, spec.id)       // every layer is a real catalog product
+        val layers = nest.map { OverlayLayer(MrmsCatalog.byId(it.id)!!, 0, it.opacity) }
+        assertEquals("Lightning nest", overlayName(layers))
+        assertEquals("Rotation Track, 1 h (0-2 km)", overlayName(listOf(OverlayLayer(MrmsCatalog.byId("RotationTrack60min_00.50")!!, 3))))
+        assertEquals("", overlayName(emptyList()))
+        assertEquals(nest, OverlayPresets.specs(OverlayPresets.LIGHTNING_NEST))
+        assertNull(OverlayPresets.specs("nope"))
+    }
+
+    @Test fun overlayStacksAreSavedAndReadBack() {
+        val specs = listOf(OverlaySpec("MergedZdr", 12, 2, 0.5), OverlaySpec("RotationTrack60min_00.50", 0, -1, 1.0))
+        assertEquals(specs, decodeOverlays(encodeOverlays(specs)))
+        assertEquals(OverlayPresets.lightningNest, decodeOverlays(encodeOverlays(OverlayPresets.lightningNest)))
+        assertEquals(emptyList(), decodeOverlays(""))
+        assertEquals(emptyList(), decodeOverlays(null))
+        assertEquals(emptyList(), decodeOverlays("garbage;a|b"))                               // damaged text is ignored, never a crash
+        assertEquals(0.05, decodeOverlays("x|0|0|0.0").single().opacity, 0.0)                  // an invisible layer is raised to a visible minimum
+        assertEquals(6, decodeOverlays((1..20).joinToString(";") { "p$it|0|0|1.0" }).size)     // capped
+    }
+
+    @Test fun strikeOverlaysAreDotsAndAreaFieldsAreNot() {
+        assertTrue(overlayIsMarker(MrmsCatalog.byId("NLDN_CG_001min_AvgDensity_00.00")!!))
+        assertTrue(overlayIsMarker(MrmsCatalog.byId("NLDN_CG_030min_AvgDensity_00.00")!!))
+        assertTrue(!overlayIsMarker(MrmsCatalog.byId("LightningProbabilityNext30minGrid_scale_1")!!))   // a probability area, drawn as cells
+        assertTrue(!overlayIsMarker(MrmsCatalog.byId("RotationTrack60min_00.50")!!))
+        // the strike scale starts on a strong color (a pale one disappears on a light map)
+        assertEquals(0xff9500, MrmsCatalog.byId("NLDN_CG_005min_AvgDensity_00.00")!!.style.stops.first().rgb)
+    }
+
+    @Test fun nestedStrikeDotsGrowWithTheWindow() {
+        fun scale(id: String) = overlayMarkerScale(MrmsCatalog.byId(id)!!)
+        assertEquals(1.0f, scale("NLDN_CG_001min_AvgDensity_00.00"), 1e-6f)
+        assertTrue(scale("NLDN_CG_001min_AvgDensity_00.00") < scale("NLDN_CG_005min_AvgDensity_00.00"))
+        assertTrue(scale("NLDN_CG_005min_AvgDensity_00.00") < scale("NLDN_CG_030min_AvgDensity_00.00"))
+        assertEquals(1.0f, overlayMarkerScale(MrmsCatalog.default), 0f)                        // other products: no growth
+    }
 }
