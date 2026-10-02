@@ -20,6 +20,9 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 ## MRMS page
 The "MRMS" button in the header opens a second page over the same renderers: 136 products in nine buckets (reflectivity, echo tops and VIL, rotation, hail, lightning, rainfall, flash flooding, quality, model fields; see `docs/mrms-products.md`), from the NOAA open data bucket (`noaa-mrms-pds`). The files are GRIB2 with PNG packing; the core decodes them itself (no GDAL), cutting the sector's window out a row at a time at 1 km (rotation: 500 m) or a coarser step for wide areas. The page follows new scans by itself, has selectable units (in / mm, F / C, kft / km), a categorical precipitation-type map, and has what the SPC page has: product buckets with favourites, meso sectors and a globe, tap read-out, saved places, a loop, share / export of a picture or loop video (a screen-area export is decoded afresh at the finest step that fits, so it keeps 1 km detail), settings (shared with the SPC page, including export / import) and the optional contact email. The decoder is checked against GDAL (`scripts/make_mrms_fixtures.py`, `core/tests`). How the NSSL viewer and the data are laid out: `docs/mrms-site-outline.md`.
 
+## Play and loop length
+Play starts at once on the frames that have already arrived and widens the cycle as the rest download (1-5, then 1-10, then 1-20, ...), going back to frame 1 at the end. "Loop: N" next to Play chooses how many frames it covers: the first N of a model run, or the newest N radar scans (6 / 12 / 24 / 36 or all); only those frames are downloaded, and a loop video export covers the same frames. The choice is remembered per page.
+
 ## Build and test the core
 ```
 cmake -S core -B build && cmake --build build && ctest --test-dir build --output-on-failure

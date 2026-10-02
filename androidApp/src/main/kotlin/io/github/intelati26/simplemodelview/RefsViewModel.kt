@@ -24,6 +24,8 @@ import simplemodelview.Grid
 import simplemodelview.globeInverse
 import simplemodelview.BackupPlace
 import simplemodelview.Place
+import simplemodelview.loopWindow
+import simplemodelview.nextPlayable
 import simplemodelview.VideoSize
 import simplemodelview.SettingsBackup
 import simplemodelview.isValidEmail
@@ -86,6 +88,7 @@ data class UiState(
     val runComplete: Long? = null,               // when the run's metadata was last written: the run is complete about then
     val contactPrompt: Boolean = false,          // the "please enter your email" dialog is showing
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
+    val loopLength: Int = 0,                     // how many frames Play and a loop video cover (the first N); 0 = all
 ) {
     val validLabel: String
         get() = times.getOrNull(timeIndex)?.let { formatUtc(it) } ?: ""
@@ -117,6 +120,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
+            loopLength = prefs.getInt("loop_frames", 0),
         )
     )
     val state: kotlinx.coroutines.flow.StateFlow<UiState> = _state
@@ -474,7 +478,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val v = resolveView(area)
         val pictureW = if (area == ShareArea.Globe && globeW > 0) 1500 else v.pixelWidth
         val pictureH = if (area == ShareArea.Globe && globeW > 0) 1500 * globeH / globeW else v.pixelHeight
-        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, _state.value.times.size)   // + header and legend
+        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindow(_state.value.times.size, _state.value.loopLength).count())   // + header and legend
     }
 
     var videoSize: VideoSize
@@ -486,6 +490,15 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissNotice() = update { it.copy(notice = null) }
 
     fun dismissNewerCycle() = update { it.copy(newerCycle = null) }
+
+    /** Chooses how many frames Play (and a loop video) covers: the first [frames], or 0 for the whole run. Restarts a running loop. */
+    fun setLoopLength(frames: Int) {
+        prefs.edit().putInt("loop_frames", frames).apply()
+        val wasPlaying = _state.value.playing
+        if (wasPlaying) stopPlaying()
+        update { it.copy(loopLength = frames) }
+        if (wasPlaying) startPlaying()
+    }
 
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
@@ -506,21 +519,40 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
+            val window = loopWindow(st.times.size, st.loopLength)
+            val count = window.count()
+            val ready = BooleanArray(st.times.size)
+            var finished = false
             try {
-                // download the whole loop first (politely: a few at a time); the HTTP cache then serves each pass
-                val gate = Semaphore(3)
-                var done = 0
-                coroutineScope {
-                    st.times.indices.map { t ->
-                        async { gate.withPermit { repo.prefetchFrame(s, product, t, st.member) }; done += 1; update { it.copy(prefetch = done / st.times.size.toFloat()) } }
-                    }.awaitAll()
+                // download the loop in order, a few frames at a time (politely), while the slideshow is already running on the frames that
+                // have arrived: 1-5, then 1-10, then 1-20 as the rest load. The HTTP cache then serves each pass.
+                val loader = launch {
+                    val gate = Semaphore(3)
+                    var done = 0
+                    coroutineScope {
+                        for (t in window) launch {
+                            gate.withPermit {
+                                try { repo.prefetchFrame(s, product, t, st.member); ready[t] = true } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                            }
+                            done += 1
+                            update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
+                        }
+                    }
+                    finished = true
                 }
-                update { it.copy(prefetch = null) }
+                if (_state.value.timeIndex in window) ready[_state.value.timeIndex] = true      // the frame on screen is loaded
                 while (true) {
-                    val next = (_state.value.timeIndex + 1) % _state.value.times.size
+                    val at = _state.value.timeIndex
+                    val next = nextPlayable(at, ready)
+                    if (next == null || next == at) {
+                        if (finished && ready.none { it }) throw RefsException("The loop's frames could not be downloaded.")
+                        delay(150)
+                        continue
+                    }
                     update { it.copy(timeIndex = next) }
                     loadFrame()
-                    delay(if (next == _state.value.times.size - 1) 1200 else 250)
+                    // a short rest at the end of the cycle (longer once everything has loaded), then back to frame 1
+                    delay(if (next < at) (if (finished) 1200L else 500L) else 250L)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -569,7 +601,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return@withContext null
         val cycle = st.cycle ?: return@withContext null
-        val n = st.times.size
+        val window = loopWindow(st.times.size, st.loopLength)
+        val n = window.count()
         if (n < 2) return@withContext null
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
@@ -577,7 +610,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         var exporter: LoopExporter? = null
         val v = resolveView(area)
         try {
-            for (t in 0 until n) {
+            for ((k, t) in window.withIndex()) {
                 val data = repo.readFrame(s, product, t, st.member)
                 val style = withAutoStops(product.style, data)
                 val map = areaBitmap(area, product, style, data, st, v)
@@ -587,8 +620,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
                 val (sw, sh) = size.scaled(picture.width, picture.height)
                 if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
                 if (exporter == null) exporter = LoopExporter(file, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
-                exporter.add(picture, last = t == n - 1)
-                onProgress(t + 1, n)
+                exporter.add(picture, last = k == n - 1)
+                onProgress(k + 1, n)
             }
             exporter?.finish()
             file

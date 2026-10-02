@@ -225,6 +225,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
+                    LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
                     Slider(
                         value = s.timeIndex.toFloat(), onValueChange = { vm.pickTime(it.toInt()) },
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),

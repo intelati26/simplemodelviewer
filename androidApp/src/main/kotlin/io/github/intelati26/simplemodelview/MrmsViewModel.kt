@@ -37,6 +37,8 @@ import simplemodelview.View
 import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
 import simplemodelview.formatClock
+import simplemodelview.loopWindow
+import simplemodelview.nextPlayable
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
 import simplemodelview.mrmsStep
@@ -71,6 +73,7 @@ data class MrmsState(
     val contactPrompt: Boolean = false,
     val units: Units = Units(),
     val live: Boolean = false,                   // the page is on screen and checks for newer scans by itself
+    val loopLength: Int = 0,                     // how many of the newest scans Play and a loop video cover; 0 = all
 ) {
     val file: MrmsFile? get() = files.getOrNull(index)
 }
@@ -105,6 +108,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             settings = readSettings(),
             units = readUnits(),
+            loopLength = prefs.getInt("mrms_loop_frames", 0),
         )
     )
     val state: StateFlow<MrmsState> = _state
@@ -491,6 +495,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissContactPrompt() = update { it.copy(contactPrompt = false) }
 
     // ---- loop ----
+    /** Chooses how many of the newest scans Play (and a loop video) covers, or 0 for all of them. Restarts a running loop. */
+    fun setLoopLength(frames: Int) {
+        prefs.edit().putInt("mrms_loop_frames", frames).apply()
+        val wasPlaying = _state.value.playing
+        if (wasPlaying) stopPlaying()
+        update { it.copy(loopLength = frames) }
+        if (wasPlaying) startPlaying()
+    }
+
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
     private fun stopPlaying() {
@@ -508,21 +521,39 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
+            val window = loopWindow(st.files.size, st.loopLength, fromEnd = true)
+            val count = window.count()
+            val ready = BooleanArray(st.files.size)
+            var finished = false
             try {
-                // download the whole loop first (politely: a few at a time); the HTTP cache then serves each pass
-                val gate = Semaphore(3)
-                var done = 0
-                coroutineScope {
-                    st.files.map { f ->
-                        async { gate.withPermit { repo.prefetch(f) }; done += 1; update { it.copy(prefetch = done / st.files.size.toFloat()) } }
-                    }.awaitAll()
+                // download in order, a few at a time (politely), while the slideshow already runs on the frames that have arrived:
+                // 1-5, then 1-10, then 1-20 as the rest load; the HTTP cache then serves each pass
+                launch {
+                    val gate = Semaphore(3)
+                    var done = 0
+                    coroutineScope {
+                        for (i in window) launch {
+                            gate.withPermit {
+                                try { repo.prefetch(st.files[i]); ready[i] = true } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                            }
+                            done += 1
+                            update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
+                        }
+                    }
+                    finished = true
                 }
-                update { it.copy(prefetch = null) }
+                if (_state.value.index in window) ready[_state.value.index] = true          // the frame on screen is loaded
                 while (true) {
-                    val next = (_state.value.index + 1) % _state.value.files.size
+                    val at = _state.value.index
+                    val next = nextPlayable(at, ready)
+                    if (next == null || next == at) {
+                        if (finished && ready.none { it }) throw IllegalStateException("The loop's frames could not be downloaded.")
+                        delay(150)
+                        continue
+                    }
                     update { it.copy(index = next) }
                     showCurrent()
-                    delay(if (next == _state.value.files.size - 1) 1200 else 150)
+                    delay(if (next < at) (if (finished) 1200L else 500L) else 150L)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -617,20 +648,22 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** Renders every file of the loop into an MP4 and returns it. [onProgress] gets (done, total). Files come from the HTTP cache once played. */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val st = _state.value
-        val n = st.files.size
+        val window = loopWindow(st.files.size, st.loopLength, fromEnd = true)
+        val n = window.count()
         if (n < 2) return@withContext null
         val dir = sharedDir()
         val out = File(dir, fileName(st.product, st.files.last(), "mp4"))
         var exporter: LoopExporter? = null
         try {
-            for ((i, file) in st.files.withIndex()) {
+            for ((k, i) in window.withIndex()) {
+                val file = st.files[i]
                 val (map, style) = areaBitmap(area, st.product, file)
                 var picture = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
                 val (sw, sh) = size.scaled(picture.width, picture.height)
                 if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
                 if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
-                exporter.add(picture, last = i == n - 1)
-                onProgress(i + 1, n)
+                exporter.add(picture, last = k == n - 1)
+                onProgress(k + 1, n)
             }
             exporter?.finish()
             out
@@ -651,6 +684,6 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 g.columns * s to g.rows * s
             }
         }
-        return VideoSize.estimateMegabytes(size, w, h + w / 6, _state.value.files.size)   // + header and legend
+        return VideoSize.estimateMegabytes(size, w, h + w / 6, loopWindow(_state.value.files.size, _state.value.loopLength, fromEnd = true).count())   // + header and legend
     }
 }
