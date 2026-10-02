@@ -63,3 +63,6 @@ fun formatAge(seconds: Long): String {
         else -> "<1 min"
     }
 }
+
+/** "+1 h 56 min": how long after its cycle (init) time something appeared. A file stamped before the cycle time shows as "+<1 min". */
+fun formatDelay(seconds: Long): String = "+" + formatAge(seconds)

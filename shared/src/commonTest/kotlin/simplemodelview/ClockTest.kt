@@ -23,6 +23,12 @@ class ClockTest {
         assertEquals("<1 min", formatAge(-50))
     }
 
+    @Test fun delayText() {
+        assertEquals("+1 h 56 min", formatDelay(1 * 3600 + 56 * 60))
+        assertEquals("+3 h 51 min", formatDelay(3 * 3600 + 51 * 60 + 33))
+        assertEquals("+<1 min", formatDelay(-5))
+    }
+
     @Test fun frameCarriesTheFileTimeAndMetadataTimeIsKept() = runTest {
         val meta = """{"metadata":{"cref_max/.zarray":{"shape":[3,1059,1799],"chunks":[1,1059,1799],"dtype":"<f2","fill_value":"NaN","compressor":{"id":"blosc"}},
           "cref_max/.zattrs":{"_ARRAY_DIMENSIONS":["valid_time","y","x"],"units":"dBz"}}}"""

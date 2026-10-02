@@ -86,7 +86,9 @@ import androidx.compose.material3.FilterChip
 import simplemodelview.Place
 import simplemodelview.fixed
 import simplemodelview.formatAge
+import simplemodelview.epochSeconds
 import simplemodelview.formatClock
+import simplemodelview.formatDelay
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
 import simplemodelview.visibleFractions
@@ -174,7 +176,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                 SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
                 TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
             }
-            TimesLine(s.fileTime, s.runComplete)
+            TimesLine(s.fileTime, s.runComplete, s.cycle)
           }
         }
         val mapArea: @Composable (Modifier) -> Unit = { modifier ->
@@ -649,18 +651,33 @@ private fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit) {
     )
 }
 
-/** The UTC clock, always visible, next to when the shown frame's file was uploaded and when the run finished, for comparison. */
+/**
+ * The UTC clock, always visible, next to when the shown frame's file was uploaded and when the run finished, for comparison; and
+ * how long after the run's cycle time (init) each of those was, for any run.
+ */
 @Composable
-private fun TimesLine(fileTime: Long?, runComplete: Long?) {
+private fun TimesLine(fileTime: Long?, runComplete: Long?, cycle: Cycle?) {
     var now by remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis() / 1000; kotlinx.coroutines.delay(10_000) } }
+    val style = MaterialTheme.typography.labelSmall
+    val pad = Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, bottom = 2.dp)
     Text(
         buildString {
             append("Now ").append(formatClock(now))
             if (fileTime != null) append(" \u00B7 File ").append(formatClock(fileTime, now)).append(" (").append(formatAge(now - fileTime)).append(" ago)")
             if (runComplete != null) append(" \u00B7 Done ").append(formatClock(runComplete, now))
         },
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, bottom = 3.dp),
-        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        pad, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
+    if (cycle != null && (fileTime != null || runComplete != null)) {
+        val init = cycle.epochSeconds
+        Text(
+            buildString {
+                append("After the ").append(cycle.hour.toString().padStart(2, '0')).append("Z run:")
+                if (fileTime != null) append(" this file ").append(formatDelay(fileTime - init))
+                if (runComplete != null) append(" \u00B7 run done ").append(formatDelay(runComplete - init))
+            },
+            pad, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
