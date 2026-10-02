@@ -77,6 +77,10 @@ wait_for_picture mrms-rainfall 120 || { echo "FAIL: the MRMS rainfall map never 
 emu_tap_text "CONUS ▾"; sleep 2; emu_tap_text "South Central"
 wait_for_picture mrms-meso 120 || { echo "FAIL: the MRMS meso-sector map never appeared"; fail=1; }
 tap 50 48; sleep 2; shot mrms-readout
+emu_tap_text "Composite Reflectivity"; sleep 3; shot mrms-product-picker; adb shell input keyevent 4; sleep 2
+emu_tap_text "Share"; sleep 3; shot mrms-share-dialog; adb shell input keyevent 4; sleep 2
+emu_tap_text "South Central ▾"; sleep 2; emu_tap_text "Globe"
+wait_for_picture mrms-globe 120 || { echo "FAIL: the MRMS globe never appeared"; fail=1; }
 
 # only crashes of this app count (the emulator image's own apps, e.g. Gmail, may crash too)
 if adb logcat -d -s AndroidRuntime:E | grep -A2 "FATAL EXCEPTION" | grep -q "Process: $PKG"; then

@@ -123,6 +123,14 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     private inline fun update(f: (UiState) -> UiState) { _state.value = f(_state.value) }
 
+    /** The MRMS page may have changed favourites, places or settings while this page was away. */
+    fun reloadFromPrefs() = update {
+        it.copy(
+            favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()),
+            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
+        )
+    }
+
     init { load(); promptForContact() }
 
     fun load() {

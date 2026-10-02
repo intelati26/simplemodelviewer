@@ -122,10 +122,10 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     // each page's view model is created only when the page is first opened
-                    if (page == "mrms") MrmsScreen(mrmsViewModel, onSpc = { open("spc") })
+                    if (page == "mrms") MrmsScreen(mrmsViewModel, onSpc = { open("spc"); viewModel.reloadFromPrefs() })
                     else {
                         LaunchedEffect(dark) { viewModel.setDark(dark) }
-                        RefsScreen(viewModel, onMrms = { open("mrms") })
+                        RefsScreen(viewModel, onMrms = { open("mrms"); mrmsViewModel.reloadFromPrefs() })
                     }
                 }
             }
@@ -315,25 +315,10 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
     )
 }
 
-/** The globe: drag to turn it, pinch to zoom, tap for a value. The picture is drawn by the core at the screen's pixel size. */
+/** The REFS globe (see [GlobeSurface]). */
 @Composable
 private fun GlobeView(s: UiState, vm: RefsViewModel) {
-    var size by remember { mutableStateOf(IntSize.Zero) }
-    Box(
-        Modifier.fillMaxSize().onSizeChanged { size = it; vm.setGlobeSize(it.width, it.height) }
-            .pointerInput(Unit) { detectTransformGestures { _, pan, zoom, _ -> vm.globeGesture(pan.x, pan.y, zoom) } }
-            .pointerInput(Unit) { detectTapGestures { p -> vm.onGlobeTap(p.x, p.y) } },
-    ) {
-        s.map?.let { Image(it.asImageBitmap(), contentDescription = "SPC REFS globe", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
-        s.tapLatLon?.let { (lat, lon) ->
-            val p = globeForward(s.cam, size.width, size.height, lat, lon)
-            if (p != null) Canvas(Modifier.fillMaxSize()) {
-                val x = p[0].toFloat(); val y = p[1].toFloat(); val r = 10.dp.toPx(); val w = 1.5.dp.toPx()
-                drawLine(Color.Black, Offset(x - r, y), Offset(x + r, y), w * 2.4f); drawLine(Color.Black, Offset(x, y - r), Offset(x, y + r), w * 2.4f)
-                drawLine(Color.White, Offset(x - r, y), Offset(x + r, y), w); drawLine(Color.White, Offset(x, y - r), Offset(x, y + r), w)
-            }
-        }
-    }
+    GlobeSurface(s.map, s.cam, s.tapLatLon, "SPC REFS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
 }
 
 /** The REFS map picture (see [ZoomableMap]). */
@@ -368,7 +353,7 @@ internal fun Legend(style: Style, members: List<String>) {
 }
 
 @Composable
-private fun SectorMenu(current: String, onGlobe: () -> Unit, onPick: (Sector) -> Unit) {
+internal fun SectorMenu(current: String, onGlobe: () -> Unit, onPick: (Sector) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(current) }
@@ -401,14 +386,14 @@ private fun MemberMenu(members: List<String>, current: Int, onPick: (Int) -> Uni
     }
 }
 
-private const val FAVOURITES = "Favourites"
+internal const val FAVOURITES = "Favourites"
 
 /** The product list in collapsible buckets like SPC's own menu (Guidance, Synoptic, Severe, ...), with Favourites first. All start collapsed. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProductPicker(
+internal fun ProductPicker(
     products: List<Product>, current: Product?, favourites: Set<String>,
-    onToggle: (Product) -> Unit, onPick: (Product) -> Unit, onDismiss: () -> Unit,
+    onToggle: (Product) -> Unit, onPick: (Product) -> Unit, onDismiss: () -> Unit, groups: List<String> = Groups.ordered,
 ) {
     var query by remember { mutableStateOf("") }
     var open by remember { mutableStateOf(setOf<String>()) }        // buckets the user has expanded
@@ -417,7 +402,7 @@ private fun ProductPicker(
     val shown = products.filter { p -> words.all { p.title.contains(it, ignoreCase = true) } }
     // while searching, every bucket with a match is open; otherwise only the ones the user opened
     val buckets: List<Pair<String, List<Product>>> =
-        listOf(FAVOURITES to shown.filter { it.id in favourites }) + Groups.ordered.map { g -> g to shown.filter { it.group == g } }
+        listOf(FAVOURITES to shown.filter { it.id in favourites }) + groups.map { g -> g to shown.filter { it.group == g } }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true, label = { Text("Search products") })
         LazyColumn(Modifier.fillMaxWidth()) {
@@ -474,7 +459,7 @@ private fun MoreMenu(onMrms: () -> Unit, onPlaces: () -> Unit, onSettings: () ->
 }
 
 @Composable
-private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit) {
+internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
@@ -498,7 +483,7 @@ private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Plac
 }
 
 @Composable
-private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit, onDismiss: () -> Unit) {
+internal fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
@@ -552,7 +537,7 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onChange:
     }
 }
 
-private fun shareFile(context: android.content.Context, file: java.io.File, mime: String, title: String) {
+internal fun shareFile(context: android.content.Context, file: java.io.File, mime: String, title: String) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val send = Intent(Intent.ACTION_SEND).apply {
         type = mime
@@ -564,9 +549,9 @@ private fun shareFile(context: android.content.Context, file: java.io.File, mime
 
 /** Choose what to export (this screen area, the whole map, or a meso sector) and in what form. */
 @Composable
-private fun ShareDialog(
+internal fun ShareDialog(
     canLoop: Boolean, current: String, globe: Boolean, initialSize: VideoSize, estimate: (ShareArea, VideoSize) -> Double,
-    onDismiss: () -> Unit, onShare: (ShareArea, Boolean, VideoSize) -> Unit,
+    onDismiss: () -> Unit, onShare: (ShareArea, Boolean, VideoSize) -> Unit, disclaimer: String = DISCLAIMER,
 ) {
     var area by remember { mutableStateOf<ShareArea>(if (globe) ShareArea.Globe else ShareArea.Screen) }
     var size by remember { mutableStateOf(initialSize) }
@@ -598,7 +583,7 @@ private fun ShareDialog(
                         }
                     }
                 }
-                Disclaimer(Modifier.padding(top = 8.dp))
+                Disclaimer(Modifier.padding(top = 8.dp), disclaimer)
             }
         },
         confirmButton = {
@@ -619,15 +604,15 @@ private fun AreaRow(text: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-private const val DISCLAIMER = "Data: NOAA/NWS Storm Prediction Center. Experimental guidance, not a warning or decision-support tool."
+internal const val DISCLAIMER = "Data: NOAA/NWS Storm Prediction Center. Experimental guidance, not a warning or decision-support tool."
 
 @Composable
-private fun Disclaimer(modifier: Modifier = Modifier) =
-    Text(DISCLAIMER, modifier, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Disclaimer(modifier: Modifier = Modifier, text: String = DISCLAIMER) =
+    Text(text, modifier, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** Asks for a contact address. Optional, but it comes back at every launch until one is saved; "Not now" closes it. */
 @Composable
-private fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit) {
+internal fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit, provider: String = "the Storm Prediction Center", server: String = "SPC's server") {
     var email by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onNotNow,
@@ -635,8 +620,8 @@ private fun ContactDialog(onSave: (String) -> Unit, onNotNow: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "This app reads the Storm Prediction Center's public data directly. To be a polite client it would like to identify " +
-                        "you to SPC's server: your address would be sent in the User-Agent header of every request, so SPC can contact you if the app " +
+                    "This app reads $provider's public data directly. To be a polite client it would like to identify " +
+                        "you to $server: your address would be sent in the User-Agent header of every request, so they can contact you if the app " +
                         "ever causes them problems. It is not shared with anyone else and is kept only on this device. Optional; you can also " +
                         "set it later in Settings.",
                     style = MaterialTheme.typography.bodyMedium,

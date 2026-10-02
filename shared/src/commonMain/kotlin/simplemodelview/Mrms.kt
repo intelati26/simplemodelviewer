@@ -82,7 +82,7 @@ private fun two(n: Int) = n.toString().padStart(2, '0')
 private fun four(n: Int) = n.toString().padStart(4, '0')
 
 /** Epoch seconds -> (year, month, day, hour, minute, second) in UTC. */
-internal fun civilFromEpoch(epoch: Long): IntArray {
+fun civilFromEpoch(epoch: Long): IntArray {
     val days = floorDiv(epoch, 86400L)
     val secs = floorMod(epoch, 86400L).toInt()
     val z = days + 719468

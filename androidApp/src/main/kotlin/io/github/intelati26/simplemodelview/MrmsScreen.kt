@@ -1,5 +1,7 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -24,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
@@ -36,11 +39,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import kotlinx.coroutines.launch
+import simplemodelview.Grid
+import simplemodelview.Product
+import simplemodelview.placeLabel
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,12 +68,28 @@ import simplemodelview.formatPlus
 @Composable
 internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    var places by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }
+    var savingPlace by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
+    var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
+    }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); onPauseOrDispose { } }
     val dark = isSystemInDarkTheme()
-    androidx.compose.runtime.LaunchedEffect(dark) { vm.setDark(dark) }
+    LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
     val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+    // the catalogue as the picker's product type (it groups, searches and stars them like the SPC page does)
+    val products = remember { MrmsCatalogue.all.map { Product(it.id, it.title, it.group, it.style, false, null, Grid.REFS) } }
 
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
@@ -74,7 +100,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                     Text(s.error!!, color = MaterialTheme.colorScheme.error)
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", onViewport = { _, _, _, _ -> }, onTap = vm::onTap)
+                s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", onViewport = vm::setViewport, onTap = vm::onTap)
                 else -> CircularProgressIndicator()
             }
         }
@@ -86,7 +113,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 ) {
                     AssistChip(onClick = { picker = true }, label = { Text(s.product.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     TextButton(onClick = onSpc, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("SPC REFS") }
-                    MrmsMenu(onAbout = { about = true })
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -100,7 +127,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
-                    MrmsSectorMenu(s.sector.name, vm::pickSector)
+                    SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
+                    TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
                 MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.cellKilometres)
             }
@@ -109,6 +137,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    if (s.tapLatLon != null) TextButton(onClick = { savingPlace = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Save") }
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
@@ -126,7 +155,68 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
         }
     }
 
-    if (picker) MrmsProductPicker(s.product, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
+    if (s.contactPrompt) ContactDialog(
+        onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt,
+        provider = "NOAA", server = "NOAA's servers",
+    )
+    if (picker) ProductPicker(
+        products, products.firstOrNull { it.id == s.product.id }, s.favourites, onToggle = vm::toggleFavourite,
+        onPick = { picked -> picker = false; MrmsCatalogue.byId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
+        groups = MrmsCatalogue.groups,
+    )
+    if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
+        var name by remember { mutableStateOf(placeLabel(lat, lon)) }
+        AlertDialog(
+            onDismissRequest = { savingPlace = false },
+            title = { Text("Save place") },
+            text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
+            confirmButton = { TextButton(onClick = { vm.savePlace(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
+        )
+    }
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace)
+    if (settings) SettingsDialog(
+        s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
+        onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+    ) { settings = false }
+    if (sharing) ShareDialog(
+        canLoop = s.files.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
+        initialSize = vm.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
+        onShare = { area, loop, size ->
+            vm.videoSize = size
+            sharing = false
+            scope.launch {
+                try {
+                    if (!loop) {
+                        val file = vm.buildShareFile(area) ?: return@launch
+                        shareFile(context, file, "image/png", "Share map")
+                    } else {
+                        loopProgress = 0 to s.files.size
+                        val file = vm.buildLoopFile(area, size) { done, total -> loopProgress = done to total }
+                        loopProgress = null
+                        if (file != null) shareFile(context, file, "video/mp4", "Share loop")
+                    }
+                } catch (e: Exception) {
+                    loopProgress = null
+                    vm.reportNotice("Could not make the ${if (loop) "video" else "picture"}: ${e.message}")
+                }
+            }
+        },
+        disclaimer = "Data: NOAA/NSSL MRMS. Experimental viewer, not a warning or decision-support tool.",
+    )
+    loopProgress?.let { (done, total) ->
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Making the loop video") },
+            text = {
+                Column {
+                    Text("Frame $done of $total")
+                    LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+            },
+        )
+    }
     if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
@@ -143,50 +233,16 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
 }
 
 @Composable
-private fun MrmsMenu(onAbout: () -> Unit) {
+private fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
+            DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
         }
     }
-}
-
-@Composable
-private fun MrmsSectorMenu(current: String, onPick: (Sector) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("$current ▾") }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            for (sector in Sector.all) DropdownMenuItem(text = { Text(sector.name) }, onClick = { open = false; onPick(sector) })
-        }
-    }
-}
-
-@Composable
-private fun MrmsProductPicker(current: MrmsProduct, onPick: (MrmsProduct) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        title = { Text("MRMS product") },
-        text = {
-            LazyColumn {
-                for (group in MrmsCatalogue.groups) {
-                    item(key = "g$group") {
-                        Text(group, Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    }
-                    items(MrmsCatalogue.all.filter { it.group == group }, key = { it.id }) { p ->
-                        Text(
-                            p.title, Modifier.fillMaxWidth().clickable { onPick(p) }.padding(vertical = 10.dp),
-                            fontWeight = if (p.id == current.id) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp,
-                        )
-                        HorizontalDivider()
-                    }
-                }
-            }
-        },
-    )
 }
 
 /** "Now 13:04Z · File 13:01Z (3 min ago)" and "Delay: file 13Z+0:46 · 1.1 km cells". */

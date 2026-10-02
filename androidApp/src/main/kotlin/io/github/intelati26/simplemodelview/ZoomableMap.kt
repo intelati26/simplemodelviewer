@@ -25,6 +25,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import simplemodelview.GlobeCamera
+import simplemodelview.globeForward
 import simplemodelview.visibleFractions
 
 /**
@@ -96,6 +98,30 @@ internal fun ZoomableMap(
                     drawLine(Color.White, Offset(x - r, y), Offset(x + r, y), stroke)
                     drawLine(Color.White, Offset(x, y - r), Offset(x, y + r), stroke)
                 }
+            }
+        }
+    }
+}
+
+/** The globe: drag to turn it, pinch to zoom, tap for a value. The picture is drawn by the core at the screen's pixel size. */
+@Composable
+internal fun GlobeSurface(
+    bitmap: android.graphics.Bitmap?, cam: GlobeCamera, tapLatLon: Pair<Double, Double>?, description: String,
+    onSize: (Int, Int) -> Unit, onGesture: (Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
+) {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    Box(
+        Modifier.fillMaxSize().onSizeChanged { size = it; onSize(it.width, it.height) }
+            .pointerInput(Unit) { detectTransformGestures { _, pan, zoom, _ -> onGesture(pan.x, pan.y, zoom) } }
+            .pointerInput(Unit) { detectTapGestures { p -> onTap(p.x, p.y) } },
+    ) {
+        bitmap?.let { Image(it.asImageBitmap(), contentDescription = description, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
+        tapLatLon?.let { (lat, lon) ->
+            val p = globeForward(cam, size.width, size.height, lat, lon)
+            if (p != null) Canvas(Modifier.fillMaxSize()) {
+                val x = p[0].toFloat(); val y = p[1].toFloat(); val r = 10.dp.toPx(); val w = 1.5.dp.toPx()
+                drawLine(Color.Black, Offset(x - r, y), Offset(x + r, y), w * 2.4f); drawLine(Color.Black, Offset(x, y - r), Offset(x, y + r), w * 2.4f)
+                drawLine(Color.White, Offset(x - r, y), Offset(x + r, y), w); drawLine(Color.White, Offset(x, y - r), Offset(x, y + r), w)
             }
         }
     }
