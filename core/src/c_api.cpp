@@ -8,7 +8,9 @@
 #include <vector>
 #include "blosc_decode.h"
 #include "chunk_decode.h"
+#include <cstdlib>
 #include "grids.h"
+#include "mrms_decode.h"
 #include "raster.h"
 
 extern "C" {
@@ -54,6 +56,33 @@ void spc_latlon_to_grid(int grid, double lat, double lon, double * column, doubl
 void spc_grid_to_latlon(int grid, double column, double row, double * lat, double * lon) {
     Grids::get(grid).toLatLon(column, row, *lat, *lon);
 }
+
+int spc_define_latlon_grid(int columns, int rows, double south_lat, double west_lon, double d_lat, double d_lon) {
+    return Grids::defineLatLon(columns, rows, south_lat, west_lon, d_lat, d_lon);
+}
+
+int spc_mrms_decode(const uint8_t * data, size_t size, const spc_mrms_request * request, float ** out, spc_mrms_result * result,
+                    char * error, size_t error_cap) {
+    std::vector<float> values;
+    std::string message;
+    if (!Mrms::decode(data, size, *request, values, *result, message)) {
+        if (error && error_cap > 0) {
+            std::strncpy(error, message.c_str(), error_cap - 1);
+            error[error_cap - 1] = 0;
+        }
+        return -1;
+    }
+    float * copy = static_cast<float *>(std::malloc(values.size() * sizeof(float)));
+    if (copy == nullptr) {
+        if (error && error_cap > 0) std::strncpy(error, "out of memory", error_cap - 1);
+        return -1;
+    }
+    std::memcpy(copy, values.data(), values.size() * sizeof(float));
+    *out = copy;
+    return 0;
+}
+
+void spc_free(void * pointer) { std::free(pointer); }
 
 void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb) {
     Raster::renderGlobe(values, *globe, *style, argb);

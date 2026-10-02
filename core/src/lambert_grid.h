@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <utility>
+#include "grid_base.h"
 
 // A Lambert conformal conic grid with one standard parallel on a sphere of radius 6371229 m (the grids of SPC's REFS data).
 // REFS: 1799 x 1059 points, 3 km, parallel 38.5, central meridian 262.5 E, first (south-west) point 21.138123 N 237.280472 E; the
@@ -16,9 +17,9 @@
 // 12.19 N 226.541 E). The REFSCT stores' latitude / longitude arrays agree with it. The GREFS store's own latitude / longitude arrays do NOT
 // (they follow a different mapping), and its data do not follow them either: correlating GREFS wind probability with REFS storm
 // reflectivity gives ~0.37 on this grid and ~0.08 on the arrays' mapping. Use these parameters, not that store's coordinate arrays.
-struct LambertGrid {
+struct LambertGrid : GridBase {
     LambertGrid(int cols, int rows, double cellMetres, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
-        : columns(cols), rows(rows), cell(cellMetres), lon0Rad(degrees(centralMeridianDeg)) {
+        : GridBase(cols, rows), cell(cellMetres), lon0Rad(degrees(centralMeridianDeg)) {
         const double phi1 = degrees(parallelDeg);
         n = std::sin(phi1);
         f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
@@ -28,19 +29,17 @@ struct LambertGrid {
         y0 = first.second;
     }
 
-    const int columns;
-    const int rows;
     const double cell;   // metres
 
     // fractional grid position (column from the west, row from the south) of a latitude / west-negative longitude
-    void toGrid(double lat, double lon, double& column, double& row) const {
+    void toGrid(double lat, double lon, double& column, double& row) const override {
         const auto xy = project(lat, lon);
         column = (xy.first - x0) / cell;
         row = (xy.second - y0) / cell;
     }
 
     // latitude / longitude (east-positive, -180..180) of a fractional grid position
-    void toLatLon(double column, double row, double& lat, double& lon) const {
+    void toLatLon(double column, double row, double& lat, double& lon) const override {
         const double x = x0 + column * cell;
         const double y = y0 + row * cell;
         const double r = std::hypot(x, rho0 - y);

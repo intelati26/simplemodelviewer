@@ -90,7 +90,7 @@ namespace Raster {
     }
 
     void render(const float * values, const spc_view& view, const spc_style& style, uint32_t * out) {
-        const LambertGrid& gridInfo = Grids::get(view.grid);
+        const GridBase& gridInfo = Grids::get(view.grid);
         const int gw = gridInfo.columns;
         const int gh = gridInfo.rows;
         const int step = std::max(view.step, 1);
@@ -107,7 +107,7 @@ namespace Raster {
     }
 
     void renderGlobe(const float * values, const spc_globe& globe, const spc_style& style, uint32_t * out) {
-        const LambertGrid& grid = Grids::get(globe.grid);
+        const GridBase& grid = Grids::get(globe.grid);
         const Grids::Window win = Grids::window(globe.grid);
         const double pi = 3.14159265358979323846;
         const double lat0 = globe.center_lat * pi / 180.0;

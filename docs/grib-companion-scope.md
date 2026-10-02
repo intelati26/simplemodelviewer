@@ -32,7 +32,8 @@ UI shell.
 1. **GRIB2 decoder in the C++ core** (the main cost)
    - Section parsing (0-7), a bitmap section, gunzip for MRMS (`.grib2.gz`).
    - Grid templates: lat/lon (MRMS, GFS), Lambert conformal (HRRR / RRFS; this is the same grid as REFS), polar stereographic (NAM Alaska).
-   - Packing: simple, complex with spatial differencing, JPEG2000, PNG. Which of these each product really uses has to be confirmed from real files.
+   - Packing: simple, complex with spatial differencing, JPEG2000, PNG. **MRMS uses PNG (template 5.41)**, confirmed from a real file; the NCEP model files still
+     have to be checked.
    - Vendor NCEP's public-domain `g2c` with OpenJPEG (BSD) and zlib rather than eccodes (large). Unit-test against GDAL-produced reference values.
 2. **Generic grids in the core.** Today the core has two compiled-in grids (`SPC_GRID_REFS`, `SPC_GRID_GREFS`). It needs "grid as data" with
    lat/lon and Lambert kinds. This is step 2 of `docs/separating-spc.md`.
@@ -46,8 +47,8 @@ UI shell.
 ## How it differs from REFS
 
 - MRMS updates about every 2 minutes and has no run structure: the slider covers the last 30-60 minutes, and the "delay" line becomes data age.
-- The MRMS CONUS grid is about 7000 x 3500 cells (to verify). As floats that is roughly 100 MB, so frames need a smaller storage type, cropping to a
-  sector, or decimation (the existing data-saver step helps).
+- The MRMS CONUS grid is 7000 x 3500 cells at 0.01 degrees (verified from a real file; see `mrms-site-outline.md`). As floats that is about 98 MB, so
+  frames need a smaller storage type, cropping to a sector, or decimation (the existing data-saver step helps).
 - Frames are bigger and more numerous: the loop budget, the Wi-Fi-only default and the cache cap need retuning.
 - No SPC-specific parts: titles, colours and branding come from the provider.
 

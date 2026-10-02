@@ -10,8 +10,9 @@
 extern "C" {
 #endif
 
-/* The grids of SPC's data: REFS (1799 x 1059, 3 km) and GREFS probabilities (185 x 129, 40.6 km). */
-enum { SPC_GRID_REFS = 0, SPC_GRID_GREFS = 1 };
+/* The grids of SPC's data: REFS (1799 x 1059, 3 km) and GREFS probabilities (185 x 129, 40.6 km). Ids from SPC_GRID_FIRST_DYNAMIC are
+ * regular latitude / longitude grids registered at run time (MRMS windows): see spc_mrms_decode / spc_define_latlon_grid. */
+enum { SPC_GRID_REFS = 0, SPC_GRID_GREFS = 1, SPC_GRID_FIRST_DYNAMIC = 2 };
 #define SPC_GRID_COLUMNS 1799   /* the REFS grid */
 #define SPC_GRID_ROWS 1059
 
@@ -74,6 +75,34 @@ void spc_render_globe(const float * values, const spc_globe * globe, const spc_s
 /* Renders `values` (the grid's columns x rows, row 0 = south) into `argb` ((view.cols*scale/step) x (view.rows*scale/step), north up,
  * 0xAARRGGBB, transparent where nothing is shown). */
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb);
+
+/* Registers a regular latitude / longitude grid: cell (column, row) is centred at (south_lat + row * d_lat, west_lon + column * d_lon),
+ * row 0 = south, west-negative longitudes. Returns its grid id (the same definition gives the same id). */
+int spc_define_latlon_grid(int columns, int rows, double south_lat, double west_lon, double d_lat, double d_lon);
+
+/* ---- MRMS: GRIB2 files with PNG packing (template 5.41) on a regular lat / lon grid (7000 x 3500 at 0.01 degrees, 14000 x 7000 at 0.005) ---- */
+
+typedef struct {
+    double west, south, east, north;   /* the box to cut out (degrees, west-negative) */
+    int step;                          /* >= 1: every step-th cell in each direction, cells combined by `pool` */
+    int pool;                          /* 0 = maximum of the valid cells (reflectivity, rotation), 1 = mean of the valid cells (accumulations) */
+    double missing_at_or_below;        /* stored values <= this (the files' -999 / -99 / -3 codes) become NaN */
+} spc_mrms_request;
+
+typedef struct {
+    int grid;                          /* the registered lat / lon grid of the output (columns x rows, row 0 = south) */
+    int columns, rows;                 /* of the output */
+    int64_t valid_time;                /* epoch seconds (the file's reference time) */
+    int source_columns, source_rows;   /* of the whole file's grid */
+    double source_d_lat, source_d_lon; /* degrees per cell of the file */
+} spc_mrms_result;
+
+/* Decodes a (possibly gzip-compressed) MRMS GRIB2 file's window into floats. On success returns 0, `*out` is a malloc'd array of
+ * result->columns * result->rows floats (release with spc_free). Otherwise returns -1 with a message in `error`. */
+int spc_mrms_decode(const uint8_t * data, size_t size, const spc_mrms_request * request, float ** out, spc_mrms_result * result,
+                    char * error, size_t error_cap);
+
+void spc_free(void * pointer);
 
 #ifdef __cplusplus
 }
