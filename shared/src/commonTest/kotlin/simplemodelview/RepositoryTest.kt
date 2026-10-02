@@ -137,6 +137,8 @@ internal object StubCore : Core {
     override fun decodeFloats(raw: ByteArray, dtype: String, compressed: Boolean, count: Int) = FloatArray(count)
     override fun latLonToGrid(grid: Grid, lat: Double, lon: Double) = doubleArrayOf(0.0, 0.0)
     override fun gridToLatLon(grid: Grid, column: Double, row: Double) = doubleArrayOf(0.0, 0.0)
+    override fun decodeMrms(file: ByteArray, west: Double, south: Double, east: Double, north: Double, step: Int, pool: Pool, missingAtOrBelow: Double) =
+        MrmsWindow(Grid(2, 2, 2), FloatArray(4), 0L, 0.01)
     override fun render(values: FloatArray, view: View, style: Style, memberRgb: IntArray, argb: IntArray) {}
     override fun renderGlobe(grid: Grid, values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
                              domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray) {}

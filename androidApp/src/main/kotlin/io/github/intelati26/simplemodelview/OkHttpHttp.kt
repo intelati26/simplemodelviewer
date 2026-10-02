@@ -15,9 +15,9 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * The app's only network client. Be a good client of SPC's server: a descriptive User-Agent, a small cap on parallel
- * requests, and a disk cache. Chunks of one cycle never change, so they are cached whatever the server's headers say; only
- * the `.zgroup` probes (does a newer cycle exist yet?) are always fresh.
+ * The app's only network client. Be a good client of the servers: a descriptive User-Agent, a small cap on parallel
+ * requests, and a disk cache. Chunks of one cycle (and MRMS scan files) never change, so they are cached whatever the server's
+ * headers say; only the `.zgroup` probes (does a newer cycle exist yet?) and the MRMS listings are always fresh.
  */
 class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val contact: () -> String = { "" }) : Http {
     private val client = OkHttpClient.Builder()
@@ -30,7 +30,8 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val conta
         .addNetworkInterceptor(Interceptor { chain ->
             val response = chain.proceed(chain.request())
             val url = response.request.url.toString()
-            if (response.isSuccessful && ".zarr/" in url && !url.endsWith("/.zgroup")) {
+            // an MRMS scan file never changes either (its name carries the scan time)
+            if (response.isSuccessful && (".zarr/" in url && !url.endsWith("/.zgroup") || "noaa-mrms-pds" in url && url.endsWith(".grib2.gz"))) {
                 response.newBuilder().removeHeader("Pragma").header("Cache-Control", "public, max-age=604800").build()
             } else response
         })

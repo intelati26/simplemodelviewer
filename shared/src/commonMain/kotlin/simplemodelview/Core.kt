@@ -14,20 +14,29 @@ data class View(
         val CONUS = View("CONUS", 0, 0, GRID_COLUMNS, GRID_ROWS, 1)
 
         /** The whole of a grid. The coarse GREFS grid is drawn 8 pixels per cell (and smoothed) so it fills a screen. */
-        fun whole(grid: Grid) = when (grid) {
-            Grid.REFS -> CONUS
-            Grid.GREFS -> View("Whole grid", 0, 0, grid.columns, grid.rows, 8, 1, grid)
-        }
+        fun whole(grid: Grid) = if (grid == Grid.REFS) CONUS else View("Whole grid", 0, 0, grid.columns, grid.rows, 8, 1, grid)
     }
 }
 
-/** The native core (C++: blosc decode, Lambert grid, rasteriser). Implemented over JNI on Android and cinterop on iOS. */
+/** How MRMS cells are combined when a window is decimated: the maximum of the valid cells, or their mean. */
+enum class Pool { Max, Mean }
+
+/** A decoded MRMS window: [values] fill [grid] (row 0 = south, NaN where there is no value). */
+class MrmsWindow(val grid: Grid, val values: FloatArray, val validTime: Long, val sourceCellDegrees: Double)
+
+/** The native core (C++: blosc decode, grids, MRMS GRIB2 decode, rasteriser). Implemented over JNI on Android and cinterop on iOS. */
 interface Core {
     /** Blosc-decompresses to raw bytes; throws on a malformed buffer. */
     fun inflate(raw: ByteArray): ByteArray
 
     /** Raw or blosc chunk -> floats in C order. Throws on a malformed buffer or unsupported dtype. */
     fun decodeFloats(raw: ByteArray, dtype: String, compressed: Boolean, count: Int): FloatArray
+
+    /**
+     * Decodes a (gzip-compressed) MRMS GRIB2 file's part inside the box (west-negative degrees), every [step]-th cell in each direction
+     * (cells combined by [pool]); stored values at or below [missingAtOrBelow] become NaN. Throws on a damaged / unsupported file.
+     */
+    fun decodeMrms(file: ByteArray, west: Double, south: Double, east: Double, north: Double, step: Int, pool: Pool, missingAtOrBelow: Double): MrmsWindow
 
     /** Fractional grid position (column from the west, row from the south) of a latitude / longitude. Returns [column, row]. */
     fun latLonToGrid(grid: Grid, lat: Double, lon: Double): DoubleArray

@@ -1,6 +1,6 @@
 # Scope: GRIB / MRMS companion app (working title `simplegribview`)
 
-Scoping only; nothing here is built. It uses this repository (simplemodelview) and the desktop viewer wxqt (`~/Claude/wxqt-grib`) as scaffolding.
+Scoping only; nothing here is built, except that the MRMS part is now an in-app page of simplemodelview (see `mrms-site-outline.md`; model fields are still unbuilt). It uses this repository (simplemodelview) and the desktop viewer wxqt (`~/Claude/wxqt-grib`) as scaffolding.
 Written 2026-10-02.
 
 ## What it is

@@ -69,6 +69,8 @@ and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
   grids: a server-side C++ renderer returns finished map pictures per request (product, time, centre, zoom, pixel size). It is
   a rendering service for their page, not an API, and gives no values to tap. Real MRMS values are `.grib2.gz` on NCEP's server
   and the `noaa-mrms-pds` AWS bucket (needs a gunzip + GRIB2 decoder; radar is out of scope for v1). Not pursued.
+  **Update 2026-10-02:** the public GRIB2 files turned out to be PNG-packed (template 5.41), so decoding is small (`docs/mrms-site-outline.md`). An MRMS page now
+  exists in the app (composite reflectivity, rotation tracks, 24 h rainfall) beside the SPC page; still no MRMS point alerts.
 - **Decision (owner): no location-based alerts or point forecasts.** A saved-place point-forecast strip and threshold notifications were built and
   verified on the emulator, then removed; saved places remain as map bookmarks. Products (including GREFS / thunder probability later) are not affected.
 - **Decision (owner): GitHub only, for now.** Distribution is the GitHub repository plus APKs from GitHub Releases / Actions (CI artifacts are named

@@ -17,6 +17,9 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 | `.github/workflows/` | `core-tests`, `android` (debug APK as artifact; attached to a release on `v*` tags), `android-ui` (emulator smoke test with screenshots), `ios` (core on macOS + iOS Simulator). |
 | `scripts/` | `emu.sh` (drive an emulator with adb), `ui_smoke.sh` (the CI smoke test). |
 
+## MRMS page
+"MRMS radar" in the menu opens a second page over the same renderers: composite reflectivity, base reflectivity, rotation tracks (30 min to 24 h) and 24 h rainfall, from the NOAA open data bucket (`noaa-mrms-pds`). The files are GRIB2 with PNG packing; the core decodes them itself (no GDAL), cutting the sector's window out a row at a time at 1 km (rotation: 500 m) or a coarser step for wide areas. The decoder is checked against GDAL (`scripts/make_mrms_fixtures.py`, `core/tests`). How the NSSL viewer and the data are laid out: `docs/mrms-site-outline.md`.
+
 ## Build and test the core
 ```
 cmake -S core -B build && cmake --build build && ctest --test-dir build --output-on-failure

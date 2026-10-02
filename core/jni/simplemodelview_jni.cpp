@@ -53,6 +53,30 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     return result;
 }
 
+JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_decodeMrmsNative(
+    JNIEnv * env, jobject, jbyteArray file, jdouble west, jdouble south, jdouble east, jdouble north, jint step, jint pool, jdouble missing,
+    jdoubleArray info) {
+    const jsize size = env->GetArrayLength(file);
+    std::vector<uint8_t> in(static_cast<size_t>(size));
+    env->GetByteArrayRegion(file, 0, size, reinterpret_cast<jbyte *>(in.data()));
+    const spc_mrms_request request{west, south, east, north, step, pool, missing};
+    spc_mrms_result result{};
+    float * values = nullptr;
+    char error[200] = {0};
+    if (spc_mrms_decode(in.data(), in.size(), &request, &values, &result, error, sizeof error) != 0) {
+        throwRuntime(env, error);
+        return nullptr;
+    }
+    const jsize count = result.columns * result.rows;
+    jfloatArray out = env->NewFloatArray(count);
+    if (out != nullptr) env->SetFloatArrayRegion(out, 0, count, values);
+    spc_free(values);
+    const double v[5] = {static_cast<double>(result.grid), static_cast<double>(result.columns), static_cast<double>(result.rows),
+                         static_cast<double>(result.valid_time), result.source_d_lon};
+    env->SetDoubleArrayRegion(info, 0, 5, v);
+    return out;
+}
+
 JNIEXPORT jdoubleArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_latLonToGridNative(JNIEnv * env, jobject, jint grid, jdouble lat, jdouble lon) {
     double c = 0, r = 0;
     spc_latlon_to_grid(grid, lat, lon, &c, &r);

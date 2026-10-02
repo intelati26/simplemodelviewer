@@ -1,0 +1,194 @@
+package simplemodelview
+
+import kotlin.math.ceil
+
+/**
+ * An MRMS product as the public AWS bucket (`noaa-mrms-pds`) names it: one GRIB2 file per scan under `CONUS/<id>/<yyyymmdd>/`.
+ * The files are PNG-packed GRIB2 on a regular latitude / longitude grid of [cellDegrees] (see core/src/mrms_decode.h).
+ */
+data class MrmsProduct(
+    val id: String,                 // directory name, e.g. "MergedReflectivityQCComposite_00.50"
+    val title: String,
+    val pool: Pool,                 // how cells combine when a window is decimated
+    val missingAtOrBelow: Double,   // stored values at or below this are "no coverage" / "no echo" codes
+    val style: Style,
+    val cadenceMinutes: Int,        // between files (2 for most, 30 / 60 for the long accumulations)
+    val frames: Int,                // how many of the newest files the slider covers
+    val cellDegrees: Double,        // the files' cell size
+    val group: String,
+)
+
+object MrmsCatalogue {
+    const val BUCKET = "https://noaa-mrms-pds.s3.amazonaws.com"
+    const val REFLECTIVITY = "Reflectivity"
+    const val ROTATION = "Rotation"
+    const val PRECIP = "Precipitation"
+
+    /** The NWS radar colour table (5 dBZ steps); below 5 dBZ nothing is drawn. */
+    private val reflectivity = Style(
+        Kind.Banded,
+        bands((5..75 step 5).toList(), listOf(0x04e9e7, 0x019ff4, 0x0300f4, 0x02fd02, 0x01c501, 0x008e00, 0xfdf802, 0xe5bc00, 0xfd9500, 0xfd0000,
+            0xd40000, 0xbc0000, 0xf800fd, 0x9854c6, 0xfdfdfd)),
+        units = "dBZ", digits = 1,
+    )
+
+    /** Azimuthal-shear tracks in 0.001 / s: values below 2 are noise and stay transparent. */
+    private val rotation = Style(
+        Kind.Banded,
+        bands(listOf(2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30),
+            listOf(0x9fd3ff, 0x4aa8ff, 0x2c6cf0, 0x25c25a, 0xa7e03a, 0xffe600, 0xffa000, 0xff4a00, 0xd01010, 0xc000c0, 0x5a2a8c)),
+        units = "x10^-3 /s", digits = 0,
+    )
+
+    /** Accumulations are stored in mm and shown in inches. */
+    private val rainfall = Style(Kind.Banded, Palettes.qpf, factor = 1.0 / 25.4, units = "in", digits = 2)
+
+    private fun reflectivity(id: String, title: String, frames: Int = 30) =
+        MrmsProduct(id, title, Pool.Max, -90.0, reflectivity, 2, frames, 0.01, REFLECTIVITY)
+
+    private fun rotation(id: String, title: String, cadence: Int) =
+        MrmsProduct(id, title, Pool.Max, -0.5, rotation, cadence, if (cadence <= 2) 30 else 12, 0.005, ROTATION)
+
+    private fun qpe(id: String, title: String) = MrmsProduct(id, title, Pool.Mean, -0.5, rainfall, 60, 12, 0.01, PRECIP)
+
+    val all = listOf(
+        reflectivity("MergedReflectivityQCComposite_00.50", "Composite Reflectivity"),
+        reflectivity("MergedBaseReflectivityQC_00.50", "Base Reflectivity (lowest tilt)"),
+        rotation("RotationTrack60min_00.50", "Rotation Track, 1 h (0-2 km)", 2),
+        rotation("RotationTrack30min_00.50", "Rotation Track, 30 min (0-2 km)", 2),
+        rotation("RotationTrack120min_00.50", "Rotation Track, 2 h (0-2 km)", 2),
+        rotation("RotationTrack360min_00.50", "Rotation Track, 6 h (0-2 km)", 2),
+        rotation("RotationTrack1440min_00.50", "Rotation Track, 24 h (0-2 km)", 30),
+        qpe("MultiSensor_QPE_24H_Pass2_00.00", "24 h Rainfall (multi-sensor, best)"),
+        qpe("MultiSensor_QPE_24H_Pass1_00.00", "24 h Rainfall (multi-sensor, quicker)"),
+        qpe("RadarOnly_QPE_24H_00.00", "24 h Rainfall (radar only)"),
+    )
+
+    val default = all.first()
+    val groups = listOf(REFLECTIVITY, ROTATION, PRECIP)
+
+    fun byId(id: String?) = all.firstOrNull { it.id == id }
+}
+
+/** One file on the server: its key, the scan's valid time and when it was uploaded (the bucket's LastModified), epoch seconds. */
+data class MrmsFile(val key: String, val validTime: Long, val uploaded: Long?, val size: Long) {
+    val url: String get() = MrmsCatalogue.BUCKET + "/" + key
+}
+
+/** A decoded frame of the shown sector. */
+class MrmsFrame(val window: MrmsWindow, val file: MrmsFile)
+
+private fun two(n: Int) = n.toString().padStart(2, '0')
+private fun four(n: Int) = n.toString().padStart(4, '0')
+
+/** Epoch seconds -> (year, month, day, hour, minute, second) in UTC. */
+internal fun civilFromEpoch(epoch: Long): IntArray {
+    val days = floorDiv(epoch, 86400L)
+    val secs = floorMod(epoch, 86400L).toInt()
+    val z = days + 719468
+    val era = floorDiv(z, 146097L)
+    val doe = z - era * 146097
+    val yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    val mp = (5 * doy + 2) / 153
+    val d = (doy - (153 * mp + 2) / 5 + 1).toInt()
+    val m = (if (mp < 10) mp + 3 else mp - 9).toInt()
+    val y = (yoe + era * 400 + (if (m <= 2) 1 else 0)).toInt()
+    return intArrayOf(y, m, d, secs / 3600, secs % 3600 / 60, secs % 60)
+}
+
+internal fun epochOf(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int): Long =
+    daysFromCivil(year, month, day) * 86400L + hour * 3600L + minute * 60L + second
+
+/** "20261002-130039" from a file name "MRMS_<id>_20261002-130039.grib2.gz" -> epoch seconds, or null. */
+fun mrmsValidTime(key: String): Long? {
+    val name = key.substringAfterLast('/').removeSuffix(".grib2.gz")
+    val stamp = name.takeLast(15)
+    if (stamp.length != 15 || stamp[8] != '-' || !stamp.filterIndexed { i, _ -> i != 8 }.all { it.isDigit() }) return null
+    return epochOf(stamp.substring(0, 4).toInt(), stamp.substring(4, 6).toInt(), stamp.substring(6, 8).toInt(),
+        stamp.substring(9, 11).toInt(), stamp.substring(11, 13).toInt(), stamp.substring(13, 15).toInt())
+}
+
+/** "2026-10-02T13:01:25.000Z" -> epoch seconds, or null. */
+internal fun isoToEpoch(iso: String): Long? {
+    if (iso.length < 19) return null
+    return try {
+        epochOf(iso.substring(0, 4).toInt(), iso.substring(5, 7).toInt(), iso.substring(8, 10).toInt(),
+            iso.substring(11, 13).toInt(), iso.substring(14, 16).toInt(), iso.substring(17, 19).toInt())
+    } catch (e: NumberFormatException) { null }
+}
+
+/** The files of an S3 `ListObjectsV2` reply for one product, oldest first. Anything that does not look like a scan file is skipped. */
+fun parseMrmsListing(xml: String): List<MrmsFile> {
+    val files = ArrayList<MrmsFile>()
+    var at = 0
+    while (true) {
+        val start = xml.indexOf("<Contents>", at)
+        if (start < 0) break
+        val end = xml.indexOf("</Contents>", start)
+        if (end < 0) break
+        val block = xml.substring(start, end)
+        at = end
+        val key = block.substringAfter("<Key>", "").substringBefore("</Key>")
+        if (!key.endsWith(".grib2.gz")) continue
+        val valid = mrmsValidTime(key) ?: continue
+        val uploaded = isoToEpoch(block.substringAfter("<LastModified>", "").substringBefore("</LastModified>"))
+        val size = block.substringAfter("<Size>", "").substringBefore("</Size>").toLongOrNull() ?: 0L
+        files += MrmsFile(key, valid, uploaded, size)
+    }
+    return files.sortedBy { it.validTime }
+}
+
+/** The cells to skip so a window of [west]..[east] is about [targetColumns] cells wide (1 = every cell: the files' full resolution). */
+fun mrmsStep(cellDegrees: Double, west: Double, east: Double, targetColumns: Int, dataSaver: Boolean): Int {
+    val columns = (east - west) / cellDegrees
+    val step = ceil(columns / targetColumns).toInt().coerceAtLeast(1)
+    return if (dataSaver) step * 2 else step
+}
+
+/** Lists and decodes MRMS files from the public AWS bucket over [http]. */
+class MrmsRepository(private val http: Http, private val core: Core) {
+    /**
+     * The newest [MrmsProduct.frames] files at or before [nowEpochSeconds], oldest first. Lists only the keys after a point a little before the
+     * window (S3 lists in key order, and the day folders sort by date), so the reply is a few dozen entries, not a day's worth.
+     */
+    suspend fun listFiles(product: MrmsProduct, nowEpochSeconds: Long): List<MrmsFile> {
+        for (extraHours in listOf(0L, 24L)) {
+            val from = nowEpochSeconds - (product.frames + 3L) * product.cadenceMinutes * 60 - extraHours * 3600
+            val c = civilFromEpoch(from)
+            val prefix = "CONUS/${product.id}/"
+            val after = "$prefix${four(c[0])}${two(c[1])}${two(c[2])}/MRMS_${product.id}_${four(c[0])}${two(c[1])}${two(c[2])}-${two(c[3])}${two(c[4])}${two(c[5])}.grib2.gz"
+            val result = http.get("${MrmsCatalogue.BUCKET}/?list-type=2&max-keys=1000&prefix=$prefix&start-after=$after")
+            if (result.status != 200) throw RefsException("could not list MRMS files (HTTP ${result.status})")
+            val files = parseMrmsListing(result.body.decodeToString()).filter { it.validTime <= nowEpochSeconds + 300 }
+            if (files.isNotEmpty()) return files.takeLast(product.frames)
+        }
+        return emptyList()
+    }
+
+    /** Downloads the file (an HTTP cache keeps it) and decodes the [west]..[east] x [south]..[north] window, every [step]-th cell. */
+    suspend fun loadFrame(
+        product: MrmsProduct, file: MrmsFile, west: Double, south: Double, east: Double, north: Double, step: Int,
+    ): MrmsFrame {
+        val bytes = download(file)
+        val window = try {
+            core.decodeMrms(bytes, west, south, east, north, step, product.pool, product.missingAtOrBelow)
+        } catch (e: Exception) {
+            throw RefsException("could not decode ${product.title}: ${e.message}")
+        }
+        return MrmsFrame(window, file)
+    }
+
+    /** Downloads a file without decoding it, so the HTTP cache has it for a loop. */
+    suspend fun prefetch(file: MrmsFile) { download(file) }
+
+    private suspend fun download(file: MrmsFile): ByteArray {
+        var result = http.get(file.url)
+        if (result.status != 200 && result.status != 404 && result.status != 403) result = http.get(file.url)   // one retry
+        return when (result.status) {
+            200 -> if (result.body.isEmpty()) throw RefsException("empty MRMS file") else result.body
+            404, 403 -> throw RefsException("that MRMS file is no longer on the server")
+            else -> throw RefsException("the MRMS file could not be downloaded (HTTP ${result.status})")
+        }
+    }
+}

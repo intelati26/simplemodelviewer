@@ -17,7 +17,10 @@ class MapLines(context: Context, private val core: Core) {
     // raw: lat, west-positive lon, lat, west-positive lon per segment; trig: sin(lat), cos(lat), sin(lon), cos(lon) for both vertices
     // (the globe needs no trig per frame). Grid cells (col, row, col, row) are projected per grid on first use.
     private class Layer(val raw: FloatArray, val trig: FloatArray) {
-        val cells = HashMap<Grid, FloatArray>()
+        // projected lines per grid; MRMS windows make many grids, so only the few most recent are kept
+        val cells = object : LinkedHashMap<Grid, FloatArray>(8, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Grid, FloatArray>) = size > 6
+        }
     }
 
     private val layers: Map<String, Layer> = listOf("statev2", "county", "ca", "mx").associateWith { name ->
@@ -59,9 +62,10 @@ class MapLines(context: Context, private val core: Core) {
     fun draw(canvas: Canvas, view: View, dark: Boolean) {
         val s = view.scale.toFloat()
         val widthUnit = if (view.scale > 1) 1.0f else 0.8f
-        val lineScale = if (view.grid == Grid.REFS) maxOf(1f, s / 2f) else 1.2f   // (the coarse GREFS grid is drawn at 8-16 px per cell: keep lines thin)
+        val window = view.grid.isWindow   // an MRMS window: 1-3 px per cell
+        val lineScale = if (view.grid == Grid.REFS) maxOf(1f, s / 2f) else if (window) maxOf(1f, s / 2f) else 1.2f   // (the coarse GREFS grid is drawn at 8-16 px per cell: keep lines thin)
         // counties only when zoomed to a sector: at whole-map scale they are noise
-        val counties = if (view.grid == Grid.REFS) view.scale > 1 else view.scale >= 16
+        val counties = if (view.grid == Grid.REFS) view.scale > 1 else if (window) view.cols * view.step <= 2000 else view.scale >= 16
         val plan = listOf(
             Triple("mx", if (dark) 0xFF8A8A8A.toInt() else 0xFF5A5A5A.toInt(), 1.0f * widthUnit),
             Triple("ca", if (dark) 0xFF8A8A8A.toInt() else 0xFF5A5A5A.toInt(), 1.0f * widthUnit),

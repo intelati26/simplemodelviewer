@@ -5,6 +5,8 @@ export PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH
 APK=${APK:-androidApp/build/outputs/apk/debug/simplemodelview-debug.apk}
 emu_install() { adb install -r "$APK" | tail -1; }
 emu_launch()  { adb logcat -c; adb shell am force-stop io.github.intelati26.simplemodelview; adb shell am start -n io.github.intelati26.simplemodelview/.MainActivity >/dev/null; }
+# Opens the app straight on a page: spc (default) or mrms.
+emu_launch_page() { adb logcat -c; adb shell am force-stop io.github.intelati26.simplemodelview; adb shell am start -n io.github.intelati26.simplemodelview/.MainActivity --es page "${1:-spc}" >/dev/null; }
 emu_tap()     { adb shell input tap "$1" "$2"; }
 emu_shot()    { adb exec-out screencap -p > "$1"; }
 emu_crashes() { adb logcat -d -s AndroidRuntime:E | head -20; }

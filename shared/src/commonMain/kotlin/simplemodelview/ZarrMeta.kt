@@ -13,14 +13,22 @@ import kotlinx.serialization.json.jsonPrimitive
 const val GRID_COLUMNS = 1799   // the REFS grid (kept for the common case)
 const val GRID_ROWS = 1059
 
-/** The grids of SPC's data. [id] matches the core's SPC_GRID_* values. */
-enum class Grid(val id: Int, val columns: Int, val rows: Int) {
-    REFS(0, 1799, 1059),      // 3 km
-    GREFS(1, 185, 129);       // 40.6 km (NCEP grid 212): the calibrated probability fields (GREFS) and thunder probability (REFSCT)
-
+/**
+ * A grid the core can draw on: SPC's two fixed grids ([REFS], [GREFS]) or a regular latitude / longitude window the core registered for an
+ * MRMS frame (id from 2). [id] matches the core's grid ids.
+ */
+data class Grid(val id: Int, val columns: Int, val rows: Int) {
     val cells get() = columns * rows
 
+    /** A latitude / longitude window (MRMS) rather than one of SPC's grids. */
+    val isWindow get() = id >= FIRST_WINDOW
+
     companion object {
+        const val FIRST_WINDOW = 2
+        val REFS = Grid(0, 1799, 1059)      // 3 km
+        val GREFS = Grid(1, 185, 129)       // 40.6 km (NCEP grid 212): the calibrated probability fields (GREFS) and thunder probability (REFSCT)
+        val entries = listOf(REFS, GREFS)
+
         /** The grid whose (rows, columns) are the last two entries of an array shape, or null. */
         fun matching(shape: List<Int>): Grid? =
             if (shape.size < 3) null else entries.firstOrNull { shape[shape.size - 1] == it.columns && shape[shape.size - 2] == it.rows }

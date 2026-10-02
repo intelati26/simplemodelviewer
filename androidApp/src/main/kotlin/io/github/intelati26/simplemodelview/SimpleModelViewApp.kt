@@ -2,6 +2,7 @@ package io.github.intelati26.simplemodelview
 
 import android.app.Application
 import android.content.Context
+import simplemodelview.MrmsRepository
 import simplemodelview.RefsRepository
 
 /** One HTTP client (and its disk cache), core and repository for the whole process: the UI and the alert worker share them. */
@@ -22,5 +23,7 @@ object AppContainer {
     val prefs by lazy { app.getSharedPreferences("simplemodelview", Context.MODE_PRIVATE) }
     val core by lazy { NativeCore() }
     val lines by lazy { MapLines(app, core) }
-    val repo by lazy { RefsRepository(OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()) { prefs.getString("contact_email", "").orEmpty() }, core) }   // a new cache size applies on the next launch
+    private val http by lazy { OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()) { prefs.getString("contact_email", "").orEmpty() } }   // a new cache size applies on the next launch
+    val repo by lazy { RefsRepository(http, core) }
+    val mrms by lazy { MrmsRepository(http, core) }
 }

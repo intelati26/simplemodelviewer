@@ -108,15 +108,26 @@ import simplemodelview.Style
 
 class MainActivity : ComponentActivity() {
     private val viewModel: RefsViewModel by viewModels()
+    private val mrmsViewModel: MrmsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // which page opens: an intent extra (`--es page mrms`, used by the emulator scripts), else the one used last
+        val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            LaunchedEffect(dark) { viewModel.setDark(dark) }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (start == "mrms") "mrms" else "spc") }
+            fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { RefsScreen(viewModel) }
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    // each page's view model is created only when the page is first opened
+                    if (page == "mrms") MrmsScreen(mrmsViewModel, onSpc = { open("spc") })
+                    else {
+                        LaunchedEffect(dark) { viewModel.setDark(dark) }
+                        RefsScreen(viewModel, onMrms = { open("mrms") })
+                    }
+                }
             }
         }
     }
@@ -124,7 +135,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RefsScreen(vm: RefsViewModel) {
+private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -159,7 +170,7 @@ private fun RefsScreen(vm: RefsViewModel) {
                 AssistChip(onClick = { picker = true }, label = { Text(s.product?.title ?: "Product", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.weight(1f))
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
-                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
+                MoreMenu(onMrms = onMrms, onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
 
@@ -325,77 +336,15 @@ private fun GlobeView(s: UiState, vm: RefsViewModel) {
     }
 }
 
-/** The map picture with pinch-zoom, pan and tap-for-value. Tap positions are converted back through the zoom and pan. */
+/** The REFS map picture (see [ZoomableMap]). */
 @Composable
 private fun MapView(s: UiState, vm: RefsViewModel) {
     val bitmap = s.map ?: return
-    var scale by remember(bitmap.width, bitmap.height) { mutableStateOf(1f) }
-    var offset by remember(bitmap.width, bitmap.height) { mutableStateOf(Offset.Zero) }
-    var size by remember { mutableStateOf(IntSize.Zero) }
-    val image = remember(bitmap) { bitmap.asImageBitmap() }
-    // tell the view model which part of the picture is on screen, for "export this screen area"
-    LaunchedEffect(scale, offset, size, bitmap) {
-        if (size.width == 0) return@LaunchedEffect
-        val f = visibleFractions(size.width.toFloat(), size.height.toFloat(), bitmap.width.toFloat() / bitmap.height, scale, offset.x, offset.y)
-        vm.setViewport(f[0], f[1], f[2], f[3])
-    }
-
-    Box(
-        Modifier.fillMaxSize().clipToBounds().onSizeChanged { size = it }
-            .pointerInput(Unit) {
-                detectTransformGestures { centroid, pan, zoom, _ ->
-                    val newScale = (scale * zoom).coerceIn(1f, 12f)
-                    // keep the point under the fingers fixed, then pan
-                    val centre = Offset(size.width / 2f, size.height / 2f)
-                    offset = (offset + (centroid - centre - offset) * (1f - newScale / scale) + pan)
-                    scale = newScale
-                    val maxX = size.width * (scale - 1f) / 2f
-                    val maxY = size.height * (scale - 1f) / 2f
-                    offset = Offset(offset.x.coerceIn(-maxX, maxX), offset.y.coerceIn(-maxY, maxY))
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        val aspect = bitmap.width.toFloat() / bitmap.height
-        Box(
-            Modifier.aspectRatio(aspect)
-                .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
-                .pointerInput(bitmap) {
-                    detectTapGestures(
-                        onTap = { p -> vm.onTap(p.x / this.size.width, p.y / this.size.height) },
-                        // zoom in on that spot (the wide US map leaves room above and below it), or back out
-                        onDoubleTap = { q ->
-                            if (scale > 1.05f) { scale = 1f; offset = Offset.Zero } else {
-                                val target = 2.5f
-                                val t = (q - Offset(this.size.width / 2f, this.size.height / 2f)) * (1f - target)   // keeps that point under the finger
-                                val maxX = size.width * (target - 1f) / 2f
-                                val maxY = size.height * (target - 1f) / 2f
-                                scale = target
-                                offset = Offset(t.x.coerceIn(-maxX, maxX), t.y.coerceIn(-maxY, maxY))
-                            }
-                        },
-                    )
-                },
-        ) {
-            Image(image, contentDescription = "SPC REFS map", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
-            s.crosshair?.let { (fx, fy) ->
-                Canvas(Modifier.fillMaxSize()) {
-                    val x = fx * this.size.width
-                    val y = fy * this.size.height
-                    val r = 10.dp.toPx() / scale
-                    val stroke = 1.5.dp.toPx() / scale
-                    drawLine(Color.Black, Offset(x - r, y), Offset(x + r, y), stroke * 2.4f)
-                    drawLine(Color.Black, Offset(x, y - r), Offset(x, y + r), stroke * 2.4f)
-                    drawLine(Color.White, Offset(x - r, y), Offset(x + r, y), stroke)
-                    drawLine(Color.White, Offset(x, y - r), Offset(x, y + r), stroke)
-                }
-            }
-        }
-    }
+    ZoomableMap(bitmap, s.crosshair, "SPC REFS map", onViewport = vm::setViewport, onTap = vm::onTap)
 }
 
 @Composable
-private fun Legend(style: Style, members: List<String>) {
+internal fun Legend(style: Style, members: List<String>) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
         if (style.kind == Kind.Paintball) {
             Row(Modifier.fillMaxWidth()) {
@@ -511,11 +460,12 @@ private fun ProductRow(product: Product, selected: Boolean, favourite: Boolean, 
 }
 
 @Composable
-private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+private fun MoreMenu(onMrms: () -> Unit, onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("MRMS radar") }, onClick = { open = false; onMrms() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

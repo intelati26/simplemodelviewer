@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UI smoke test, driven like a person with adb: launch, wait for the live map, open the product picker, switch to the globe,
-# open the share dialog and menus. Saves a screenshot per step into $1 (default: screenshots/) and fails on a crash, an ANR or
+# open the share dialog and menus, then the MRMS page (composite reflectivity, rotation track, 24 h rainfall, a meso sector). Saves a screenshot per step into $1 (default: screenshots/) and fails on a crash, an ANR or
 # a screen whose middle part is empty. The app reads SPC's live data, so a slow or unreachable server shows up as a missing map.
 set -u
 OUT=${1:-screenshots}
@@ -65,6 +65,18 @@ wait_for_picture globe 180 || { echo "FAIL: the globe never appeared"; fail=1; }
 tap 92 11; sleep 3; shot share-dialog           # Share
 adb shell input keyevent 4; sleep 2
 tap 91 7;  sleep 3; shot more-menu
+
+# the MRMS page (live radar from NOAA's AWS bucket): open it from the menu, then the three first products
+adb shell input keyevent 4; sleep 2     # close the menu if it is still open
+emu_tap_text "MRMS radar" 2>/dev/null || { tap 91 7; sleep 2; emu_tap_text "MRMS radar"; }
+wait_for_picture mrms-reflectivity 240 || { echo "FAIL: the MRMS reflectivity map never appeared"; fail=1; }
+emu_tap_text "Composite Reflectivity"; sleep 2; emu_tap_text "Rotation Track, 1 h (0-2 km)"
+wait_for_picture mrms-rotation 120 || { echo "FAIL: the MRMS rotation map never appeared"; fail=1; }
+emu_tap_text "Rotation Track, 1 h (0-2 km)"; sleep 2; emu_tap_text "24 h Rainfall (multi-sensor, best)"
+wait_for_picture mrms-rainfall 120 || { echo "FAIL: the MRMS rainfall map never appeared"; fail=1; }
+emu_tap_text "CONUS ▾"; sleep 2; emu_tap_text "South Central"
+wait_for_picture mrms-meso 120 || { echo "FAIL: the MRMS meso-sector map never appeared"; fail=1; }
+tap 50 48; sleep 2; shot mrms-readout
 
 # only crashes of this app count (the emulator image's own apps, e.g. Gmail, may crash too)
 if adb logcat -d -s AndroidRuntime:E | grep -A2 "FATAL EXCEPTION" | grep -q "Process: $PKG"; then

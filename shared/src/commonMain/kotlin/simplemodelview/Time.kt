@@ -31,8 +31,8 @@ fun formatUtc(epochSeconds: Long): String {
     return "$weekday ${d.toString().padStart(2, '0')} $monthName ${hour.toString().padStart(2, '0')}Z"
 }
 
-private fun floorDiv(a: Long, b: Long): Long { val q = a / b; return if ((a % b != 0L) && ((a < 0) != (b < 0))) q - 1 else q }
-private fun floorMod(a: Long, b: Long): Long = a - floorDiv(a, b) * b
+internal fun floorDiv(a: Long, b: Long): Long { val q = a / b; return if ((a % b != 0L) && ((a < 0) != (b < 0))) q - 1 else q }
+internal fun floorMod(a: Long, b: Long): Long = a - floorDiv(a, b) * b
 
 private fun two(n: Int) = n.toString().padStart(2, '0')
 

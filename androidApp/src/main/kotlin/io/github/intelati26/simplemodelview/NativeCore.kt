@@ -3,6 +3,8 @@ package io.github.intelati26.simplemodelview
 import simplemodelview.Core
 import simplemodelview.Grid
 import simplemodelview.Kind
+import simplemodelview.MrmsWindow
+import simplemodelview.Pool
 import simplemodelview.Style
 import simplemodelview.View
 
@@ -10,6 +12,18 @@ import simplemodelview.View
 class NativeCore : Core {
     external override fun inflate(raw: ByteArray): ByteArray
     external override fun decodeFloats(raw: ByteArray, dtype: String, compressed: Boolean, count: Int): FloatArray
+    private external fun decodeMrmsNative(
+        file: ByteArray, west: Double, south: Double, east: Double, north: Double, step: Int, pool: Int, missing: Double, info: DoubleArray,
+    ): FloatArray
+
+    override fun decodeMrms(
+        file: ByteArray, west: Double, south: Double, east: Double, north: Double, step: Int, pool: Pool, missingAtOrBelow: Double,
+    ): MrmsWindow {
+        val info = DoubleArray(5)
+        val values = decodeMrmsNative(file, west, south, east, north, step, pool.ordinal, missingAtOrBelow, info)
+        return MrmsWindow(Grid(info[0].toInt(), info[1].toInt(), info[2].toInt()), values, info[3].toLong(), info[4])
+    }
+
     private external fun latLonToGridNative(grid: Int, lat: Double, lon: Double): DoubleArray
     private external fun gridToLatLonNative(grid: Int, column: Double, row: Double): DoubleArray
     override fun latLonToGrid(grid: Grid, lat: Double, lon: Double) = latLonToGridNative(grid.id, lat, lon)
