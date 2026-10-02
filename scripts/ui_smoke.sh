@@ -43,8 +43,14 @@ wait_for_picture() {   # $1 = name, $2 = seconds to wait
 }
 
 # a fresh install asks for an (optional) contact email at launch; a user would tap "Not now"
-sleep 6; shot email-dialog
-emu_tap_text "Not now" || { echo "FAIL: no email dialog on a fresh launch"; fail=1; }
+# (a slow emulator can take a minute to draw it: poll rather than wait a fixed time)
+found=0
+for i in $(seq 1 24); do
+  sleep 5
+  if emu_tap_text "Not now" 2>/dev/null; then found=1; break; fi
+done
+shot email-dialog-dismissed
+[ $found = 1 ] || { echo "FAIL: no email dialog on a fresh launch"; fail=1; }
 
 echo "waiting for the map (up to 6 min)"
 wait_for_picture map 360 || { echo "FAIL: the map never appeared"; fail=1; }
