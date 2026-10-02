@@ -37,7 +37,7 @@ import simplemodelview.View
 import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
 import simplemodelview.formatClock
-import simplemodelview.loopWindow
+import simplemodelview.loopWindowEndingAt
 import simplemodelview.nextPlayable
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
@@ -536,7 +536,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
-            val window = loopWindow(st.files.size, st.loopLength, fromEnd = true)
+            val window = loopWindowEndingAt(st.files.size, st.loopLength, st.index)
             val count = window.count()
             val ready = BooleanArray(st.files.size)
             var finished = false
@@ -663,7 +663,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** Renders every file of the loop into an MP4 and returns it. [onProgress] gets (done, total). Files come from the HTTP cache once played. */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val st = _state.value
-        val window = loopWindow(st.files.size, st.loopLength, fromEnd = true)
+        val window = loopWindowEndingAt(st.files.size, st.loopLength, st.index)
         val n = window.count()
         if (n < 2) return@withContext null
         val dir = sharedDir()
@@ -699,6 +699,6 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 g.columns * s to g.rows * s
             }
         }
-        return VideoSize.estimateMegabytes(size, w, h + w / 6, loopWindow(_state.value.files.size, _state.value.loopLength, fromEnd = true).count())   // + header and legend
+        return VideoSize.estimateMegabytes(size, w, h + w / 6, loopWindowEndingAt(_state.value.files.size, _state.value.loopLength, _state.value.index).count())   // + header and legend
     }
 }

@@ -23,3 +23,14 @@ fun loopLengthOptions(total: Int): List<Int> = listOf(6, 12, 24, 36).filter { it
  */
 fun loopWindow(total: Int, length: Int, fromEnd: Boolean = false): IntRange =
     if (length <= 0 || length >= total) 0 until total else if (fromEnd) (total - length) until total else 0 until length
+
+/**
+ * The [length] frames of a loop that ends at frame [end] (the one on screen): frames end-length+1 .. end, or the first [length] frames when there
+ * are fewer than that before it. 0 (or a length of the whole series) = all frames. Radar loops use this, so "12 frames" is the 12 up to the time shown.
+ */
+fun loopWindowEndingAt(total: Int, length: Int, end: Int): IntRange {
+    if (length <= 0 || length >= total) return 0 until total
+    val last = end.coerceIn(0, total - 1)
+    val start = (last - length + 1).coerceAtLeast(0)
+    return start until (start + length)
+}

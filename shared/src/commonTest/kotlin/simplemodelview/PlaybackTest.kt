@@ -48,4 +48,15 @@ class PlaybackTest {
         assertEquals(listOf(6, 0), loopLengthOptions(12))
         assertEquals(listOf(0), loopLengthOptions(4))
     }
+
+    @Test fun aLoopEndsAtTheFrameOnScreen() {
+        assertEquals(18 until 30, loopWindowEndingAt(30, 12, 29))      // at the newest scan: the newest 12
+        assertEquals(8 until 20, loopWindowEndingAt(30, 12, 19))       // looking at an older scan: the 12 up to it
+        assertEquals(0 until 12, loopWindowEndingAt(30, 12, 3))        // too few before it: from the first
+        assertEquals(0 until 30, loopWindowEndingAt(30, 0, 17))        // all
+        assertEquals(0 until 30, loopWindowEndingAt(30, 40, 17))
+        assertEquals(29 .. 29, loopWindowEndingAt(30, 1, 29))
+        assertEquals(0 until 0, loopWindowEndingAt(0, 6, 0))
+        for (end in 0 until 30) assertEquals(12, loopWindowEndingAt(30, 12, end).count())
+    }
 }

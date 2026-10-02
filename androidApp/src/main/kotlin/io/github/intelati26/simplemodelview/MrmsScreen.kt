@@ -125,7 +125,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        s.file?.let { "Valid ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}   frame ${s.index + 1}/${s.files.size}" + if (s.live && s.index == s.files.size - 1) "   \u25CF live" else "" } ?: "",
+                        s.file?.let { "Valid at ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}   frame ${s.index + 1}/${s.files.size}" + if (s.live && s.index == s.files.size - 1) "   \u25CF live" else "" } ?: "",
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
