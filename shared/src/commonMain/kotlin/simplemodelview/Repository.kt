@@ -53,7 +53,9 @@ class RefsRepository(private val http: Http, private val core: Core) {
             throw RefsException("the metadata for ${cycle.label} could not be read: ${e.message}")
         }
         // GREFS probabilities live in their own stores; a cycle without them (or a server hiccup) simply has no GREFS products
-        for (kind in listOf(StoreKind.GREFS4) + if (cycle.hasLongRange) listOf(StoreKind.GREFS24) else emptyList()) {
+        val extras = listOf(StoreKind.GREFS4) + (if (cycle.hasLongRange) listOf(StoreKind.GREFS24) else emptyList()) +
+            listOf(StoreKind.REFSCT1, StoreKind.REFSCT4, StoreKind.REFSCT_FULL)
+        for (kind in extras) {
             val extra = try { http.get(cycle.storeUrl(kind) + "/.zmetadata") } catch (e: Exception) { null }
             if (extra != null && extra.status == 200 && extra.body.isNotEmpty()) {
                 try { arrays += parseZMetadata(extra.body.decodeToString(), kind) } catch (_: Exception) { }

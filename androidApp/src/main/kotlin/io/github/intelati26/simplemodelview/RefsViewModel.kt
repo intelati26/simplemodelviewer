@@ -22,7 +22,9 @@ import simplemodelview.CycleStore
 import simplemodelview.GlobeCamera
 import simplemodelview.Grid
 import simplemodelview.globeInverse
+import simplemodelview.BackupPlace
 import simplemodelview.Place
+import simplemodelview.SettingsBackup
 import simplemodelview.isValidEmail
 import simplemodelview.Product
 import simplemodelview.decodePlaces
@@ -354,7 +356,45 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (redraw && values != null) viewModelScope.launch { rerender() }
     }
 
-    // ---- places and the point forecast ----
+    // ---- settings export / import ----
+    private fun backup(): SettingsBackup {
+        val st = _state.value
+        return SettingsBackup(
+            wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
+            contactEmail = st.settings.contactEmail, favourites = st.favourites.sorted(),
+            places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
+            product = st.product?.id ?: prefs.getString("product", null), sector = st.sector.name,
+        )
+    }
+
+    /** Writes the settings as JSON to a file the user chose (the system "save as" picker). */
+    suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+        val text = SettingsBackup.encode(backup())
+        val ok = withContext(Dispatchers.IO) {
+            try { resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) } != null } catch (e: Exception) { false }
+        }
+        update { it.copy(notice = if (ok) "Settings exported: ${backup().favourites.size} favourites, ${backup().places.size} places." else "Could not write the settings file.") }
+    }
+
+    /** Reads a settings file the user chose, validates it and applies it. Nothing changes if it is not a simplemodelview backup. */
+    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+        val text = withContext(Dispatchers.IO) {
+            try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null }
+        }
+        val b = text?.let { SettingsBackup.decode(it) }
+        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
+        val current = _state.value.settings
+        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }))
+        prefs.edit().putStringSet("favourites", b.favourites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
+        update { it.copy(favourites = b.favourites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
+        if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
+        Sector.all.firstOrNull { it.name == b.sector }?.let { setGlobe(false); pickSector(it) }
+        val product = b.product?.let { id -> _state.value.products.firstOrNull { it.id == id } }
+        if (product != null) pickProduct(product) else b.product?.let { prefs.edit().putString("product", it).apply() }
+        update { it.copy(notice = "Settings imported: ${b.favourites.size} favourites, ${b.places.size} places.") }
+    }
+
+    // ---- places ----
     fun savePlace(name: String, lat: Double, lon: Double) {
         val places = (_state.value.places.filter { it.name != name } + Place(name.ifBlank { placeLabel(lat, lon) }, lat, lon))
         prefs.edit().putString("places", encodePlaces(places)).apply()

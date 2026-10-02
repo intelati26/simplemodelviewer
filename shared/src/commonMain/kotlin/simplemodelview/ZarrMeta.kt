@@ -16,7 +16,7 @@ const val GRID_ROWS = 1059
 /** The grids of SPC's data. [id] matches the core's SPC_GRID_* values. */
 enum class Grid(val id: Int, val columns: Int, val rows: Int) {
     REFS(0, 1799, 1059),      // 3 km
-    GREFS(1, 185, 129);       // 42 km, the calibrated probability fields
+    GREFS(1, 185, 129);       // 40.6 km (NCEP grid 212): the calibrated probability fields (GREFS) and thunder probability (REFSCT)
 
     val cells get() = columns * rows
 
@@ -32,6 +32,9 @@ enum class StoreKind(val prefix: String, val filePrefix: String) {
     REFS("", "refs-spc"),
     GREFS4("grefs-4hr/", "grefs-4hr"),
     GREFS24("grefs-24hr/", "grefs-24hr"),
+    REFSCT1("refsct-1hr/", "refsct-1hr"),           // thunder probability: 1-h, 4-h and remainder-of-convective-day periods
+    REFSCT4("refsct-4hr/", "refsct-4hr"),
+    REFSCT_FULL("refsct-full/", "refsct-full"),
 }
 
 data class ArrayInfo(

@@ -11,9 +11,11 @@
 
 // A Lambert conformal conic grid with one standard parallel on a sphere of radius 6371229 m (the grids of SPC's REFS data).
 // REFS: 1799 x 1059 points, 3 km, parallel 38.5, central meridian 262.5 E, first (south-west) point 21.138123 N 237.280472 E; the
-// formulas reproduce the store's own latitude / longitude arrays to better than 1e-10 degrees. GREFS: 185 x 129 points, 42.081 km,
-// effective parallel 45.68967, central meridian 245 E, first point 12.19 N 226.540985 E: these three were fitted to corner and centre
-// points of the store's own latitude / longitude arrays (residual < 1e-5 cells) since SPC does not document the grid.
+// formulas reproduce the store's own latitude / longitude arrays to better than 1e-10 degrees. GREFS / REFSCT: 185 x 129 points on NCEP
+// grid 212 as the stores' GRIB attributes state it (Lambert conformal, 40.635 km, parallel 25, central meridian 265 E, first point
+// 12.19 N 226.541 E). The REFSCT stores' latitude / longitude arrays agree with it. The GREFS store's own latitude / longitude arrays do NOT
+// (they follow a different mapping), and its data do not follow them either: correlating GREFS wind probability with REFS storm
+// reflectivity gives ~0.37 on this grid and ~0.08 on the arrays' mapping. Use these parameters, not that store's coordinate arrays.
 struct LambertGrid {
     LambertGrid(int cols, int rows, double cellMetres, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
         : columns(cols), rows(rows), cell(cellMetres), lon0Rad(degrees(centralMeridianDeg)) {

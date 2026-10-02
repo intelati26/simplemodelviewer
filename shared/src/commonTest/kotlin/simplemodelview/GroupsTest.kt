@@ -14,6 +14,7 @@ class GroupsTest {
     @Test fun guidanceIsGrefs() {
         assertEquals(Groups.GUIDANCE, g("grefs-4hr/tor_prob"))
         assertEquals(Groups.GUIDANCE, g("grefs-24hr/hail_prob"))
+        assertEquals(Groups.GUIDANCE, g("refsct-1hr/thunder_prob"))
     }
 
     @Test fun synopticSevereWinterFirePrecip() {

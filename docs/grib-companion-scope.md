@@ -92,3 +92,7 @@ Do not fork. Finish the provider split first (`separating-spc.md` steps 1-4), th
 2. Separate identity (own name, icon, application ID) or a mode inside simplemodelview?
 3. Contours in a later version? They are the biggest functional gap to wxqt.
 4. Same distribution rule (GitHub only) and the same optional contact-email prompt?
+
+## Lesson carried over from simplemodelview
+Do not trust a store's own coordinate arrays blindly: check a projection against the data (correlate a field with another field on a known grid) before shipping it.
+GREFS's latitude / longitude arrays disagreed with its data; the grid its GRIB attributes described was right.

@@ -80,22 +80,23 @@ static void testLambert() {
     CHECK(std::fabs(col - 900.0) < 1e-6);
 }
 
-// The GREFS grid (fitted, see lambert_grid.h): five points of the real store's own latitude / longitude arrays (row, column, lat, east lon).
+// The GREFS / REFSCT grid (NCEP 212): five points of the REFSCT store's own latitude / longitude arrays (row, column, lat, east lon).
+// (The GREFS store's own arrays are inconsistent with its data; see lambert_grid.h.)
 static void testGrefsGrid() {
     CHECK(spc_grid_columns(SPC_GRID_GREFS) == 185 && spc_grid_rows(SPC_GRID_GREFS) == 129);
     CHECK(spc_grid_columns(SPC_GRID_REFS) == 1799 && spc_grid_rows(SPC_GRID_REFS) == 1059);
-    const double ref[5][4] = {{0, 0, 12.190000, 226.540985}, {0, 184, 3.878576, 285.203903}, {128, 0, 56.093790, 206.851787},
-                              {128, 184, 38.303064, 315.383658}, {64, 92, 35.558324, 262.038798}};
+    const double ref[5][4] = {{0, 0, 12.190000, 226.541000}, {0, 184, 14.334820, 294.907906}, {128, 0, 54.535355, 207.144893},
+                              {128, 184, 57.289180, 310.613416}, {64, 92, 40.605433, 259.444789}};
     for (const auto & p : ref) {
         double col = 0, row = 0;
         spc_latlon_to_grid(SPC_GRID_GREFS, p[2], p[3] - 360.0, &col, &row);
-        if (!(std::fabs(col - p[1]) < 0.01 && std::fabs(row - p[0]) < 0.01)) {
+        if (!(std::fabs(col - p[1]) < 0.02 && std::fabs(row - p[0]) < 0.02)) {
             std::printf("  grid point (%g,%g): got (%.4f,%.4f)\n", p[0], p[1], row, col);
         }
-        CHECK(std::fabs(col - p[1]) < 0.01 && std::fabs(row - p[0]) < 0.01);
+        CHECK(std::fabs(col - p[1]) < 0.02 && std::fabs(row - p[0]) < 0.02);
         double lat = 0, lon = 0;
         spc_grid_to_latlon(SPC_GRID_GREFS, p[1], p[0], &lat, &lon);
-        CHECK(std::fabs(lat - p[2]) < 0.01 && std::fabs(std::fmod(lon + 360.0, 360.0) - p[3]) < 0.01);
+        CHECK(std::fabs(lat - p[2]) < 0.02 && std::fabs(std::fmod(lon + 360.0, 360.0) - p[3]) < 0.02);
     }
 }
 

@@ -58,7 +58,7 @@ Name and pricing; licence; distribution (F-Droid/GitHub only vs Play); alerts in
 | Repo layout, GPLv3 notice, README | Android / iOS app modules and Compose UI |
 | `core/`: blosc decode (lz4+zstd) ported from wxqt, dtype conversion, Lambert grid, rasteriser (blended / banded / paintball), C API | JNI / cinterop bindings, map line geometry |
 | Core unit tests incl. byte-identical decode vs libblosc - pass on Linux | Real-chunk fixtures and golden images |
-| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass; run on an emulator against live data. Done beyond v1: GREFS 4-h / 24-h tornado, wind and hail probabilities (own 42 km grid, projection fitted to the store's coordinates), globe, export (screen area / meso sector / globe, PNG or MP4 loop), widget, saved places, new-run banner, settings, tablet layout | iOS app, REFSCT thunder probability (store not located), golden images, accessibility pass |
+| `shared/` and `androidApp/`: app builds and lints in CI; shared tests pass; run on an emulator against live data. Done beyond v1: GREFS 4-h / 24-h tornado, wind and hail probabilities and REFSCT thunder probability (own 40.6 km grid = NCEP 212; see lambert_grid.h), globe, export (screen area / meso sector / globe, PNG or MP4 loop), widget, saved places, new-run banner, settings, tablet layout | iOS app, golden images, accessibility pass |
 | CI: `core-tests` workflow; `android` skeleton | `android-ui`, `ios`, `release` workflows |
 
 Next: (1) fetch real chunks as fixtures and add golden tests, (2) Gradle Android + iOS targets and the JNI/cinterop hello app, (3) port SPC titles
@@ -81,3 +81,8 @@ and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
   Name check (2026-10-01): no app by this name was found; the exact name `SimpleModelView` is a small Unity UI package (EpistasisLab/SimpleModelView), a code
   library in an unrelated domain, and "model viewer" mostly returns 3D-model viewers, so the name is not self-explanatory for weather: say "SPC REFS" in
   the description. The SPC name is not used in the app's name or icon (no implied NOAA / NWS / SPC endorsement).
+- **Lightning (searched 2026-10-02):** the REFS data contain no lightning-flash product. The viewer's script and the 175 arrays of the REFS store have no flash / lightning
+  fields; the nearest thing is REFSCT **thunder probability** (stores `refsct-1hr`, `refsct-4hr`, `refsct-full`), which is now in the app under Guidance.
+- **GREFS grid correction:** the GREFS and REFSCT stores share NCEP grid 212 (Lambert, parallel 25, central meridian 265 E, 40.635 km). The GREFS store's own latitude /
+  longitude arrays are inconsistent with its data (correlation with storm reflectivity 0.08 vs 0.37 on the grid-212 mapping), so the app uses the grid-212 parameters and
+  ignores that store's coordinate arrays. GREFS values are in percent already (not fractions).

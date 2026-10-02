@@ -40,7 +40,7 @@ object Groups {
 
     /** The bucket a product belongs to, matching the site's menu. [hasMembers]: a single-member (4-D) field. */
     fun of(id: String, hasMembers: Boolean): String = when {
-        id.startsWith("grefs-") -> GUIDANCE
+        id.startsWith("grefs-") || id.startsWith("refsct-") -> GUIDANCE
         hasMembers -> MEMBERS
         id.startsWith("s10m_01h") || id.startsWith("rh2m") || id.startsWith("fosberg") || id.startsWith("gust") -> FIRE
         listOf("z500", "z700", "z850", "t500", "t700", "t850", "t2m", "td2m", "pmsl", "cld_", "pwat").any { id.startsWith(it) } -> SYNOPTIC
@@ -53,7 +53,7 @@ object Groups {
 }
 
 object Catalogue {
-    /** GREFS: SPC's calibrated 4-h and 24-h probabilities of tornadoes, damaging wind and severe hail (a coarse 42 km grid). */
+    /** GREFS: SPC's calibrated 4-h and 24-h probabilities of tornadoes, damaging wind and severe hail (a coarse 40.6 km grid), and REFSCT thunder probability. */
     private val grefsList = listOf(
         "grefs-4hr/tor_prob" to "4-h Tornado Probability (GREFS)",
         "grefs-4hr/wind_prob" to "4-h Damaging Wind Probability (GREFS)",
@@ -61,6 +61,10 @@ object Catalogue {
         "grefs-24hr/tor_prob" to "24-h Tornado Probability (GREFS)",
         "grefs-24hr/wind_prob" to "24-h Damaging Wind Probability (GREFS)",
         "grefs-24hr/hail_prob" to "24-h Severe Hail Probability (GREFS)",
+        // REFSCT: thunder probability, the viewer's "Guidance" menu has these three (there is no lightning-flash product in the data)
+        "refsct-1hr/thunder_prob" to "1-h Thunder Probability (REFSCT)",
+        "refsct-4hr/thunder_prob" to "4-h Thunder Probability (REFSCT)",
+        "refsct-full/thunder_prob" to "Remainder of Convective Day Thunder Probability (REFSCT)",
     )
     private val allCurated = curatedList + grefsList
     private val curated = allCurated.toMap()
@@ -68,12 +72,17 @@ object Catalogue {
 
     /** Colours and units from the array's name and its `units` attribute (ported from the desktop viewer). */
     fun styleFor(id: String, units: String): Style {
+        if (id.startsWith("refsct-")) {
+            // already in percent (0-100), unlike GREFS's fractions
+            return Style(Kind.Banded, bands(listOf(10, 20, 30, 40, 50, 60, 70, 80, 90),
+                listOf(0xfef0a8, 0xfed976, 0xfeb24c, 0xfd8d3c, 0xfc4e2a, 0xe31a1c, 0xbd0026, 0x800026, 0x4d004b)), hideBelow = 10.0, units = "%", digits = 0)
+        }
         if (id.startsWith("grefs-")) {
-            // stored as fractions; shown as percent with the colours of SPC's convective outlook probabilities
+            // stored in percent already (wind peaks ~17, tornado ~3; verified on real chunks), shown with the colours of SPC's convective outlook probabilities
             val tornado = id.endsWith("tor_prob")
             val stops = if (tornado) listOf(2.0 to 0x008B00, 5.0 to 0x8B4726, 10.0 to 0xFFC800, 15.0 to 0xFF0000, 30.0 to 0xFF00FF, 45.0 to 0x912CEE, 60.0 to 0x104E8B)
             else listOf(5.0 to 0x8B4726, 15.0 to 0xFFC800, 30.0 to 0xFF0000, 45.0 to 0xFF00FF, 60.0 to 0x912CEE)
-            return Style(Kind.Banded, stops.map { Stop(it.first, it.second) }, factor = 100.0, hideBelow = stops.first().first, units = "%", digits = 0)
+            return Style(Kind.Banded, stops.map { Stop(it.first, it.second) }, factor = 1.0, hideBelow = stops.first().first, units = "%", digits = 0)
         }
         if ("_pb_" in id) return Style(Kind.Paintball, units = "members")
         if ("nmep" in id || "_prob" in id)

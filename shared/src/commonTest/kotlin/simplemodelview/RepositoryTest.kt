@@ -69,7 +69,7 @@ class MetaTest {
         assertEquals(Grid.GREFS, p.grid)
         assertEquals("grefs-4hr/valid_time", p.timeDimension)
         assertEquals(Kind.Banded, p.style.kind)
-        assertEquals(100.0, p.style.factor)
+        assertEquals(1.0, p.style.factor)                           // GREFS values are already percent (unlike REFS probability fractions)
         assertEquals(2.0, p.style.hideBelow)                        // tornado probabilities start at 2%
         assertEquals(5.0, products.first { it.id == "grefs-4hr/wind_prob" }.style.hideBelow)
         // buckets follow the site's menu order: Guidance (GREFS) comes first
@@ -81,6 +81,21 @@ class MetaTest {
         assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/grefs-4hr_20261001_1200.zarr", c.storeUrl(StoreKind.GREFS4))
         assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/grefs-24hr_20261001_1200.zarr", c.storeUrl(StoreKind.GREFS24))
         assertEquals(c.storeUrl, c.storeUrl(StoreKind.REFS))
+    }
+
+    @Test fun refsctThunderProducts() {
+        val ct = """{"metadata":{
+          "thunder_prob/.zarray":{"shape":[60,129,185],"chunks":[1,129,185],"dtype":"<f4","fill_value":"NaN","compressor":{"id":"blosc"}},
+          "thunder_prob/.zattrs":{"_ARRAY_DIMENSIONS":["valid_time","y","x"],"units":"percent"}}}"""
+        val all = parseZMetadata(zmeta) + parseZMetadata(ct, StoreKind.REFSCT1)
+        val p = Catalogue.build(all.values).first { it.id == "refsct-1hr/thunder_prob" }
+        assertEquals("1-h Thunder Probability (REFSCT)", p.title)
+        assertEquals(Groups.GUIDANCE, p.group)
+        assertEquals(Grid.GREFS, p.grid)
+        assertEquals(1.0, p.style.factor)                  // already percent: not multiplied by 100 like the REFS probability fractions
+        assertEquals(10.0, p.style.hideBelow)
+        assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/refsct-1hr_20261001_1800.zarr", Cycle(2026, 10, 1, 18).storeUrl(StoreKind.REFSCT1))
+        assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/refsct-full_20261001_1800.zarr", Cycle(2026, 10, 1, 18).storeUrl(StoreKind.REFSCT_FULL))
     }
 
     @Test fun gridsMatchShapes() {

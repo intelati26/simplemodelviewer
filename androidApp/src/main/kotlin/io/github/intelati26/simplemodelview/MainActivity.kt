@@ -4,7 +4,9 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
@@ -132,6 +134,13 @@ private fun RefsScreen(vm: RefsViewModel) {
     var savingPlace by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sharing by remember { mutableStateOf(false) }
+    // settings export / import go through the system file pickers: the app needs no storage permission
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
+    }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); onPauseOrDispose { } }
 
     val dark = isSystemInDarkTheme()
@@ -240,7 +249,7 @@ private fun RefsScreen(vm: RefsViewModel) {
         onGo = { places = false; vm.goToPlace(it) },
         onDelete = vm::deletePlace,
     )
-    if (settings) SettingsDialog(s.settings, vm::setSettings) { settings = false }
+    if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
         onShare = { area, loop ->
@@ -535,7 +544,7 @@ private fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Plac
 }
 
 @Composable
-private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onDismiss: () -> Unit) {
+private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
@@ -555,6 +564,8 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                     }
                 }
                 var email by remember { mutableStateOf(settings.contactEmail) }
+                // follow a change from outside the field (an imported settings file) without disturbing what is being typed
+                LaunchedEffect(settings.contactEmail) { if (isValidEmail(settings.contactEmail) && settings.contactEmail != email.trim()) email = settings.contactEmail }
                 OutlinedTextField(
                     value = email, onValueChange = { email = it; if (isValidEmail(it)) onChange(settings.copy(contactEmail = it.trim())) }, singleLine = true,
                     label = { Text("Your email (optional)") }, isError = email.isNotEmpty() && !isValidEmail(email),
@@ -562,6 +573,14 @@ private fun SettingsDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Column {
+                    Text("Back up or move your settings")
+                    Text("Favourites, saved places, last product and area, and these options, as a JSON file you choose where to save.", style = MaterialTheme.typography.bodySmall)
+                    Row {
+                        TextButton(onClick = onExport) { Text("Export") }
+                        TextButton(onClick = onImport) { Text("Import") }
+                    }
+                }
                 Disclaimer()
             }
         },
