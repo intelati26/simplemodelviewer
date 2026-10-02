@@ -408,6 +408,7 @@ internal const val FAVORITES = "Favorites"
 internal fun ProductPicker(
     products: List<Product>, current: Product?, favorites: Set<String>,
     onToggle: (Product) -> Unit, onPick: (Product) -> Unit, onDismiss: () -> Unit, groups: List<String> = Groups.ordered,
+    topItem: (@Composable () -> Unit)? = null,
 ) {
     var query by remember { mutableStateOf("") }
     var open by remember { mutableStateOf(setOf<String>()) }        // buckets the user has expanded
@@ -418,6 +419,7 @@ internal fun ProductPicker(
     val buckets: List<Pair<String, List<Product>>> =
         listOf(FAVORITES to shown.filter { it.id in favorites }) + groups.map { g -> g to shown.filter { it.group == g } }
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        topItem?.invoke()
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true, label = { Text("Search products") })
         LazyColumn(Modifier.fillMaxWidth()) {
             for ((name, list) in buckets) {

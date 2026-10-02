@@ -112,6 +112,10 @@ fun parseMrmsListing(xml: String): List<MrmsFile> {
     return files.sortedBy { it.validTime }
 }
 
+/** The file whose valid time is closest to [validTime], or null when none is within [toleranceSeconds] (an overlay matched to a radar frame). */
+fun nearestFile(files: List<MrmsFile>, validTime: Long, toleranceSeconds: Long): MrmsFile? =
+    files.minByOrNull { kotlin.math.abs(it.validTime - validTime) }?.takeIf { kotlin.math.abs(it.validTime - validTime) <= toleranceSeconds }
+
 /** The cells to skip so a window of [west]..[east] is about [targetColumns] cells wide (1 = every cell: the files' full resolution). */
 fun mrmsStep(cellDegrees: Double, west: Double, east: Double, targetColumns: Int, dataSaver: Boolean): Int {
     val columns = (east - west) / cellDegrees
@@ -137,6 +141,20 @@ class MrmsRepository(private val http: Http, private val core: Core) {
             if (files.isNotEmpty()) return files.takeLast(product.frames)
         }
         return emptyList()
+    }
+
+    /**
+     * Every file of [product] with a valid time from [sinceEpochSeconds] to [nowEpochSeconds], oldest first (an overlay needs the files that fall in the
+     * span of the radar frames being shown; its own newest-N window would not line up with them).
+     */
+    suspend fun listFilesSince(product: MrmsProduct, sinceEpochSeconds: Long, nowEpochSeconds: Long): List<MrmsFile> {
+        val from = sinceEpochSeconds - 3L * product.cadenceMinutes * 60
+        val c = civilFromEpoch(from)
+        val prefix = "CONUS/${product.directory}/"
+        val after = "$prefix${four(c[0])}${two(c[1])}${two(c[2])}/MRMS_${product.directory}_${four(c[0])}${two(c[1])}${two(c[2])}-${two(c[3])}${two(c[4])}${two(c[5])}.grib2.gz"
+        val result = http.get("${MrmsCatalog.BUCKET}/?list-type=2&max-keys=1000&prefix=$prefix&start-after=$after")
+        if (result.status != 200) throw RefsException("could not list MRMS files (HTTP ${result.status})")
+        return parseMrmsListing(result.body.decodeToString()).filter { it.validTime >= sinceEpochSeconds - product.cadenceMinutes * 60 && it.validTime <= nowEpochSeconds + 300 }
     }
 
     /** Downloads the file (an HTTP cache keeps it) and decodes the [west]..[east] x [south]..[north] window, every [step]-th cell. */

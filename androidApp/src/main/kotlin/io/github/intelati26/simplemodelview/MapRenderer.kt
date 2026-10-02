@@ -13,9 +13,12 @@ import simplemodelview.Style
 import simplemodelview.View
 import simplemodelview.fixed
 
-/** Draws one finished map picture: background, data (native rasteriser), lines. */
+/** A second field drawn over the data (under the map lines): [bitmap] has one pixel per cell of its own window and is stretched onto [dst], in pixels of the base picture. */
+class Overlay(val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean)
+
+/** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlay: Overlay? = null): Bitmap {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
@@ -25,6 +28,14 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
         canvas.drawBitmap(Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, null)
+        if (overlay != null) {
+            val paint = Paint().apply { isFilterBitmap = false }       // cells stay crisp
+            canvas.drawBitmap(overlay.bitmap, null, overlay.dst, paint)
+            if (overlay.bold) for ((dx, dy) in listOf(-1f to 0f, 1f to 0f, 0f to -1f, 0f to 1f)) {   // a pixel of weight for single cells (a strike, a thin track)
+                val r = android.graphics.RectF(overlay.dst); r.offset(dx, dy)
+                canvas.drawBitmap(overlay.bitmap, null, r, paint)
+            }
+        }
         lines.draw(canvas, view, dark)
         return bitmap
     }

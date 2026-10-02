@@ -26,6 +26,9 @@ The SPC page uses the color tables of SPC's own viewer (levels, band colors, the
 ## Play and loop length
 Play starts at once on the frames that have already arrived and widens the cycle as the rest download (1-5, then 1-10, then 1-20, ...), going back to frame 1 at the end. "Loop: N" next to Play chooses how many frames it covers: the first N of a model run, or the newest N radar scans (6 / 12 / 24 / 36 or all); only those frames are downloaded, and a loop video export covers the same frames. The choice is remembered per page.
 
+## Overlay
+On the MRMS page, "Overlay" draws a second product over the first: any MRMS product (lightning strikes, lightning probability, any of the 14 rotation products, hail size, ...), cut from the same area and drawn with its own colors, with a **minimum value** ("show only rotation of at least 10") chosen from its own band edges. Each radar frame gets the overlay file nearest in time (strike files come every minute, radar every 2). Loops prefetch the overlay files too, exports include the overlay, and the tap read-out shows both values. Overlay files are small: strike density 1-2 KB, rotation tracks about 100-160 KB (30 min to 1 h), against about 1.4 MB for a radar frame. The overlay is not drawn on the globe.
+
 ## UI tests (device or emulator)
 ```
 ./gradlew :androidApp:connectedDebugAndroidTest

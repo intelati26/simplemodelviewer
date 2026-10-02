@@ -38,6 +38,13 @@ import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
 import simplemodelview.formatClock
 import simplemodelview.loopWindowEndingAt
+import simplemodelview.nearestFile
+import simplemodelview.overlayIsSparse
+import simplemodelview.overlayThresholdChoices
+import simplemodelview.overlayToleranceSeconds
+import simplemodelview.defaultOverlayThresholdIndex
+import simplemodelview.shownValue
+import simplemodelview.fixed
 import simplemodelview.nextPlayable
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
@@ -74,6 +81,11 @@ data class MrmsState(
     val units: Units = Units(),
     val live: Boolean = false,                   // the page is on screen and checks for newer scans by itself
     val loopLength: Int = 0,                     // how many of the newest scans Play and a loop video cover; 0 = all
+    val overlay: MrmsProduct? = null,            // a second product drawn over the first
+    val overlayIndex: Int = 0,                   // its minimum value: an index into overlayThresholdChoices
+    val overlayFiles: List<MrmsFile> = emptyList(),
+    val overlayStyle: Style? = null,             // as drawn (units, minimum), for its legend
+    val overlayInfo: String? = null,             // which overlay file is on the picture, or why there is none
 ) {
     val file: MrmsFile? get() = files.getOrNull(index)
 }
@@ -109,6 +121,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             settings = readSettings(),
             units = readUnits(),
             loopLength = prefs.getInt("mrms_loop_frames", 0),
+            overlay = prefs.getString("mrms_overlay", null)?.let { MrmsCatalog.byId(it) }?.let { withSavedLevel(it) },
         )
     )
     val state: StateFlow<MrmsState> = _state
@@ -136,7 +149,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val dataSaver get() = prefs.getBoolean("data_saver", false)
     private val wifiOnlyLoop get() = prefs.getBoolean("wifi_only", false)
 
-    init { load(); promptForContact() }
+    init {
+        _state.value.overlay?.let { ov -> update { it.copy(overlayIndex = overlayIndexFor(ov)) } }
+        load(); promptForContact()
+    }
 
     /** The SPC page may have changed favorites, places or settings while this page was away. */
     fun reloadFromPrefs() = update {
@@ -156,6 +172,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                     if (files.isEmpty()) throw IllegalStateException("No recent ${_state.value.product.title} files on the MRMS server.")
                     lastLoad = System.currentTimeMillis()
                     update { it.copy(files = files, index = files.size - 1) }
+                    refreshOverlayFiles()
                     showCurrent()
                     return@launch
                 } catch (e: CancellationException) {
@@ -189,6 +206,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val atNewest = st.index == st.files.size - 1
             val keep = st.file?.key
             update { it.copy(files = files, index = if (atNewest) files.size - 1 else files.indexOfFirst { f -> f.key == keep }.coerceAtLeast(0)) }
+            refreshOverlayFiles()
             if (atNewest) showFrame()
         } catch (e: CancellationException) { throw e } catch (_: Exception) { /* a failed check is not an error to show */ }
     }
@@ -228,6 +246,97 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("mrms_level_${current.id}", level).apply()
         update { it.copy(product = current.copy(level = level)) }
         load()
+    }
+
+    // ---- overlay: a second product over the first ----
+    private fun overlayIndexFor(p: MrmsProduct): Int {
+        val choices = overlayThresholdChoices(styleOf(p))
+        if (choices.isEmpty()) return 0
+        val saved = prefs.getInt("mrms_overlay_idx_${p.id}", -1)
+        return if (saved in choices.indices) saved else defaultOverlayThresholdIndex(p, choices.size)
+    }
+
+    /** The overlay's style as drawn: its own palette, units and colors, with nothing below the chosen minimum. */
+    private fun overlayStyleOf(p: MrmsProduct, index: Int): Style {
+        val style = styleOf(p)
+        val choices = overlayThresholdChoices(style)
+        return if (choices.isEmpty()) style else style.copy(hideBelow = maxOf(style.hideBelow, choices[index.coerceIn(0, choices.size - 1)]))
+    }
+
+    /** Chooses the overlay (null: none). The files of its product that fall in the span of the radar frames are listed, and the picture redrawn. */
+    fun pickOverlay(picked: MrmsProduct?) {
+        stopPlaying()
+        if (picked == null) {
+            prefs.edit().remove("mrms_overlay").apply()
+            update { it.copy(overlay = null, overlayFiles = emptyList(), overlayStyle = null, overlayInfo = null) }
+            shownOverlay = null
+            showFrame()
+            return
+        }
+        val product = withSavedLevel(picked)
+        prefs.edit().putString("mrms_overlay", product.id).apply()
+        update { it.copy(overlay = product, overlayIndex = overlayIndexFor(product), overlayFiles = emptyList()) }
+        frameJob?.cancel()
+        frameJob = viewModelScope.launch {
+            refreshOverlayFiles()
+            try { showCurrent() } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(busy = false, error = e.message) } }
+        }
+    }
+
+    /** Limits the overlay to values from the chosen minimum up (an index into the choices). */
+    fun setOverlayThreshold(index: Int) {
+        val ov = _state.value.overlay ?: return
+        prefs.edit().putInt("mrms_overlay_idx_${ov.id}", index).apply()
+        update { it.copy(overlayIndex = index) }
+        showFrame()
+    }
+
+    private suspend fun refreshOverlayFiles() {
+        val st = _state.value
+        val ov = st.overlay ?: return
+        val first = st.files.firstOrNull() ?: return
+        val files = try { repo.listFilesSince(ov, first.validTime - 120, System.currentTimeMillis() / 1000) }
+        catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+        update { it.copy(overlayFiles = files) }
+    }
+
+    private fun overlayFileFor(base: MrmsFile): MrmsFile? {
+        val st = _state.value
+        val ov = st.overlay ?: return null
+        return nearestFile(st.overlayFiles, base.validTime, overlayToleranceSeconds(ov))
+    }
+
+    private class OverlayResult(val layer: Overlay, val shown: Pair<Product, FloatArray>, val info: String)
+    private var shownOverlay: Pair<Product, FloatArray>? = null
+
+    /**
+     * The overlay for one radar frame: the overlay file nearest in time, cut from the same latitude / longitude box, drawn with its own style (and minimum)
+     * and placed on the base picture by where its cells fall (its grid can differ a little from the base's: another cell size). Null without an overlay or a file.
+     */
+    private suspend fun overlayLayer(baseFile: MrmsFile, label: String, box: DoubleArray, base: View, cache: Boolean, stepOf: (MrmsProduct) -> Int): OverlayResult? {
+        val st = _state.value
+        val ov = st.overlay ?: return null
+        val file = overlayFileFor(baseFile) ?: return null
+        val frame = try { decode(ov, file, "$label|overlay", box, stepOf(ov), cache) } catch (e: CancellationException) { throw e } catch (_: Exception) { return null }
+        val g = frame.window.grid
+        val (latA, lonA) = core.gridToLatLon(g, 0.0, 0.0).let { it[0] to it[1] }
+        val (latB, lonB) = core.gridToLatLon(g, g.columns - 1.0, g.rows - 1.0).let { it[0] to it[1] }
+        val a = core.latLonToGrid(base.grid, latA, lonA)
+        val b = core.latLonToGrid(base.grid, latB, lonB)
+        val dc = if (g.columns > 1) (b[0] - a[0]) / (g.columns - 1) else 1.0           // base cells per overlay cell
+        val dr = if (g.rows > 1) (b[1] - a[1]) / (g.rows - 1) else 1.0
+        val s = base.scale.toDouble()
+        val dst = android.graphics.RectF(
+            ((a[0] - 0.5 * dc + 0.5) * s).toFloat(), ((base.rows - (b[1] + 0.5 * dr)) * s).toFloat(),
+            ((b[0] + 0.5 * dc + 0.5) * s).toFloat(), ((base.rows - (a[1] - 0.5 * dr)) * s).toFloat(),
+        )
+        val style = overlayStyleOf(ov, st.overlayIndex)
+        val one = View("overlay", 0, 0, g.columns, g.rows, 1, 1, g)
+        val argb = IntArray(g.columns * g.rows)
+        withContext(Dispatchers.Default) { core.render(frame.window.values, one, style, IntArray(10), argb) }
+        val bitmap = Bitmap.createBitmap(argb, g.columns, g.rows, Bitmap.Config.ARGB_8888)
+        val product = Product(ov.directory, ov.displayTitle, ov.group, style, hasMembers = false, timeDimension = null, grid = g)
+        return OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov)), product to frame.window.values, "${ov.displayTitle}: ${formatClock(file.validTime)}")
     }
 
     fun pickSector(sector: Sector) {
@@ -306,11 +415,19 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val grid = window.grid
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark) }
+        val ov = overlayLayer(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov?.layer) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
-        update { it.copy(map = bitmap, style = synthetic.style, busy = false, cellKilometers = window.sourceCellDegrees * step * 111.0) }
+        shownOverlay = ov?.shown
+        val ovStyle = st.overlay?.let { overlayStyleOf(it, st.overlayIndex) }
+        val info = when {
+            st.overlay == null -> null
+            ov != null -> ov.info
+            else -> "No ${st.overlay.displayTitle} data near this time"
+        }
+        update { it.copy(map = bitmap, style = synthetic.style, busy = false, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyle = ovStyle, overlayInfo = info) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -343,7 +460,13 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val column = floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row), tapLatLon = lat to lon) }
+        var text = readout(core, product, values, emptyList(), column, row)
+        shownOverlay?.let { (op, ovValues) ->
+            val c = core.latLonToGrid(op.grid, lat, lon)
+            val v = shownValue(op.style, ovValues, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
+            text += "   \u00B7 ${op.title.substringBefore(" (")}: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
+        }
+        update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon) }
     }
 
     fun onGlobeTap(px: Float, py: Float) {
@@ -549,7 +672,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                     coroutineScope {
                         for (i in window) launch {
                             gate.withPermit {
-                                try { repo.prefetch(st.files[i]); ready[i] = true } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                                try { repo.prefetch(st.files[i]); ready[i] = true; overlayFileFor(st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } } } catch (e: CancellationException) { throw e } catch (_: Exception) { }
                             }
                             done += 1
                             update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
@@ -616,6 +739,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val v = view
         val frame: MrmsFrame
         val box: View
+        val overlayResult: OverlayResult?
         if (area == ShareArea.Screen && v != null) {
             // the visible part, as a latitude / longitude box through the shown window's grid
             val (l, t, r, b) = viewport.toList()
@@ -623,23 +747,28 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val (south, west) = core.gridToLatLon(g, floor(l * g.columns).toDouble(), floor((1f - b) * g.rows).toDouble()).let { it[0] to it[1] }
             val (north, east) = core.gridToLatLon(g, ceil(r * g.columns) - 1.0, ceil((1f - t) * g.rows) - 1.0).let { it[0] to it[1] }
             val step = mrmsStep(product.cellDegrees, west, east, 2400, false)
-            frame = decode(product, file, "screen", doubleArrayOf(west - 0.02, south - 0.02, east + 0.02, north + 0.02), step, cache = false)
+            val coords = doubleArrayOf(west - 0.02, south - 0.02, east + 0.02, north + 0.02)
+            frame = decode(product, file, "screen", coords, step, cache = false)
             val g2 = frame.window.grid
             box = View("Screen area", 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
+            overlayResult = overlayLayer(file, "screen", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, west, east, 2400, false) }
         } else {
             val sector = sectorOf(area)
             frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector))
             val g2 = frame.window.grid
             box = View(sector.name, 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
+            overlayResult = overlayLayer(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
         }
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false)
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResult?.layer)
         }
         return bitmap to style
     }
 
-    private fun header(file: MrmsFile) =
-        "Valid ${formatClock(file.validTime, 0)}   Data: NOAA/NSSL MRMS (experimental viewer)"
+    private fun header(file: MrmsFile): String {
+        val ov = _state.value.overlay
+        return "Valid ${formatClock(file.validTime, 0)}" + (if (ov != null) "   + ${ov.displayTitle}" else "") + "   Data: NOAA/NSSL MRMS (experimental viewer)"
+    }
 
     private fun fileName(product: MrmsProduct, file: MrmsFile, extension: String): String {
         val c = simplemodelview.civilFromEpoch(file.validTime)

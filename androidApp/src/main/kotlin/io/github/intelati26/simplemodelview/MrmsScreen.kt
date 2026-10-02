@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import simplemodelview.MrmsCatalog
+import simplemodelview.Stop
+import simplemodelview.overlayThresholdChoices
 import simplemodelview.MrmsProduct
 import simplemodelview.Sector
 import simplemodelview.fixed
@@ -73,6 +75,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
+    var overlayPicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
@@ -144,6 +147,11 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 }
             }
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
+            OverlayRow(s.overlay, s.overlayStyle, s.overlayIndex, onPick = { overlayPicker = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
+            s.overlayStyle?.let { st -> if (s.overlay != null) {
+                Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())
+                s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            } }
             s.style?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -221,6 +229,12 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
             },
         )
     }
+    if (overlayPicker) ProductPicker(
+        products, products.firstOrNull { it.id == s.overlay?.id }, s.favorites, onToggle = vm::toggleFavorite,
+        onPick = { picked -> overlayPicker = false; MrmsCatalog.byId(picked.id)?.let(vm::pickOverlay) }, onDismiss = { overlayPicker = false },
+        groups = MrmsCatalog.groups,
+        topItem = { TextButton(onClick = { overlayPicker = false; vm.pickOverlay(null) }, Modifier.padding(horizontal = 8.dp)) { Text(if (s.overlay == null) "No overlay (selected)" else "No overlay") } },
+    )
     if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
@@ -245,6 +259,29 @@ private fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
+        }
+    }
+}
+
+/** "Overlay: none" or the overlay product with its minimum value and a clear button: a second field (lightning, rotation, ...) drawn over the first. */
+@Composable
+private fun OverlayRow(overlay: MrmsProduct?, style: simplemodelview.Style?, index: Int, onPick: () -> Unit, onThreshold: (Int) -> Unit, onClear: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onPick, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.weight(1f, fill = false)) {
+            Text(if (overlay == null) "Overlay: none" else "Overlay: ${overlay.displayTitle}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (overlay != null && style != null) {
+            val choices = overlayThresholdChoices(style)
+            if (choices.isNotEmpty()) {
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u2265 ${MapRenderer.label(Stop(choices[index.coerceIn(0, choices.size - 1)], 0), style)} ${style.units} \u25BE") }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        choices.forEachIndexed { i, v -> DropdownMenuItem(text = { Text("\u2265 ${MapRenderer.label(Stop(v, 0), style)} ${style.units}") }, onClick = { open = false; onThreshold(i) }) }
+                    }
+                }
+            }
+            TextButton(onClick = onClear, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u2715") }
         }
     }
 }

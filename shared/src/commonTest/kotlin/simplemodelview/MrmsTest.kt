@@ -221,4 +221,49 @@ class MrmsTest {
         assertTrue("prefix=CONUS/MergedRhoHV_10.00/" in url, url)
         assertTrue("start-after=CONUS/MergedRhoHV_10.00/20261002/MRMS_MergedRhoHV_10.00_" in url, url)
     }
+
+    private fun f(valid: Long) = MrmsFile("CONUS/x/20261002/MRMS_x_$valid.grib2.gz", valid, null, 1L)
+
+    @Test fun anOverlayFileIsMatchedByNearestTime() {
+        val files = listOf(f(1000), f(1060), f(1120), f(1180))      // lightning, every minute
+        assertEquals(1060L, nearestFile(files, 1075, 150)!!.validTime)
+        assertEquals(1120L, nearestFile(files, 1100, 150)!!.validTime)    // a tie goes to the earlier... checked below
+        assertEquals(1180L, nearestFile(files, 1500, 400)!!.validTime)
+        assertNull(nearestFile(files, 2000, 150))                         // nothing near enough
+        assertNull(nearestFile(emptyList(), 1000, 150))
+    }
+
+    @Test fun overlayToleranceFollowsTheOverlaysOwnCadence() {
+        assertEquals(150L, overlayToleranceSeconds(MrmsCatalog.byId("NLDN_CG_005min_AvgDensity_00.00")!!))      // 1-minute files: 2.5 min
+        assertEquals(180L, overlayToleranceSeconds(MrmsCatalog.byId("RotationTrack60min_00.50")!!))             // 2-minute files: 3 min
+        assertEquals(5400L, overlayToleranceSeconds(MrmsCatalog.byId("MultiSensor_QPE_24H_Pass2_00.00")!!))     // hourly: 1.5 h
+    }
+
+    @Test fun thresholdChoicesAreTheStylesOwnBandEdges() {
+        val rotation = MrmsCatalog.byId("RotationTrack60min_00.50")!!
+        val choices = overlayThresholdChoices(rotation.style)
+        assertEquals(listOf(2.0, 4.0, 6.0, 10.0, 15.0, 30.0), choices)
+        assertEquals(10.0, choices[defaultOverlayThresholdIndex(rotation, choices.size)], 0.0)       // "high rotation" by default
+        val lightning = MrmsCatalog.byId("NLDN_CG_005min_AvgDensity_00.00")!!
+        val lc = overlayThresholdChoices(lightning.style)
+        assertEquals(lightning.style.stops.first().value, lc[defaultOverlayThresholdIndex(lightning, lc.size)], 0.0)   // every strike by default
+        assertTrue(overlayIsSparse(lightning) && overlayIsSparse(rotation) && !overlayIsSparse(MrmsCatalog.default))
+        assertEquals(emptyList(), overlayThresholdChoices(MrmsCatalog.byId("PrecipFlag_00.00")!!.style))   // categories are drawn whole
+        assertEquals(listOf(1.0, 2.0), overlayThresholdChoices(Style(Kind.Banded, listOf(Stop(1.0, 0), Stop(2.0, 0)))))
+    }
+
+    @Test fun listingASpanKeepsFilesFromThatSpanOnly() = runTest {
+        val product = MrmsCatalog.byId("NLDN_CG_005min_AvgDensity_00.00")!!
+        val stamps = (0 until 40).map { i ->
+            val c = civilFromEpoch(1790946000L - 600 - i * 60L)
+            fun p(n: Int) = n.toString().padStart(2, '0')
+            "${c[0]}${p(c[1])}${p(c[2])}-${p(c[3])}${p(c[4])}${p(c[5])}" to "2026-10-02T13:01:25.000Z"
+        }.reversed()
+        var url = ""
+        val http = object : Http { override suspend fun get(url0: String): HttpResult { if (url.isEmpty()) url = url0; return HttpResult(200, listing(*stamps.toTypedArray(), product = product.id).encodeToByteArray()) } }
+        val since = 1790946000L - 600 - 20 * 60L
+        val files = MrmsRepository(http, StubCore).listFilesSince(product, since, 1790946000L)
+        assertTrue(files.isNotEmpty() && files.all { it.validTime >= since - 60 && it.validTime <= 1790946300L })
+        assertTrue("prefix=CONUS/${product.id}/" in url && "start-after=CONUS/${product.id}/" in url, url)
+    }
 }
