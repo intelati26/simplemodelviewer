@@ -1,7 +1,9 @@
 package simplemodelview
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNames
 
 @Serializable
 data class BackupPlace(val name: String, val lat: Double, val lon: Double)
@@ -10,6 +12,7 @@ data class BackupPlace(val name: String, val lat: Double, val lon: Double)
  * What "Export settings" writes and "Import settings" reads: the user's own preferences, as readable JSON. Nothing about the data
  * provider's files, and no device identifiers. [format] lets a later version refuse or migrate an old file.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class SettingsBackup(
     val app: String = APP,
@@ -18,7 +21,8 @@ data class SettingsBackup(
     val dataSaver: Boolean = false,
     val cacheMegabytes: Int = 150,
     val contactEmail: String = "",
-    val favourites: List<String> = emptyList(),
+    @JsonNames("favourites")        // (files written before the spelling change)
+    val favorites: List<String> = emptyList(),
     val places: List<BackupPlace> = emptyList(),
     val product: String? = null,
     val sector: String? = null,
@@ -41,7 +45,7 @@ data class SettingsBackup(
             return raw.copy(
                 cacheMegabytes = raw.cacheMegabytes.coerceIn(10, 2000),
                 contactEmail = raw.contactEmail.trim().takeIf { isValidEmail(it) } ?: "",
-                favourites = raw.favourites.filter { it.isNotBlank() && it.length <= 200 }.distinct().take(500),
+                favorites = raw.favorites.filter { it.isNotBlank() && it.length <= 200 }.distinct().take(500),
                 places = raw.places.filter { it.name.isNotBlank() && it.name.length <= 100 && it.lat in -90.0..90.0 && it.lon in -180.0..180.0 }
                     .distinctBy { it.name }.take(200),
                 product = raw.product?.takeIf { it.length <= 200 },

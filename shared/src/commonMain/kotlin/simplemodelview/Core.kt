@@ -46,12 +46,12 @@ interface Core {
 
     /**
      * Renders the grid values into [argb] (view.pixelWidth x view.pixelHeight, north up, 0xAARRGGBB, transparent where nothing
-     * is shown). [memberRgb] is the paintball colour per member bit.
+     * is shown). [memberRgb] is the paintball color per member bit.
      */
     fun render(values: FloatArray, view: View, style: Style, memberRgb: IntArray, argb: IntArray)
 
     /**
-     * Renders the data onto an orthographic globe ([width] x [height], sphere of [radius] pixels centred in the buffer, looking
+     * Renders the data onto an orthographic globe ([width] x [height], sphere of [radius] pixels centered in the buffer, looking
      * down on [centerLat] / [centerLon]). Pixels outside the REFS grid stay 0; inside it with nothing to show they get
      * [domainArgb]. [stride] > 1 draws coarse blocks (a fast preview while dragging).
      */

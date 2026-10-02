@@ -1,11 +1,11 @@
 package simplemodelview
 
-/** A colour stop: value in shown units and 0xRRGGBB. */
+/** A color stop: value in shown units and 0xRRGGBB. */
 data class Stop(val value: Double, val rgb: Int)
 
-/** Thresholds and the colours of the bands between them (SPC's tables are written that way). */
-internal fun bands(thresholds: List<Number>, colours: List<Int>): List<Stop> =
-    colours.indices.filter { it < thresholds.size }.map { Stop(thresholds[it].toDouble(), colours[it]) }
+/** Thresholds and the colors of the bands between them (SPC's tables are written that way). */
+internal fun bands(thresholds: List<Number>, colors: List<Int>): List<Stop> =
+    colors.indices.filter { it < thresholds.size }.map { Stop(thresholds[it].toDouble(), colors[it]) }
 
 /** Palettes ported from the desktop viewer (SPC's own tables for reflectivity, QPF and a few more). */
 internal object Palettes {
@@ -46,24 +46,24 @@ internal object Palettes {
         Stop(20.0, 0xef8a62), Stop(40.0, 0xb2182b))
 
     fun rainbow(lo: Double, hi: Double): List<Stop> {
-        val colours = listOf(0x6a3d9a, 0x3b4cc0, 0x00a0ff, 0x00c8a0, 0x60d040, 0xe6e61e, 0xffa000, 0xe03020, 0x8c0a0a)
-        return colours.mapIndexed { i, c -> Stop(lo + (hi - lo) * i / 8.0, c) }
+        val colors = listOf(0x6a3d9a, 0x3b4cc0, 0x00a0ff, 0x00c8a0, 0x60d040, 0xe6e61e, 0xffa000, 0xe03020, 0x8c0a0a)
+        return colors.mapIndexed { i, c -> Stop(lo + (hi - lo) * i / 8.0, c) }
     }
 
     fun temperature(fahrenheit: Boolean): List<Stop> = listOf(-30 to 0xffffff, -10 to 0x9a64c8, 0 to 0x6496ff, 20 to 0x00b4ff, 32 to 0x00c864,
         50 to 0x96dc00, 70 to 0xffff00, 85 to 0xffa000, 100 to 0xff0000, 115 to 0x960000)
         .map { (v, c) -> Stop(if (fahrenheit) v.toDouble() else (v - 32.0) / 1.8, c) }
 
-    fun cloud(colour: Int): List<Stop> {
-        val r = colour shr 16 and 255; val g = colour shr 8 and 255; val b = colour and 255
+    fun cloud(color: Int): List<Stop> {
+        val r = color shr 16 and 255; val g = color shr 8 and 255; val b = color and 255
         return (0..8).map {
             val t = it / 8.0
             Stop(10.0 + 90.0 * t, ((240 + (r - 240) * t).toInt() shl 16) or ((240 + (g - 240) * t).toInt() shl 8) or (240 + (b - 240) * t).toInt())
         }
     }
 
-    /** SPC viewer's paintball colour per member, in bit order (member names in the store: HRRR, RRFS, REFS M01, ...). */
-    val memberColours = mapOf("HRRR" to 0x4c4c4c, "RRFS" to 0x007399, "REFS M01" to 0x009985, "REFS M02" to 0x009947, "REFS M03" to 0x009909,
+    /** SPC viewer's paintball color per member, in bit order (member names in the store: HRRR, RRFS, REFS M01, ...). */
+    val memberColors = mapOf("HRRR" to 0x4c4c4c, "RRFS" to 0x007399, "REFS M01" to 0x009985, "REFS M02" to 0x009947, "REFS M03" to 0x009909,
         "REFS M05" to 0x469900, "HRRR TL06" to 0x7f7f7f, "RRFS TL06" to 0x4cd3ff, "HRRR TL12" to 0xb3b3b3, "RRFS TL12" to 0xb3ecff)
 
     fun memberDisplayName(raw: String) = when (raw) {

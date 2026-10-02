@@ -31,13 +31,13 @@ is built. Companion to `grib-companion-scope.md`.
 |---|---|---|
 | Menu | `shared/fetch_menu_json_from_config.php?menu=<server path>menu_config.txt` | JSON: top-level product types and sub-products with labels and minute resolution |
 | Title | `shared/fetch_product_title_via_config.php?config_file=...&product=CREF` | plain text ("Composite Reflectivity") |
-| Legend | `shared/fetch_svg_legend_via_config.php?...&product=` | an SVG colour bar (QPE products have fixed legend files by scale) |
-| **Product picture** | `local/render_multi_domain_product_layer.php?prod_root=CREF&year&month&day&hour&minute&clon&clat&zoom&width=920&height=630&qpe_pal_option&qperate_pal_option` | **PNG, 920 x 630, RGBA**, already projected to the current Leaflet view and coloured (about 50 KB) |
+| Legend | `shared/fetch_svg_legend_via_config.php?...&product=` | an SVG color bar (QPE products have fixed legend files by scale) |
+| **Product picture** | `local/render_multi_domain_product_layer.php?prod_root=CREF&year&month&day&hour&minute&clon&clat&zoom&width=920&height=630&qpe_pal_option&qperate_pal_option` | **PNG, 920 x 630, RGBA**, already projected to the current Leaflet view and colored (about 50 KB) |
 | **Point value** | `local/get_multi_domain_rect_binary_value.php?prod_root&lon&lat&year...&minute` | JSON, see below |
 | Overlays | `shared/fetch_overlay_image_from_geo_data-conus.php` | PNG of lines for the view |
 | mPING | `shared/fetch_mping_json_on_demand.php?...&num_minutes=` | JSON reports (not MRMS data) |
 
-How a frame is made: the page computes the Leaflet view (centre, zoom, size) and asks for a picture. A PHP script runs a C++ program (the
+How a frame is made: the page computes the Leaflet view (center, zoom, size) and asks for a picture. A PHP script runs a C++ program (the
 `cpp_exec_dir` parameter points at `/home/metop/web/specific/opv/`) that reads the product's binary file for that minute, resamples it to the
 requested view with the palette and returns the PNG. **Looping** is just N such requests (default 6 frames, 10 minutes apart) kept in `Image` objects
 and flipped on a timer; nothing is cached by the app beyond the browser's image objects.
@@ -61,7 +61,7 @@ tells us the grid: column 3249 / row 1959 for 97.5 W / 35.4 N matches a 0.01 deg
 - The HTML contains a commented-out `product_viewer_shutdown_banner.css` (dated 2025-10-01) and a `<div id="shutdown_banner">`. The viewer is working
   today, but a shutdown banner exists; do not depend on it.
 
-## 4. Product catalogue (the menu file)
+## 4. Product catalog (the menu file)
 
 `menu_config.txt` is a tiny text format: a `start_top ... end_top` block of top-level types (`code|label|default minute resolution|number of options|`), then one
 `start_sub ... end_sub` block per type. 20 top-level types, about 300 sub-products, each with its own cadence:
@@ -131,4 +131,4 @@ viewed sector before drawing.
 - The shutdown banner: worth asking NSSL whether the QVS viewer is being retired; it does not affect the public GRIB2 data.
 - NCEP's `.latest` alias and the session cookie: confirm what rate NCEP expects before polling.
 - Template 5.41 details (bits per value, how missing and no-coverage are coded) still need a full decode checked against a GDAL reference.
-- Palettes: the QVS legends are SVG and the colour tables live on the server; wxqt's own MRMS palettes are the practical source.
+- Palettes: the QVS legends are SVG and the color tables live on the server; wxqt's own MRMS palettes are the practical source.

@@ -7,13 +7,13 @@ class ViewportTest {
     private fun assertNear(expected: Float, actual: Float) = assertEquals(expected, actual, 1e-4f)
 
     @Test fun unzoomedShowsAllOfTheWidth() {
-        val f = visibleFractions(1000f, 2000f, 1.5f, 1f, 0f, 0f)   // picture is 1000 x 667, centred in a tall container
+        val f = visibleFractions(1000f, 2000f, 1.5f, 1f, 0f, 0f)   // picture is 1000 x 667, centered in a tall container
         assertNear(0f, f[0]); assertNear(1f, f[2])
         assertNear(0f, f[1]); assertNear(1f, f[3])                  // all of the height too (clamped)
     }
 
     @Test fun heightLimitedPictureIsFittedInsideTheContainer() {
-        // a 1.5:1 picture in a 1200 x 400 container is 600 x 400, centred: it spans the middle half of the width
+        // a 1.5:1 picture in a 1200 x 400 container is 600 x 400, centered: it spans the middle half of the width
         val f = visibleFractions(1200f, 400f, 1.5f, 1f, 0f, 0f)
         assertNear(0f, f[0]); assertNear(1f, f[2]); assertNear(0f, f[1]); assertNear(1f, f[3])
         val zoomed = visibleFractions(1200f, 400f, 1.5f, 2f, 0f, 0f)

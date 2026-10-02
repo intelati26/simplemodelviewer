@@ -17,11 +17,35 @@ data class MrmsProduct(
     val cellDegrees: Double,        // the files' cell size
     val group: String,
     val quantity: Quantity = Quantity.None,   // what [style] measures, so its unit can be switched
-)
+    /** The 3D mosaic families have one server directory per height (km above sea level); [level] is the chosen index into this list. */
+    val levels: List<Double> = emptyList(),
+    val level: Int = 0,
+) {
+    /** The server directory this product's files are in: [id], plus the chosen height ("MergedZdr_03.00") for the 3D mosaic families. */
+    val directory: String get() = if (levels.isEmpty()) id else "${id}_${levelName(levels[level.coerceIn(0, levels.size - 1)])}"
+
+    /** The height as shown: "3.0 km (9.8 kft)"; empty for products without levels. */
+    val levelLabel: String
+        get() {
+            if (levels.isEmpty()) return ""
+            val km = levels[level.coerceIn(0, levels.size - 1)]
+            val tenths = kotlin.math.round(km * 100).toInt() % 10 == 0     // 3.0, 0.5, 10.0 read with one decimal; 0.75, 1.25 with two
+            return "${fixed(km, if (tenths) 1 else 2)} km (${fixed(km * 3.28084, 1)} kft)"
+        }
+
+    /** The title with the chosen height: "3D Reflectivity, 3.0 km (9.8 kft)". */
+    val displayTitle: String get() = if (levels.isEmpty()) title else "$title, $levelLabel"
+}
+
+/** A level's directory suffix as the bucket spells it: 0.5 -> "00.50", 3.0 -> "03.00", 19.0 -> "19.00". */
+fun levelName(km: Double): String {
+    val hundredths = kotlin.math.round(km * 100).toInt()
+    return (hundredths / 100).toString().padStart(2, '0') + "." + (hundredths % 100).toString().padStart(2, '0')
+}
 
 /** One file on the server: its key, the scan's valid time and when it was uploaded (the bucket's LastModified), epoch seconds. */
 data class MrmsFile(val key: String, val validTime: Long, val uploaded: Long?, val size: Long) {
-    val url: String get() = MrmsCatalogue.BUCKET + "/" + key
+    val url: String get() = MrmsCatalog.BUCKET + "/" + key
 }
 
 /** A decoded frame of the shown sector. */
@@ -105,9 +129,9 @@ class MrmsRepository(private val http: Http, private val core: Core) {
         for (extraHours in listOf(0L, 24L)) {
             val from = nowEpochSeconds - (product.frames + 3L) * product.cadenceMinutes * 60 - extraHours * 3600
             val c = civilFromEpoch(from)
-            val prefix = "CONUS/${product.id}/"
-            val after = "$prefix${four(c[0])}${two(c[1])}${two(c[2])}/MRMS_${product.id}_${four(c[0])}${two(c[1])}${two(c[2])}-${two(c[3])}${two(c[4])}${two(c[5])}.grib2.gz"
-            val result = http.get("${MrmsCatalogue.BUCKET}/?list-type=2&max-keys=1000&prefix=$prefix&start-after=$after")
+            val prefix = "CONUS/${product.directory}/"
+            val after = "$prefix${four(c[0])}${two(c[1])}${two(c[2])}/MRMS_${product.directory}_${four(c[0])}${two(c[1])}${two(c[2])}-${two(c[3])}${two(c[4])}${two(c[5])}.grib2.gz"
+            val result = http.get("${MrmsCatalog.BUCKET}/?list-type=2&max-keys=1000&prefix=$prefix&start-after=$after")
             if (result.status != 200) throw RefsException("could not list MRMS files (HTTP ${result.status})")
             val files = parseMrmsListing(result.body.decodeToString()).filter { it.validTime <= nowEpochSeconds + 300 }
             if (files.isNotEmpty()) return files.takeLast(product.frames)

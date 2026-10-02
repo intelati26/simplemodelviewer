@@ -19,7 +19,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
-        val memberRgb = IntArray(10) { Palettes.memberColours[memberNames.getOrNull(it)] ?: 0x808080 }
+        val memberRgb = IntArray(10) { Palettes.memberColors[memberNames.getOrNull(it)] ?: 0x808080 }
         core.render(values, view, style, memberRgb, argb)
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -29,7 +29,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         return bitmap
     }
 
-    /** The picture to share: a header (product / run / valid time), the map and a colour key. */
+    /** The picture to share: a header (product / run / valid time), the map and a color key. */
     fun shareImage(map: Bitmap, product: Product, style: Style, header: String, memberNames: List<String>): Bitmap {
         val pad = maxOf(12, map.width / 90)
         val titleSize = maxOf(18f, map.width / 48f)
@@ -53,7 +53,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         if (style.kind == Kind.Paintball) {
             val cell = w / 10f
             for (i in 0 until 10) {
-                paint.color = 0xFF000000.toInt() or (Palettes.memberColours[members.getOrNull(i)] ?: 0x808080)
+                paint.color = 0xFF000000.toInt() or (Palettes.memberColors[members.getOrNull(i)] ?: 0x808080)
                 canvas.drawRect(x + i * cell, y + h * 0.15f, x + (i + 1) * cell, y + h * 0.45f, paint)
                 paint.color = Color.BLACK
                 canvas.drawText(Palettes.memberDisplayName(members.getOrNull(i) ?: ""), x + i * cell, y + h * 0.85f, paint)

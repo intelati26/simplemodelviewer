@@ -38,7 +38,7 @@ android {
     }
     buildFeatures { compose = true }
 
-    // the platform-independent Kotlin (catalogue, Zarr metadata, repository) is shared with the iOS target, so compile it in directly
+    // the platform-independent Kotlin (catalog, Zarr metadata, repository) is shared with the iOS target, so compile it in directly
     sourceSets["main"].kotlin.srcDir("../shared/src/commonMain/kotlin")
 }
 

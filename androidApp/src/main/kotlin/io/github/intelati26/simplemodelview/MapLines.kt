@@ -74,7 +74,7 @@ class MapLines(context: Context, private val core: Core) {
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = true }
         val w = view.pixelWidth.toFloat()
         val h = view.pixelHeight.toFloat()
-        for ((name, colour, width) in plan) {
+        for ((name, color, width) in plan) {
             val cells = cellsFor(layers.getValue(name), view.grid)
             val pts = FloatArray(cells.size)
             var count = 0
@@ -90,7 +90,7 @@ class MapLines(context: Context, private val core: Core) {
                 }
                 i += 4
             }
-            paint.color = colour
+            paint.color = color
             paint.strokeWidth = width * lineScale
             canvas.drawLines(pts, 0, count, paint)
         }
@@ -105,12 +105,12 @@ class MapLines(context: Context, private val core: Core) {
         val r = cam.radius.toFloat()
         val cx = width / 2f; val cy = height / 2f
         val zoomedIn = r > width * 1.4f
-        val grey = if (dark) 0xFF9AA4B0.toInt() else 0xFF4A5560.toInt()
-        val plan = listOf(Triple("mx", grey, 0.8f), Triple("ca", grey, 0.8f)) +
+        val gray = if (dark) 0xFF9AA4B0.toInt() else 0xFF4A5560.toInt()
+        val plan = listOf(Triple("mx", gray, 0.8f), Triple("ca", gray, 0.8f)) +
             (if (zoomedIn && detailed) listOf(Triple("county", if (dark) 0x55AAAAAA else 0x55606060, 0.5f)) else emptyList()) +
             listOf(Triple("statev2", if (dark) 0xFFE0E4E8.toInt() else 0xFF2A3036.toInt(), 1.1f))
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = detailed }
-        for ((name, colour, width1) in plan) {
+        for ((name, color, width1) in plan) {
             val trig = layers.getValue(name).trig
             val pts = FloatArray(trig.size / 2)
             var count = 0
@@ -134,7 +134,7 @@ class MapLines(context: Context, private val core: Core) {
                 pts[count] = x1; pts[count + 1] = y1; pts[count + 2] = x2; pts[count + 3] = y2
                 count += 4
             }
-            paint.color = colour
+            paint.color = color
             paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f)
             canvas.drawLines(pts, 0, count, paint)
         }

@@ -56,7 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import simplemodelview.MrmsCatalogue
+import simplemodelview.MrmsCatalog
 import simplemodelview.MrmsProduct
 import simplemodelview.Sector
 import simplemodelview.fixed
@@ -90,8 +90,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
     val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-    // the catalogue as the picker's product type (it groups, searches and stars them like the SPC page does)
-    val products = remember { MrmsCatalogue.all.map { Product(it.id, it.title, it.group, it.style, false, null, Grid.REFS) } }
+    // the catalog as the picker's product type (it groups, searches and stars them like the SPC page does)
+    val products = remember { MrmsCatalog.all.map { Product(it.id, it.title, it.group, it.style, false, null, Grid.REFS) } }
 
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
@@ -113,7 +113,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    AssistChip(onClick = { picker = true }, label = { Text(s.product.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
+                    AssistChip(onClick = { picker = true }, label = { Text(s.product.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     TextButton(onClick = onSpc, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("SPC REFS") }
                     MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
                 }
@@ -132,7 +132,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                     SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
-                MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.cellKilometres)
+                MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.cellKilometers)
             }
         }
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) {
@@ -143,6 +143,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+            if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
             s.style?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -163,9 +164,9 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
         provider = "NOAA", server = "NOAA's servers",
     )
     if (picker) ProductPicker(
-        products, products.firstOrNull { it.id == s.product.id }, s.favourites, onToggle = vm::toggleFavourite,
-        onPick = { picked -> picker = false; MrmsCatalogue.byId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
-        groups = MrmsCatalogue.groups,
+        products, products.firstOrNull { it.id == s.product.id }, s.favorites, onToggle = vm::toggleFavorite,
+        onPick = { picked -> picker = false; MrmsCatalog.byId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
+        groups = MrmsCatalog.groups,
     )
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
@@ -245,6 +246,23 @@ private fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
         }
+    }
+}
+
+/** The height of a 3D mosaic field: - / + buttons and a slider over its levels (loading starts when the slider is let go) with the height in km and kft. */
+@Composable
+private fun HeightRow(product: MrmsProduct, onPick: (Int) -> Unit) {
+    val last = product.levels.size - 1
+    var dragging by remember(product.id, product.level) { mutableStateOf<Float?>(null) }
+    val shown = dragging?.toInt() ?: product.level
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { onPick(product.level - 1) }, enabled = product.level > 0, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("\u2212") }
+        Slider(
+            value = (dragging ?: product.level.toFloat()), onValueChange = { dragging = it }, onValueChangeFinished = { dragging?.let { onPick(it.toInt()) } },
+            valueRange = 0f..last.toFloat(), steps = maxOf(0, last - 1), modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = { onPick(product.level + 1) }, enabled = product.level < last, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("+") }
+        Text(product.copy(level = shown).levelLabel, Modifier.padding(end = 8.dp), style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 

@@ -2,8 +2,8 @@ package simplemodelview
 
 /**
  * The part of the picture that is on screen, as fractions of its width / height: [left, top, right, bottom].
- * The picture is fitted and centred in a container of [w] x [h]; it is then zoomed by [scale] about the container's
- * centre and moved by ([tx], [ty]) pixels.
+ * The picture is fitted and centered in a container of [w] x [h]; it is then zoomed by [scale] about the container's
+ * center and moved by ([tx], [ty]) pixels.
  */
 fun visibleFractions(w: Float, h: Float, aspect: Float, scale: Float, tx: Float, ty: Float): FloatArray {
     val imgW = minOf(w, h * aspect)          // the picture is fitted inside the container

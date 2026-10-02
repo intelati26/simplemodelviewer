@@ -106,14 +106,14 @@ static void testGrefsGrid() {
 }
 
 static void testGlobe() {
-    // a uniform field over the whole grid, viewed from above Kansas: the centre pixel is inside the grid and coloured
+    // a uniform field over the whole grid, viewed from above Kansas: the center pixel is inside the grid and colored
     std::vector<float> values(static_cast<size_t>(SPC_GRID_COLUMNS) * SPC_GRID_ROWS, 40.0f);
     const spc_stop stops[2] = {{10.0, 0, 0, 255}, {50.0, 255, 0, 0}};
-    spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0};
+    spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0, 1e30, 1.0};
     spc_globe globe{SPC_GRID_REFS, 200, 200, 90.0, 38.5, -98.0, 1, 0x40FFFFFFu};
     std::vector<uint32_t> img(200 * 200, 0xDEADBEEF);
     spc_render_globe(values.data(), &globe, &style, img.data());
-    CHECK((img[100 * 200 + 100] >> 24) == 0xFF);        // centre: data
+    CHECK((img[100 * 200 + 100] >> 24) == 0xFF);        // center: data
     CHECK(img[2 * 200 + 2] == 0);                       // corner: outside the sphere
     for (uint32_t p : img) { CHECK(p != 0xDEADBEEF); }
     // looking at the far side of the earth: nothing over the grid
@@ -124,7 +124,7 @@ static void testGlobe() {
     spc_globe coarse{SPC_GRID_REFS, 200, 200, 90.0, 38.5, -98.0, 4, 0x40FFFFFFu};
     spc_render_globe(values.data(), &coarse, &style, img.data());
     CHECK(img[100 * 200 + 100] == img[101 * 200 + 101]);
-    // NaN data inside the grid -> the domain colour
+    // NaN data inside the grid -> the domain color
     std::vector<float> none(values.size(), std::nanf(""));
     spc_render_globe(none.data(), &globe, &style, img.data());
     CHECK(img[100 * 200 + 100] == 0x40FFFFFFu);
@@ -134,7 +134,7 @@ static void testRender() {
     std::vector<float> values(static_cast<size_t>(SPC_GRID_COLUMNS) * SPC_GRID_ROWS, std::nanf(""));
     values[10 * SPC_GRID_COLUMNS + 20] = 45.0f;   // one cell at column 20, row 10 (from the south)
     const spc_stop stops[2] = {{10.0, 0, 0, 255}, {50.0, 255, 0, 0}};
-    spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0};
+    spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 10.0, nullptr, 0, 1e30, 1.0};
     spc_view view{SPC_GRID_REFS, 0, 0, 40, 20, 1, 1};
     std::vector<uint32_t> img(40 * 20, 0xDEADBEEF);
     spc_render(values.data(), &view, &style, img.data());
@@ -158,7 +158,7 @@ static void testRender() {
     values[11 * SPC_GRID_COLUMNS + 21] = std::nanf("");
     values[10 * SPC_GRID_COLUMNS + 20] = 5.0f;
     const uint32_t members[3] = {0x000000, 0x00FF00, 0xFF0000};
-    spc_style pb{SPC_PAINTBALL, nullptr, 0, 1.0, 0.0, -1e30, members, 3};
+    spc_style pb{SPC_PAINTBALL, nullptr, 0, 1.0, 0.0, -1e30, members, 3, 1e30, 1.0};
     spc_render(values.data(), &view, &pb, img.data());
     CHECK((img[9 * 40 + 20] >> 24) == 0xFF && ((img[9 * 40 + 20] >> 16) & 255) > 100);
 }
@@ -221,7 +221,7 @@ static void testMrmsFixture(const Fixture& fx) {
     CHECK(mismatches == 0);
     CHECK(finite > 50);   // the window has real data in it
 
-    // the output grid's coordinates: a regular lat / lon grid whose cell centres match the file's (checked against gdalinfo's origin)
+    // the output grid's coordinates: a regular lat / lon grid whose cell centers match the file's (checked against gdalinfo's origin)
     double lat = 0, lon = 0;
     spc_grid_to_latlon(res.grid, 0, 0, &lat, &lon);
     const double dLat = res.source_d_lat;
@@ -260,13 +260,13 @@ static void testMrmsFixture(const Fixture& fx) {
             }
         }
         CHECK(bad == 0);
-        // a block's centre moves by half a source cell per extra step
+        // a block's center moves by half a source cell per extra step
         double la = 0, lo = 0;
         spc_grid_to_latlon(rr.grid, 0, 0, &la, &lo);
         CHECK(std::fabs(lo - (lon + (step - 1) / 2.0 * dLon)) < 1e-9);
     }
 
-    // a sub-window picked by a latitude / longitude box (the box edges sit on cell centres)
+    // a sub-window picked by a latitude / longitude box (the box edges sit on cell centers)
     if (std::strncmp(fx.name, "MergedReflectivity", 18) == 0) {
         spc_mrms_request q{-81.495, 24.105, -81.005, 24.345, 1, fx.pool, fx.missingAtOrBelow};
         std::vector<float> o;
@@ -284,24 +284,24 @@ static void testMrmsFixture(const Fixture& fx) {
         }
     }
 
-    // draw it: the number of coloured pixels is the number of cells at or above the hide threshold
+    // draw it: the number of colored pixels is the number of cells at or above the hide threshold
     const spc_stop stops[2] = {{0.0, 255, 0, 0}, {1000.0, 0, 0, 255}};
-    const spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 0.0, nullptr, 0};
+    const spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, 0.0, nullptr, 0, 1e30, 1.0};
     const spc_view view{res.grid, 0, 0, 120, 80, 1, 1};
     std::vector<uint32_t> argb(120 * 80);
     spc_render(out.data(), &view, &style, argb.data());
-    int coloured = 0, wanted = 0;
+    int colored = 0, wanted = 0;
     for (size_t i = 0; i < argb.size(); i += 1) {
-        if (argb[i] != 0) coloured += 1;
+        if (argb[i] != 0) colored += 1;
         if (!std::isnan(out[i]) && out[i] >= 0.0f) wanted += 1;
     }
-    CHECK(coloured == wanted && coloured > 0);
+    CHECK(colored == wanted && colored > 0);
 }
 
-// category codes are drawn exactly (never blended) in the colour of the stop with that value
+// category codes are drawn exactly (never blended) in the color of the stop with that value
 static void testCategorical() {
     const spc_stop stops[3] = {{1.0, 10, 20, 30}, {6.0, 200, 0, 0}, {91.0, 0, 255, 0}};
-    const spc_style style{SPC_CATEGORICAL, stops, 3, 1.0, 0.0, -1e30, nullptr, 0};
+    const spc_style style{SPC_CATEGORICAL, stops, 3, 1.0, 0.0, -1e30, nullptr, 0, 1e30, 1.0};
     const float values[8] = {0.0f, 1.0f, 6.0f, 91.0f, 3.0f, std::nanf(""), 6.0f, 1.0f};   // 4 x 2
     const int grid = spc_define_latlon_grid(4, 2, 30.0, -100.0, 0.01, 0.01);
     const spc_view view{grid, 0, 0, 4, 2, 3, 1};   // 3 pixels per cell: a smoothing renderer would blend the codes
@@ -312,10 +312,28 @@ static void testCategorical() {
     CHECK(at(1, 0) == 0xFF0A141Eu);                // code 1
     CHECK(at(2, 0) == 0xFFC80000u);                // code 6
     CHECK(at(3, 0) == 0xFF00FF00u);                // code 91
-    CHECK(at(0, 1) == 0);                          // code 3: not in the legend, and not blended from its neighbours
+    CHECK(at(0, 1) == 0);                          // code 3: not in the legend, and not blended from its neighbors
     CHECK(at(1, 1) == 0);                          // NaN
     CHECK(at(2, 1) == 0xFFC80000u && at(3, 1) == 0xFF0A141Eu);
-    for (uint32_t c : argb) CHECK(c == 0 || c == 0xFF0A141Eu || c == 0xFFC80000u || c == 0xFF00FF00u);   // no in-between colours anywhere
+    for (uint32_t c : argb) CHECK(c == 0 || c == 0xFF0A141Eu || c == 0xFFC80000u || c == 0xFF00FF00u);   // no in-between colors anywhere
+}
+
+// a style can leave values above its top transparent and draw everything with an opacity (the SPC site's tables do both)
+static void testOpacityAndTop() {
+    const spc_stop stops[2] = {{10.0, 0, 0, 255}, {20.0, 255, 0, 0}};
+    const int grid = spc_define_latlon_grid(4, 1, 30.0, -100.0, 0.01, 0.01);
+    const float values[4] = {5.0f, 15.0f, 25.0f, 100.0f};
+    std::vector<uint32_t> argb(4);
+    const spc_view view{grid, 0, 0, 4, 1, 1, 1};
+    const spc_style opaque{SPC_BANDED, stops, 2, 1.0, 0.0, -1e30, nullptr, 0, 1e30, 1.0};
+    spc_render(values, &view, &opaque, argb.data());
+    CHECK(argb[0] == 0 && argb[1] == 0xFF0000FFu && argb[2] == 0xFFFF0000u && argb[3] == 0xFFFF0000u);   // below the first stop: nothing; above the last: its color
+    const spc_style capped{SPC_BANDED, stops, 2, 1.0, 0.0, -1e30, nullptr, 0, 50.0, 1.0};              // nothing above 50
+    spc_render(values, &view, &capped, argb.data());
+    CHECK(argb[2] == 0xFFFF0000u && argb[3] == 0);
+    const spc_style faint{SPC_BANDED, stops, 2, 1.0, 0.0, -1e30, nullptr, 0, 1e30, 0.9};              // 90 % opacity: alpha 230, the color unchanged
+    spc_render(values, &view, &faint, argb.data());
+    CHECK(argb[0] == 0 && argb[1] == 0xE60000FFu && argb[3] == 0xE6FF0000u);
 }
 
 static void testMrmsErrors() {
@@ -361,6 +379,7 @@ int main() {
     testGlobe();
     testMrms();
     testCategorical();
+    testOpacityAndTop();
 #ifdef HAVE_LIBBLOSC
     for (const char * codec : {"lz4", "zstd"}) {
         testBloscRoundTrip(codec, 2);

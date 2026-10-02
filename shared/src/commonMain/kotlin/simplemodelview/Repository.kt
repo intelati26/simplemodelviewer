@@ -61,7 +61,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
                 try { arrays += parseZMetadata(extra.body.decodeToString(), kind) } catch (_: Exception) { }
             }
         }
-        val products = Catalogue.build(arrays.values)
+        val products = Catalog.build(arrays.values)
         if (products.isEmpty()) throw RefsException("no products found in ${cycle.label}")
         return CycleStore(cycle, arrays, products, result.lastModified)
     }

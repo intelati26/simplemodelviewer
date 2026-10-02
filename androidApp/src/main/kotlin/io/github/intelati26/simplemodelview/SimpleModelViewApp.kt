@@ -10,6 +10,13 @@ class SimpleModelViewApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContainer.init(this)
+        // the favorites used to be saved under the British spelling of the key: carry them over once
+        AppContainer.prefs.let { p ->
+            if (p.contains("favourites")) {
+                val old = p.getStringSet("favourites", emptySet()).orEmpty()
+                p.edit().apply { if (!p.contains("favorites")) putStringSet("favorites", old); remove("favourites") }.apply()
+            }
+        }
         // location-based alerts were removed: drop any job a development build scheduled
         androidx.work.WorkManager.getInstance(this).cancelUniqueWork("alerts")
         AppContainer.prefs.edit().remove("rules").remove("alert_status").apply()

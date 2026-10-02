@@ -16,7 +16,7 @@ namespace ChunkDecode {
         if (exponent == 0) {
             if (mantissa == 0) {
                 bits = sign;
-            } else {   // subnormal: normalise
+            } else {   // subnormal: normalize
                 exponent = 127 - 15 + 1;
                 while ((mantissa & 0x400u) == 0) {
                     mantissa <<= 1;

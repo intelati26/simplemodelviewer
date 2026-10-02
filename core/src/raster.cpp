@@ -14,8 +14,8 @@ namespace Raster {
         }
     }
 
-    uint32_t colourFor(const spc_style& p, double shown) {
-        if (std::isnan(shown) || shown < p.hide_below || p.stop_count <= 0 || p.stops == nullptr) {
+    uint32_t colorFor(const spc_style& p, double shown) {
+        if (std::isnan(shown) || shown < p.hide_below || shown > p.hide_above || p.stop_count <= 0 || p.stops == nullptr) {
             return 0;
         }
         const spc_stop * stops = p.stops;
@@ -66,7 +66,22 @@ namespace Raster {
         return static_cast<float>((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy);
     }
 
+    namespace {
+        uint32_t shadeOpaque(const float * values, int w, int h, double column, double row, bool smooth, const spc_style& style);
+    }
+
+    // the cell's color with the style's opacity applied (a transparent cell stays transparent)
     uint32_t shade(const float * values, int w, int h, double column, double row, bool smooth, const spc_style& style) {
+        const uint32_t c = shadeOpaque(values, w, h, column, row, smooth, style);
+        if (c == 0 || style.opacity >= 1.0) {
+            return c;
+        }
+        const uint32_t alpha = static_cast<uint32_t>(std::lround(255.0 * std::clamp(style.opacity, 0.0, 1.0)));
+        return alpha == 0 ? 0u : (alpha << 24) | (c & 0x00FFFFFFu);
+    }
+
+    namespace {
+    uint32_t shadeOpaque(const float * values, int w, int h, double column, double row, bool smooth, const spc_style& style) {
         if (style.kind == SPC_CATEGORICAL) {
             const float raw = sampleAt(values, w, h, column, row, false);   // category codes are never interpolated
             if (std::isnan(raw) || style.stops == nullptr) {
@@ -99,8 +114,9 @@ namespace Raster {
             return argb(static_cast<int>(r), static_cast<int>(g), static_cast<int>(b));
         }
         const float raw = sampleAt(values, w, h, column, row, smooth);
-        return colourFor(style, std::isnan(raw) ? std::nan("") : raw * style.factor + style.offset);
+        return colorFor(style, std::isnan(raw) ? std::nan("") : raw * style.factor + style.offset);
     }
+    }   // namespace
 
     void render(const float * values, const spc_view& view, const spc_style& style, uint32_t * out) {
         const GridBase& gridInfo = Grids::get(view.grid);
@@ -139,7 +155,7 @@ namespace Raster {
                 const double x = (px - cx) / globe.radius;
                 const double y = (cy - py) / globe.radius;
                 const double rho2 = x * x + y * y;
-                uint32_t colour = 0;
+                uint32_t color = 0;
                 if (rho2 <= 1.0) {
                     const double rho = std::sqrt(rho2);
                     const double c = std::asin(rho);
@@ -158,9 +174,9 @@ namespace Raster {
                             double column = 0.0, row = 0.0;
                             grid.toGrid(latDeg, lonDeg, column, row);
                             if (column >= 0.0 && column <= grid.columns - 1 && row >= 0.0 && row <= grid.rows - 1) {
-                                colour = shade(values, grid.columns, grid.rows, column, row, true, style);
-                                if (colour == 0) {
-                                    colour = globe.domain_argb;   // inside the REFS grid but nothing to show
+                                color = shade(values, grid.columns, grid.rows, column, row, true, style);
+                                if (color == 0) {
+                                    color = globe.domain_argb;   // inside the REFS grid but nothing to show
                                 }
                             }
                         }
@@ -172,7 +188,7 @@ namespace Raster {
                     for (int dx = 0; dx < stride; dx += 1) {
                         const int xx = bx * stride + dx;
                         if (xx >= globe.width) break;
-                        out[static_cast<size_t>(yy) * globe.width + xx] = colour;
+                        out[static_cast<size_t>(yy) * globe.width + xx] = color;
                     }
                 }
             }

@@ -3,7 +3,7 @@ package simplemodelview
 /** How a field is drawn; ordinals match the core's SPC_BLENDED / SPC_BANDED / SPC_PAINTBALL / SPC_CATEGORICAL. */
 enum class Kind { Blended, Banded, Paintball, Categorical }
 
-/** Colours, units and the stored-to-shown conversion (shown = stored * factor + offset). */
+/** Colors, units and the stored-to-shown conversion (shown = stored * factor + offset). */
 data class Style(
     val kind: Kind = Kind.Blended,
     val stops: List<Stop> = emptyList(),
@@ -14,6 +14,12 @@ data class Style(
     val digits: Int = 1,
     /** Categorical fields: the name of each stop's code (parallel to [stops]). */
     val labels: List<String> = emptyList(),
+    /** Banded tables of the SPC viewer: [top] is the last level (the bands end there), [under] / [over] the colors below the first level / above [top] (null: transparent). */
+    val top: Double? = null,
+    val under: Int? = null,
+    val over: Int? = null,
+    /** How opaque the data is drawn over the map (the viewer uses 0.9 for most fields). */
+    val opacity: Double = 1.0,
 )
 
 /** An SPC REFS product: an array in the store plus how to show it. */
@@ -54,7 +60,7 @@ object Groups {
     }
 }
 
-object Catalogue {
+object Catalog {
     /** GREFS: SPC's calibrated 4-h and 24-h probabilities of tornadoes, damaging wind and severe hail (a coarse 40.6 km grid), and REFSCT thunder probability. */
     private val grefsList = listOf(
         "grefs-4hr/tor_prob" to "4-h Tornado Probability (GREFS)",
@@ -72,7 +78,7 @@ object Catalogue {
     private val curated = allCurated.toMap()
     private val curatedOrder = allCurated.mapIndexed { i, t -> t.first to i }.toMap()
 
-    /** Colours and units from the array's name and its `units` attribute (ported from the desktop viewer). */
+    /** Colors and units from the array's name and its `units` attribute (ported from the desktop viewer). */
     fun styleFor(id: String, units: String): Style {
         if (id.startsWith("refsct-")) {
             // already in percent (0-100), unlike GREFS's fractions
@@ -80,7 +86,7 @@ object Catalogue {
                 listOf(0xfef0a8, 0xfed976, 0xfeb24c, 0xfd8d3c, 0xfc4e2a, 0xe31a1c, 0xbd0026, 0x800026, 0x4d004b)), hideBelow = 10.0, units = "%", digits = 0)
         }
         if (id.startsWith("grefs-")) {
-            // stored in percent already (wind peaks ~17, tornado ~3; verified on real chunks), shown with the colours of SPC's convective outlook probabilities
+            // stored in percent already (wind peaks ~17, tornado ~3; verified on real chunks), shown with the colors of SPC's convective outlook probabilities
             val tornado = id.endsWith("tor_prob")
             val stops = if (tornado) listOf(2.0 to 0x008B00, 5.0 to 0x8B4726, 10.0 to 0xFFC800, 15.0 to 0xFF0000, 30.0 to 0xFF00FF, 45.0 to 0x912CEE, 60.0 to 0x104E8B)
             else listOf(5.0 to 0x8B4726, 15.0 to 0xFFC800, 30.0 to 0xFF0000, 45.0 to 0xFF00FF, 60.0 to 0x912CEE)
@@ -134,7 +140,7 @@ object Catalogue {
     fun describe(array: ArrayInfo): Product {
         val title = curated[array.name] ?: array.name.replace('_', ' ')
         val group = Groups.of(array.name, array.dims.size == 4)
-        return Product(array.name, title, group, styleFor(array.name, array.units), array.dims.size == 4,
+        return Product(array.name, title, group, siteStyle(array.name, styleFor(array.name, array.units)), array.dims.size == 4,
             if (array.dims.size >= 3) array.kind.prefix + array.dims[array.dims.size - 3] else null, array.grid ?: Grid.REFS)
     }
 

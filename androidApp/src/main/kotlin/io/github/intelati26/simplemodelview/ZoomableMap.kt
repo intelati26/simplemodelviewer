@@ -55,8 +55,8 @@ internal fun ZoomableMap(
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     val newScale = (scale * zoom).coerceIn(1f, 12f)
                     // keep the point under the fingers fixed, then pan
-                    val centre = Offset(size.width / 2f, size.height / 2f)
-                    offset = (offset + (centroid - centre - offset) * (1f - newScale / scale) + pan)
+                    val center = Offset(size.width / 2f, size.height / 2f)
+                    offset = (offset + (centroid - center - offset) * (1f - newScale / scale) + pan)
                     scale = newScale
                     val maxX = size.width * (scale - 1f) / 2f
                     val maxY = size.height * (scale - 1f) / 2f

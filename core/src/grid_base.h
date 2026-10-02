@@ -5,7 +5,7 @@
 #define GRID_BASE_H
 
 // A grid the rasteriser can draw on: a size and the mapping between latitude / longitude and fractional (column, row) positions.
-// Column counts from the west, row from the south; cell centres are at whole numbers.
+// Column counts from the west, row from the south; cell centers are at whole numbers.
 struct GridBase {
     GridBase(int cols, int rows_) : columns(cols), rows(rows_) {}
     virtual ~GridBase() = default;

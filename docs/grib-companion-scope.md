@@ -16,7 +16,7 @@ phone map or globe, loop it, tap for a value, export. Same shell as simplemodelv
   `MRMS_<product>_<level>_<date>-<time>.grib2.gz`, and carries a hand-built product list and palettes.
 - Its model viewers (`src/models/UtilityGrib.cpp`, about 2,400 lines, plus interfaces for NCEP, ESRL, NSSL WRF, SPC HREF / HRRR / SREF and RRFS on
   NOMADS) call **external GDAL binaries** (`gdal_translate`, `gdalwarp`, `gdaldem`, `gdal_contour`, `ogr2ogr`) for decoding, reprojection,
-  colouring and contours.
+  coloring and contours.
 - GDAL cannot ship in a phone app, so the one large new piece is an **in-app GRIB2 decoder**. wxqt's own GDAL output is the test oracle: decode a
   file with both and compare.
 - The NSSL QVS viewer is not a data source (it serves finished pictures); see `outline.md` section 10.
@@ -41,7 +41,7 @@ UI shell.
    - **MRMS:** no cycles; a "run" is the latest frame. Listing from the NCEP directory or the AWS `noaa-mrms-pds` bucket (S3 listing works).
    - **NCEP models:** runs every cycle; fetch only the fields wanted by byte range using each file's `.idx` index (NOMADS, or AWS
      `noaa-hrrr-bdp-pds` for HRRR).
-4. **Catalogue and palettes.** Port wxqt's MRMS product list and palettes as data. Model fields are keyed by GRIB discipline / category /
+4. **Catalog and palettes.** Port wxqt's MRMS product list and palettes as data. Model fields are keyed by GRIB discipline / category /
    parameter / level, with titles from a table.
 
 ## How it differs from REFS
@@ -50,7 +50,7 @@ UI shell.
 - The MRMS CONUS grid is 7000 x 3500 cells at 0.01 degrees (verified from a real file; see `mrms-site-outline.md`). As floats that is about 98 MB, so
   frames need a smaller storage type, cropping to a sector, or decimation (the existing data-saver step helps).
 - Frames are bigger and more numerous: the loop budget, the Wi-Fi-only default and the cache cap need retuning.
-- No SPC-specific parts: titles, colours and branding come from the provider.
+- No SPC-specific parts: titles, colors and branding come from the provider.
 
 ## wxqt tool -> companion replacement
 
@@ -58,7 +58,7 @@ UI shell.
 |---|---|
 | `gdal_translate` (decode) | GRIB2 decoder in the core |
 | `gdalwarp` (reproject to lat/lon) | per-pixel inverse projection in the rasteriser (already how the flat map and globe work) |
-| `gdaldem` (colour relief) | the palette rasteriser (already exists) |
+| `gdaldem` (color relief) | the palette rasteriser (already exists) |
 | `gdal_contour` / `ogr2ogr` | not in v1 (later: marching squares in the core) |
 
 ## Phases (one developer, with the reuse above)
@@ -80,7 +80,7 @@ Roughly 8-10 weeks. M0 comes first and decides whether the rest is feasible.
 - **Memory:** see the grid-size point above (index + palette is 1 byte per cell instead of 4).
 - **Source churn:** wxqt's code comments already note operational dates that move (RRFS on NOMADS); read metadata, do not hard-code layouts.
 - **Name:** another "model viewer" style name, so the same collision check applies.
-- **Licence:** code ported from wxqt is GPLv3, as for simplemodelview.
+- **License:** code ported from wxqt is GPLv3, as for simplemodelview.
 
 ## Repository strategy
 

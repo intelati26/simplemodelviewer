@@ -45,7 +45,7 @@ typedef struct {
     uint8_t r, g, b;
 } spc_stop;
 
-/* SPC_CATEGORICAL: the stored values are category codes: a cell is drawn in the colour of the stop whose value equals its (shown) value, else transparent; never blended or smoothed. */
+/* SPC_CATEGORICAL: the stored values are category codes: a cell is drawn in the color of the stop whose value equals its (shown) value, else transparent; never blended or smoothed. */
 enum { SPC_BLENDED = 0, SPC_BANDED = 1, SPC_PAINTBALL = 2, SPC_CATEGORICAL = 3 };
 
 typedef struct {
@@ -56,10 +56,12 @@ typedef struct {
     double hide_below;        /* shown values below this stay transparent */
     const uint32_t * member_rgb; /* paintball: 0xRRGGBB per member (bit order), `member_count` entries */
     int member_count;
+    double hide_above;        /* shown values above this stay transparent (1e30: none) */
+    double opacity;           /* 0..1: the alpha of everything drawn (1 = opaque) */
 } spc_style;
 
-/* An orthographic globe: `width` x `height` pixels, a sphere of `radius` pixels centred in the buffer, looking down on
- * (center_lat, center_lon). Only pixels over the REFS grid are drawn (data colours, or `domain_argb` where there is nothing to
+/* An orthographic globe: `width` x `height` pixels, a sphere of `radius` pixels centered in the buffer, looking down on
+ * (center_lat, center_lon). Only pixels over the REFS grid are drawn (data colors, or `domain_argb` where there is nothing to
  * show); everything else stays transparent (0) for the caller to paint. `stride` > 1 draws coarse stride x stride blocks (fast
  * preview while dragging). */
 typedef struct {
@@ -77,7 +79,7 @@ void spc_render_globe(const float * values, const spc_globe * globe, const spc_s
  * 0xAARRGGBB, transparent where nothing is shown). */
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb);
 
-/* Registers a regular latitude / longitude grid: cell (column, row) is centred at (south_lat + row * d_lat, west_lon + column * d_lon),
+/* Registers a regular latitude / longitude grid: cell (column, row) is centered at (south_lat + row * d_lat, west_lon + column * d_lon),
  * row 0 = south, west-negative longitudes. Returns its grid id (the same definition gives the same id). */
 int spc_define_latlon_grid(int columns, int rows, double south_lat, double west_lon, double d_lat, double d_lon);
 

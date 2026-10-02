@@ -3,9 +3,9 @@ package simplemodelview
 /**
  * The MRMS products the app offers, named as the AWS bucket (`noaa-mrms-pds/CONUS/<id>/`) names them. Each says how its stored values read
  * (units, the codes meaning "no coverage" / "no echo"), how cells combine when a wide area is decimated, how often a new file appears and
- * how it is coloured. Surveyed from real files 2026-10-02 (docs/mrms-products.md); the decoder reads all of them (PNG packing, 8 to 32 bits).
+ * how it is colored. Surveyed from real files 2026-10-02 (docs/mrms-products.md); the decoder reads all of them (PNG packing, 8 to 32 bits).
  */
-object MrmsCatalogue {
+object MrmsCatalog {
     const val BUCKET = "https://noaa-mrms-pds.s3.amazonaws.com"
     const val REFLECTIVITY = "Reflectivity"
     const val TOPS = "Echo tops and VIL"
@@ -16,11 +16,12 @@ object MrmsCatalogue {
     const val FLASH = "Flash flooding"
     const val QUALITY = "Quality"
     const val MODEL = "Model and heights"
+    const val LEVELS = "3D mosaic"
 
-    val groups = listOf(REFLECTIVITY, TOPS, ROTATION, HAIL, LIGHTNING, PRECIP, FLASH, QUALITY, MODEL)
+    val groups = listOf(REFLECTIVITY, TOPS, ROTATION, HAIL, LIGHTNING, PRECIP, FLASH, QUALITY, MODEL, LEVELS)
 
-    // ---- colours ----
-    /** [count] colours spread evenly along the key colours (a colour ramp for banded palettes). */
+    // ---- colors ----
+    /** [count] colors spread evenly along the key colors (a color ramp for banded palettes). */
     internal fun ramp(count: Int, vararg keys: Int): List<Int> = (0 until count).map { i ->
         val t = if (count == 1) 0.0 else i.toDouble() / (count - 1) * (keys.size - 1)
         val k = minOf(t.toInt(), keys.size - 2)
@@ -29,13 +30,13 @@ object MrmsCatalogue {
         (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
     }
 
-    private fun banded(thresholds: List<Number>, colours: List<Int>, units: String, digits: Int, factor: Double = 1.0, offset: Double = 0.0) =
-        Style(Kind.Banded, bands(thresholds, colours), factor = factor, offset = offset, units = units, digits = digits)
+    private fun banded(thresholds: List<Number>, colors: List<Int>, units: String, digits: Int, factor: Double = 1.0, offset: Double = 0.0) =
+        Style(Kind.Banded, bands(thresholds, colors), factor = factor, offset = offset, units = units, digits = digits)
 
     private val nwsReflectivity = listOf(0x04e9e7, 0x019ff4, 0x0300f4, 0x02fd02, 0x01c501, 0x008e00, 0xfdf802, 0xe5bc00, 0xfd9500, 0xfd0000,
         0xd40000, 0xbc0000, 0xf800fd, 0x9854c6, 0xfdfdfd)
 
-    /** The NWS radar colour table (5 dBZ steps); below 5 dBZ nothing is drawn. */
+    /** The NWS radar color table (5 dBZ steps); below 5 dBZ nothing is drawn. */
     private val reflectivity = banded((5..75 step 5).toList(), nwsReflectivity, "dBZ", 1)
 
     /** Azimuthal-shear tracks in 0.001 / s: values below 2 are noise and stay transparent. */
@@ -48,11 +49,11 @@ object MrmsCatalogue {
         factor = 1.0 / 25.4, units = "in/hr", digits = 2)
 
     private const val KFT_PER_KM = 1.0 / 0.3048
-    private val echoTopColours = listOf(0xb4e6ff, 0x82c8ff, 0x4fa3ff, 0x2d78e6, 0x1a9a3c, 0x6cc24a, 0xd4e62f, 0xffd400, 0xffa500, 0xff6a00,
+    private val echoTopColors = listOf(0xb4e6ff, 0x82c8ff, 0x4fa3ff, 0x2d78e6, 0x1a9a3c, 0x6cc24a, 0xd4e62f, 0xffd400, 0xffa500, 0xff6a00,
         0xe62020, 0xb01010, 0xd020c0, 0x7a2aa8)
     private val echoTopThresholds = listOf(5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70)
-    private val echoTopKft = banded(echoTopThresholds, echoTopColours, "kft", 1)                                  // stored in kft
-    private val echoTopKm = banded(echoTopThresholds, echoTopColours, "kft", 1, factor = KFT_PER_KM)             // stored in km MSL
+    private val echoTopKft = banded(echoTopThresholds, echoTopColors, "kft", 1)                                  // stored in kft
+    private val echoTopKm = banded(echoTopThresholds, echoTopColors, "kft", 1, factor = KFT_PER_KM)             // stored in km MSL
     private val vil = banded(listOf(1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70), nwsReflectivity, "kg/m2", 1)
     private val vii = banded(listOf(0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12), ramp(10, 0xd6ecff, 0x3b8de0, 0x6a2c91), "kg/m2", 1)
     private val vilDensity = banded(listOf(0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4), ramp(8, 0xdff3d0, 0x4ab04a, 0xe0c020, 0xd02020), "g/m3", 1)
@@ -69,6 +70,17 @@ object MrmsCatalogue {
     private val soil = banded(listOf(20, 40, 50, 60, 70, 80, 90, 100), ramp(8, 0xe8d8b0, 0x6aa84f, 0x2c6cf0, 0x1a237e), "%", 0)
     private val streamflow = banded(listOf(1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000, 10000), ramp(11, 0xbfe3ff, 0x2c6cf0, 0xe03020, 0x7a1fa8), "m3/s", 0)
     private val unitStreamflow = banded(listOf(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10), ramp(9, 0xbfe3ff, 0x2c6cf0, 0xe03020, 0x7a1fa8), "m3/s/km2", 2)
+
+    /** Differential reflectivity: about 0 for light rain, higher for big drops, negative for hail / tumbling debris; below -2 dB is mostly noise. */
+    private val zdr = banded(listOf(-2, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3, 4, 6),
+        listOf(0x1f3a93, 0x3f7fe0, 0x9cc7f2, 0xc8c8c8, 0xa8e08a, 0x4fc34f, 0xd4e62f, 0xffd400, 0xff8a00, 0xe03020, 0xc000c0), "dB", 1)
+
+    /** Correlation coefficient: about 0.97-1 in rain, lower where the echoes are mixed (hail, melting snow, debris, non-weather). */
+    private val rhohv = banded(listOf(0.5, 0.7, 0.8, 0.85, 0.9, 0.93, 0.96, 0.98, 1.0),
+        listOf(0xc000c0, 0xe03020, 0xff8a00, 0xffd400, 0xd4e62f, 0x4fc34f, 0x00c8a0, 0x3f7fe0, 0x1f3a93), "", 2)
+
+    /** The 33 heights (km above sea level) of the 3D mosaic: every 250 m to 3 km, every 500 m to 9 km, every km to 19 km. */
+    val mosaicLevels: List<Double> = (0..10).map { 0.5 + it * 0.25 } + (0..11).map { 3.5 + it * 0.5 } + (10..19).map { it.toDouble() }
 
     private val quality = banded(listOf(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0), ramp(10, 0xd02020, 0xffe14a, 0x2e9e2e), "", 2)
     private val heightKft = Style(Kind.Blended, Palettes.rainbow(0.0, 20.0), factor = KFT_PER_KM / 1000.0, units = "kft", digits = 1, hideBelow = 0.05)
@@ -183,6 +195,12 @@ object MrmsCatalogue {
             add(product("GaugeInflIndex_${d}H_Pass2_00.00", "$h h gauge influence (best)", QUALITY, quality, 60, Pool.Mean, missing = -0.0005))
             add(product("GaugeInflIndex_${d}H_Pass1_00.00", "$h h gauge influence (quicker)", QUALITY, quality, 60, Pool.Mean, missing = -0.0005))
         }
+
+        // the 3D mosaic: one entry per field, the height chosen on the page (33 server directories each, see mosaicLevels)
+        val levelIndex = mosaicLevels.indexOf(3.0)
+        add(product("MergedReflectivityQC", "3D Reflectivity (by height)", LEVELS, reflectivity, 2, missing = -90.0).copy(levels = mosaicLevels, level = levelIndex))
+        add(product("MergedZdr", "3D Differential Reflectivity, ZDR (by height)", LEVELS, zdr, 5, missing = -90.0).copy(levels = mosaicLevels, level = levelIndex))
+        add(product("MergedRhoHV", "3D Correlation Coefficient, RhoHV (by height)", LEVELS, rhohv, 5, Pool.Mean, missing = -90.0).copy(levels = mosaicLevels, level = levelIndex))
 
         // model-derived fields and heights
         add(product("Model_0degC_Height_00.50", "Freezing level height", MODEL, heightKft, 60, Pool.Mean))

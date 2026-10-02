@@ -18,8 +18,8 @@
 // (they follow a different mapping), and its data do not follow them either: correlating GREFS wind probability with REFS storm
 // reflectivity gives ~0.37 on this grid and ~0.08 on the arrays' mapping. Use these parameters, not that store's coordinate arrays.
 struct LambertGrid : GridBase {
-    LambertGrid(int cols, int rows, double cellMetres, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
-        : GridBase(cols, rows), cell(cellMetres), lon0Rad(degrees(centralMeridianDeg)) {
+    LambertGrid(int cols, int rows, double cellMeters, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
+        : GridBase(cols, rows), cell(cellMeters), lon0Rad(degrees(centralMeridianDeg)) {
         const double phi1 = degrees(parallelDeg);
         n = std::sin(phi1);
         f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
@@ -29,7 +29,7 @@ struct LambertGrid : GridBase {
         y0 = first.second;
     }
 
-    const double cell;   // metres
+    const double cell;   // meters
 
     // fractional grid position (column from the west, row from the south) of a latitude / west-negative longitude
     void toGrid(double lat, double lon, double& column, double& row) const override {

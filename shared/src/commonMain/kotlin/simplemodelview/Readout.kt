@@ -44,7 +44,7 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
     return where + fixed(shown, style.digits) + if (style.units.isEmpty()) "" else " " + style.units
 }
 
-/** Products with no colour table get a rainbow spanning the picture's own range. */
+/** Products with no color table get a rainbow spanning the picture's own range. */
 fun withAutoStops(style: Style, values: FloatArray): Style {
     if (style.kind == Kind.Paintball || style.stops.isNotEmpty()) return style
     var lo = Double.MAX_VALUE

@@ -21,7 +21,7 @@ W=${SIZE%x*}; H=${SIZE#*x}
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 tap()  { adb shell input tap "$(( W * $1 / 100 ))" "$(( H * $2 / 100 ))"; }
 
-# distinct colours in the middle of the screen (rows 30-65 %): the map, or the globe, has hundreds; a spinner or empty
+# distinct colors in the middle of the screen (rows 30-65 %): the map, or the globe, has hundreds; a spinner or empty
 # screen has a handful
 middle() { python3 - "$1" <<'PY'
 import sys

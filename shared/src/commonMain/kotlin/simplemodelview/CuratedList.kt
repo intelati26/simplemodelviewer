@@ -1,6 +1,6 @@
 package simplemodelview
 
-// Generated from wxqt UtilitySpcRefs.cpp (SPC viewer titles, in SPC menu order). The menu group comes from Catalogue.siteGroup.
+// Generated from wxqt UtilitySpcRefs.cpp (SPC viewer titles, in SPC menu order). The menu group comes from Catalog.siteGroup.
 internal val curatedList: List<Pair<String, String>> = listOf(
     "cref" to "Composite Reflectivity (one member)",
     "cref_max" to "Composite Reflectivity (ensemble maximum)",

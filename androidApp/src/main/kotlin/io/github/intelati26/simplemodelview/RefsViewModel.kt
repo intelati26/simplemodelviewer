@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import simplemodelview.Catalogue
+import simplemodelview.Catalog
 import simplemodelview.Cycle
 import simplemodelview.CycleStore
 import simplemodelview.GlobeCamera
@@ -77,7 +77,7 @@ data class UiState(
     val readout: String? = null,
     val playing: Boolean = false,
     val prefetch: Float? = null,                 // 0..1 while a loop is being downloaded
-    val favourites: Set<String> = emptySet(),
+    val favorites: Set<String> = emptySet(),
     val settings: Settings = Settings(),
     val places: List<Place> = emptyList(),
     val tapLatLon: Pair<Double, Double>? = null,
@@ -95,6 +95,9 @@ data class UiState(
     val forecastHour: Int?
         get() = cycle?.let { c -> times.getOrNull(timeIndex)?.let { ((it - c.epochSeconds) / 3600).toInt() } }
 }
+
+/** The member the member viewer opens on: the RRFS control member (shown as "RRFS Ctl"). */
+private const val DEFAULT_MEMBER = "RRFS"
 
 class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
@@ -116,7 +119,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = kotlinx.coroutines.flow.MutableStateFlow(
         UiState(
-            favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(),
+            favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(),
             settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
@@ -127,10 +130,10 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     private inline fun update(f: (UiState) -> UiState) { _state.value = f(_state.value) }
 
-    /** The MRMS page may have changed favourites, places or settings while this page was away. */
+    /** The MRMS page may have changed favorites, places or settings while this page was away. */
     fun reloadFromPrefs() = update {
         it.copy(
-            favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()),
+            favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()),
             settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
         )
     }
@@ -175,10 +178,13 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         store = opened
         val last = prefs.getString("product", null)
         val product = opened.products.firstOrNull { it.id == last }
-            ?: opened.products.firstOrNull { it.id == "cref_max" } ?: opened.products.first()   // (starts at F000 / F001, unlike the 4-h products)
+            ?: opened.products.firstOrNull { it.id == "cref" } ?: opened.products.firstOrNull { it.id == "cref_max" } ?: opened.products.first()   // (starts at F000 / F001, unlike the 4-h products)
         val members = repo.members(opened)
         // a (new) run always opens at its earliest time step: F000 / F001, not wherever the previous run's slider was
-        update { it.copy(cycle = cycle, products = opened.products, members = members, member = it.member.coerceIn(0, maxOf(0, members.size - 1)), timeIndex = 0) }
+        // the member shown is remembered by name (default: the RRFS control member, "RRFS Ctl"), so it survives a new run
+        val wanted = prefs.getString("member_name", DEFAULT_MEMBER)
+        val memberIndex = members.indexOf(wanted).takeIf { it >= 0 } ?: members.indexOf(DEFAULT_MEMBER).takeIf { it >= 0 } ?: 0
+        update { it.copy(cycle = cycle, products = opened.products, members = members, member = memberIndex, timeIndex = 0) }
         selectProductInternal(product, keepHour = false)
     }
 
@@ -207,7 +213,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         loadFrame()
     }
 
-    fun pickMember(index: Int) { update { it.copy(member = index) }; showFrame() }
+    fun pickMember(index: Int) {
+        _state.value.members.getOrNull(index)?.let { prefs.edit().putString("member_name", it).apply() }
+        update { it.copy(member = index) }
+        showFrame()
+    }
 
     fun pickTime(index: Int) {
         update { it.copy(timeIndex = index.coerceIn(0, maxOf(0, it.times.size - 1))) }
@@ -226,10 +236,10 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (values != null) viewModelScope.launch { rerender() }
     }
 
-    fun toggleFavourite(product: Product) {
-        val favourites = _state.value.favourites.let { if (product.id in it) it - product.id else it + product.id }
-        prefs.edit().putStringSet("favourites", favourites).apply()
-        update { it.copy(favourites = favourites) }
+    fun toggleFavorite(product: Product) {
+        val favorites = _state.value.favorites.let { if (product.id in it) it - product.id else it + product.id }
+        prefs.edit().putStringSet("favorites", favorites).apply()
+        update { it.copy(favorites = favorites) }
     }
 
     /** Frame for the current selection; a newer request replaces one still loading. */
@@ -374,7 +384,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         return SettingsBackup(
             wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
-            contactEmail = st.settings.contactEmail, favourites = st.favourites.sorted(),
+            contactEmail = st.settings.contactEmail, favorites = st.favorites.sorted(),
             places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
             product = st.product?.id ?: prefs.getString("product", null), sector = st.sector.name,
         )
@@ -386,7 +396,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val ok = withContext(Dispatchers.IO) {
             try { resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) } != null } catch (e: Exception) { false }
         }
-        update { it.copy(notice = if (ok) "Settings exported: ${backup().favourites.size} favourites, ${backup().places.size} places." else "Could not write the settings file.") }
+        update { it.copy(notice = if (ok) "Settings exported: ${backup().favorites.size} favorites, ${backup().places.size} places." else "Could not write the settings file.") }
     }
 
     /** Reads a settings file the user chose, validates it and applies it. Nothing changes if it is not a simplemodelview backup. */
@@ -398,13 +408,13 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
         setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }))
-        prefs.edit().putStringSet("favourites", b.favourites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
-        update { it.copy(favourites = b.favourites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
+        prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
+        update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
         Sector.all.firstOrNull { it.name == b.sector }?.let { setGlobe(false); pickSector(it) }
         val product = b.product?.let { id -> _state.value.products.firstOrNull { it.id == id } }
         if (product != null) pickProduct(product) else b.product?.let { prefs.edit().putString("product", it).apply() }
-        update { it.copy(notice = "Settings imported: ${b.favourites.size} favourites, ${b.places.size} places.") }
+        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places.") }
     }
 
     // ---- places ----
@@ -639,7 +649,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
         } else renderer.render(product, style, data, st.members, v, dark = false)
 
-    /** Writes the shareable picture (header, map, colour key) and returns the file, or null when there is nothing to share. */
+    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val product = st.product ?: return@withContext null

@@ -7,7 +7,7 @@
 #include <cmath>
 #include "grid_base.h"
 
-// A regular latitude / longitude grid (MRMS): cell centres at southLat + row * dLat and westLon + column * dLon (degrees, row 0 = south,
+// A regular latitude / longitude grid (MRMS): cell centers at southLat + row * dLat and westLon + column * dLon (degrees, row 0 = south,
 // west-negative longitudes). Used for windows cut out of (and decimated from) the 0.01 / 0.005 degree MRMS grids.
 struct LatLonGrid : GridBase {
     LatLonGrid(int cols, int rows_, double southLat_, double westLon_, double dLat_, double dLon_)

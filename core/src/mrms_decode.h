@@ -19,7 +19,7 @@ namespace Mrms {
     // what the file's sections say
     struct Info {
         int columns = 0, rows = 0;
-        double northLat = 0, westLon = 0;   // centre of the first (north-west) cell, degrees, west-negative longitude
+        double northLat = 0, westLon = 0;   // center of the first (north-west) cell, degrees, west-negative longitude
         double dLat = 0, dLon = 0;          // degrees per cell
         int64_t validTime = 0;              // epoch seconds
         double reference = 0, scale = 1;    // value = reference + sample * scale

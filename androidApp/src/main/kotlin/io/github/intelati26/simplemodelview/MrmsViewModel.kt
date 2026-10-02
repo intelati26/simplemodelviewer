@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 import simplemodelview.BackupPlace
 import simplemodelview.Grid
 import simplemodelview.GlobeCamera
-import simplemodelview.MrmsCatalogue
+import simplemodelview.MrmsCatalog
 import simplemodelview.MrmsFile
 import simplemodelview.MrmsFrame
 import simplemodelview.MrmsProduct
@@ -53,7 +53,7 @@ data class MrmsState(
     val busy: Boolean = true,
     val error: String? = null,
     val notice: String? = null,
-    val product: MrmsProduct = MrmsCatalogue.default,
+    val product: MrmsProduct = MrmsCatalog.default,
     val sector: Sector = Sector.all[0],
     val files: List<MrmsFile> = emptyList(),
     val index: Int = 0,
@@ -64,10 +64,10 @@ data class MrmsState(
     val readout: String? = null,
     val playing: Boolean = false,
     val prefetch: Float? = null,                 // 0..1 while a loop is being downloaded
-    val cellKilometres: Double? = null,          // resolution of the shown picture (after any decimation)
+    val cellKilometers: Double? = null,          // resolution of the shown picture (after any decimation)
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
-    val favourites: Set<String> = emptySet(),
+    val favorites: Set<String> = emptySet(),
     val places: List<Place> = emptyList(),
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
@@ -102,9 +102,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(
         MrmsState(
-            product = MrmsCatalogue.byId(prefs.getString("mrms_product", null)) ?: MrmsCatalogue.default,
+            product = withSavedLevel(MrmsCatalog.byId(prefs.getString("mrms_product", null)) ?: MrmsCatalog.default),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("mrms_sector", null) } ?: Sector.all[0],
-            favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(),
+            favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             settings = readSettings(),
             units = readUnits(),
@@ -114,6 +114,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<MrmsState> = _state
 
     private inline fun update(f: (MrmsState) -> MrmsState) { _state.value = f(_state.value) }
+
+    private fun withSavedLevel(product: MrmsProduct) =
+        if (product.levels.isEmpty()) product else product.copy(level = prefs.getInt("mrms_level_${product.id}", product.level).coerceIn(0, product.levels.size - 1))
 
     private fun readSettings() = Settings(
         prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(),
@@ -125,7 +128,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Switches rain / hail (in or mm), temperature (F or C) and height (kft or km) units; the picture is redrawn from the cached data. */
     fun setUnits(units: Units) {
-        prefs.edit().putBoolean("u_metric_length", units.metricLength).putBoolean("u_celsius", units.celsius).putBoolean("u_km", units.kilometres).apply()
+        prefs.edit().putBoolean("u_metric_length", units.metricLength).putBoolean("u_celsius", units.celsius).putBoolean("u_km", units.kilometers).apply()
         update { it.copy(units = units) }
         if (shown != null) showFrame()
     }
@@ -135,9 +138,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     init { load(); promptForContact() }
 
-    /** The SPC page may have changed favourites, places or settings while this page was away. */
+    /** The SPC page may have changed favorites, places or settings while this page was away. */
     fun reloadFromPrefs() = update {
-        it.copy(favourites = prefs.getStringSet("favourites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()), settings = readSettings())
+        it.copy(favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()), settings = readSettings())
     }
 
     /** (Re)reads the list of newest files and shows the latest one. */
@@ -209,9 +212,21 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun pickProduct(product: MrmsProduct) {
+    fun pickProduct(picked: MrmsProduct) {
+        val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
         update { it.copy(product = product, crosshair = null, readout = null, tapLatLon = null) }
+        load()
+    }
+
+    /** Chooses the height of a 3D mosaic field (an index into its levels): the newest scans of that height's directory are loaded. */
+    fun pickLevel(index: Int) {
+        val current = _state.value.product
+        if (current.levels.isEmpty()) return
+        val level = index.coerceIn(0, current.levels.size - 1)
+        if (level == current.level) return
+        prefs.edit().putInt("mrms_level_${current.id}", level).apply()
+        update { it.copy(product = current.copy(level = level)) }
         load()
     }
 
@@ -237,10 +252,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
-    fun toggleFavourite(product: Product) {
-        val favourites = _state.value.favourites.let { if (product.id in it) it - product.id else it + product.id }
-        prefs.edit().putStringSet("favourites", favourites).apply()
-        update { it.copy(favourites = favourites) }
+    fun toggleFavorite(product: Product) {
+        val favorites = _state.value.favorites.let { if (product.id in it) it - product.id else it + product.id }
+        prefs.edit().putStringSet("favorites", favorites).apply()
+        update { it.copy(favorites = favorites) }
     }
 
     private fun showFrame() {
@@ -280,7 +295,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             shownGrid = frame.window.grid
             shown = synthetic(product, frame.window.grid) to frame.window.values
-            update { it.copy(style = styleOf(product), cellKilometres = frame.window.sourceCellDegrees * globeStep(product) * 111.0) }
+            update { it.copy(style = styleOf(product), cellKilometers = frame.window.sourceCellDegrees * globeStep(product) * 111.0) }
             if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
             return
         }
@@ -295,12 +310,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         view = v
         shownGrid = grid
         shown = synthetic to window.values
-        update { it.copy(map = bitmap, style = synthetic.style, busy = false, cellKilometres = window.sourceCellDegrees * step * 111.0) }
+        update { it.copy(map = bitmap, style = synthetic.style, busy = false, cellKilometers = window.sourceCellDegrees * step * 111.0) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
     private fun synthetic(product: MrmsProduct, grid: Grid) =
-        Product(product.id, product.title, product.group, styleOf(product), hasMembers = false, timeDimension = null, grid = grid)
+        Product(product.directory, product.displayTitle, product.group, styleOf(product), hasMembers = false, timeDimension = null, grid = grid)
 
     /** Whole pixels per cell: as large as keeps the picture under about 6 million pixels (and at most 4). */
     private fun pixelScale(grid: Grid): Int {
@@ -452,7 +467,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         return SettingsBackup(
             wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
-            contactEmail = st.settings.contactEmail, favourites = st.favourites.sorted(),
+            contactEmail = st.settings.contactEmail, favorites = st.favorites.sorted(),
             places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
             product = prefs.getString("product", null), sector = prefs.getString("sector", null),
         )
@@ -463,7 +478,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val ok = withContext(Dispatchers.IO) {
             try { resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) } != null } catch (e: Exception) { false }
         }
-        update { it.copy(notice = if (ok) "Settings exported: ${backup().favourites.size} favourites, ${backup().places.size} places." else "Could not write the settings file.") }
+        update { it.copy(notice = if (ok) "Settings exported: ${backup().favorites.size} favorites, ${backup().places.size} places." else "Could not write the settings file.") }
     }
 
     suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
@@ -474,12 +489,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
         setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }))
-        prefs.edit().putStringSet("favourites", b.favourites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
+        prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         b.product?.let { prefs.edit().putString("product", it).apply() }       // (the SPC page's own choices)
         b.sector?.let { prefs.edit().putString("sector", it).apply() }
-        update { it.copy(favourites = b.favourites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
+        update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
-        update { it.copy(notice = "Settings imported: ${b.favourites.size} favourites, ${b.places.size} places.") }
+        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places.") }
     }
 
     private var lastContactPrompt = 0L
@@ -629,12 +644,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun fileName(product: MrmsProduct, file: MrmsFile, extension: String): String {
         val c = simplemodelview.civilFromEpoch(file.validTime)
         fun p(n: Int) = n.toString().padStart(2, '0')
-        return "mrms_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}${p(c[4])}.$extension"
+        return "mrms_${product.directory.filter { it.isLetterOrDigit() || it == '_' }.take(44)}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}${p(c[4])}.$extension"
     }
 
     private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
-    /** Writes the shareable picture (header, map, colour key) and returns the file, or null when there is nothing to share. */
+    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null

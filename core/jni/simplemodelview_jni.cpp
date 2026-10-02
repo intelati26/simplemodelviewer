@@ -98,7 +98,7 @@ JNIEXPORT jdoubleArray JNICALL Java_io_github_intelati26_simplemodelview_NativeC
 JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_renderGlobe(JNIEnv * env, jobject, jint grid, jfloatArray values, jint width, jint height,
                                                                    jdouble radius, jdouble centerLat, jdouble centerLon, jint stride,
                                                                    jint domainArgb, jint kind, jdoubleArray stopValues, jintArray stopRgb,
-                                                                   jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,
+                                                                   jdouble factor, jdouble offset, jdouble hideBelow, jdouble hideAbove, jdouble opacity, jintArray memberRgb,
                                                                    jintArray argb) {
     if (env->GetArrayLength(values) < spc_grid_columns(grid) * spc_grid_rows(grid) || env->GetArrayLength(argb) < width * height) {
         throwRuntime(env, "globe buffers are too small");
@@ -119,7 +119,7 @@ JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_rend
         members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
     }
     const spc_globe globe{grid, width, height, radius, centerLat, centerLon, stride, static_cast<uint32_t>(domainArgb)};
-    const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size())};
+    const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size()), hideAbove, opacity};
     jint * out = env->GetIntArrayElements(argb, nullptr);
     spc_render_globe(v, &globe, &style, reinterpret_cast<uint32_t *>(out));
     env->ReleaseIntArrayElements(argb, out, 0);
@@ -131,7 +131,7 @@ JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_rend
 
 JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_render(JNIEnv * env, jobject, jint grid, jfloatArray values, jint col0, jint row0, jint cols,
                                                               jint rows, jint scale, jint step, jint kind, jdoubleArray stopValues, jintArray stopRgb,
-                                                              jdouble factor, jdouble offset, jdouble hideBelow, jintArray memberRgb,
+                                                              jdouble factor, jdouble offset, jdouble hideBelow, jdouble hideAbove, jdouble opacity, jintArray memberRgb,
                                                               jintArray argb) {
     const jsize n = env->GetArrayLength(values);
     if (n < spc_grid_columns(grid) * spc_grid_rows(grid) || env->GetArrayLength(argb) < (cols * scale / (step > 1 ? step : 1)) * (rows * scale / (step > 1 ? step : 1))) {
@@ -153,7 +153,7 @@ JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_rend
         members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
     }
     const spc_view view{grid, col0, row0, cols, rows, scale, step};
-    const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size())};
+    const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size()), hideAbove, opacity};
     jint * out = env->GetIntArrayElements(argb, nullptr);
     spc_render(v, &view, &style, reinterpret_cast<uint32_t *>(out));
     env->ReleaseIntArrayElements(argb, out, 0);

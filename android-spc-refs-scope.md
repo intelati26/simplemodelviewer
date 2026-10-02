@@ -10,9 +10,9 @@ share the picture. No account, no server of ours, no ads, no other weather featu
 
 ### Must have (v1)
 1. **Product picker** - SPC's own product titles in groups (Severe storms, Instability and shear, Precipitation, ...), with
-   favourites and the last choice remembered. About 40 curated products, the rest under "Other".
+   favorites and the last choice remembered. About 40 curated products, the rest under "Other".
 2. **Cycle and time** - newest cycle by default, older cycles available; a time slider and Play (loop).
-3. **Map** - the 3 km CONUS grid, pinch-zoom and pan, state / county lines, colour key. A choice of the standard mesoscale
+3. **Map** - the 3 km CONUS grid, pinch-zoom and pan, state / county lines, color key. A choice of the standard mesoscale
    sectors (snap-zoom, 4x4 smoothed pixels per 3 km cell, as on the desktop).
 4. **Tap for a value** - crosshair on the cell, popup with coordinates and value (members exceeding, for paintball products).
 5. **Share / save** - the picture (or the loop as animated WebP / MP4) with the product / run / valid-time border.
@@ -22,7 +22,7 @@ share the picture. No account, no server of ours, no ads, no other weather featu
 - Saved places and a "point forecast" strip (value at your point for every hour of the chosen product).
 - Alerts: a notification when a chosen probability (e.g. 4-h UH or tornado/hail probability) near a saved place passes a threshold
   at a new cycle (needs background work and a battery-friendly design; no push server, so it is poll-on-new-cycle only).
-- Home-screen widget with the latest picture for a favourite product.
+- Home-screen widget with the latest picture for a favorite product.
 - GREFS (4-h / 24-h tornado, wind, hail probability) and REFSCT thunder probability - separate stores, not yet read on the desktop.
 - Tablet layout.
 
@@ -40,15 +40,15 @@ Radar, observations, forecasts, other models, accounts / sync, a backend of any 
   - 0.4 to 1 MB each, blosc-compressed (zstd for most fields, lz4 for coordinates and some others), byte shuffle.
   - dtypes half / single float, int32 bit masks ("paintball": bit i = member i over the threshold), uint8.
 - Each frame is therefore one HTTP request of about 0.5 MB; a 24-frame loop is about 12-20 MB of data.
-- Colour tables and product titles are in SPC's viewer JavaScript; the desktop version uses SPC's published tables for
+- Color tables and product titles are in SPC's viewer JavaScript; the desktop version uses SPC's published tables for
   reflectivity and QPF and its own for the rest.
 
 ## 3. Architecture (recommended)
 **Kotlin + Jetpack Compose UI, with a small C++ core through the NDK (JNI).**
 - The C++ core is a straight lift from the desktop viewer: `Blosc` (blosc frame + lz4 + the vendored zstd decoder),
-  `ZarrStore` (metadata, chunk index, dtype conversion), `LambertGrid`, and the rasteriser (value -> colour, bilinear smoothing for
+  `ZarrStore` (metadata, chunk index, dtype conversion), `LambertGrid`, and the rasteriser (value -> color, bilinear smoothing for
   sectors, paintball compositing). About 1,500 lines, already verified byte-identical to libblosc on real chunks.
-- Kotlin side: networking (OkHttp, HTTP cache and ETags), product catalogue, UI state, share / export, settings (DataStore).
+- Kotlin side: networking (OkHttp, HTTP cache and ETags), product catalog, UI state, share / export, settings (DataStore).
 - Rendering: the core returns an `ARGB_8888` Bitmap (or a 1-byte-per-cell index plus palette, which keeps a 24-frame loop to ~45 MB
   of RAM instead of ~180 MB); a zoomable image view draws it. Map lines are vectors drawn at render time from bundled geometry.
 - No server: the phone talks to spc.noaa.gov directly.
@@ -74,9 +74,9 @@ Alternatives considered:
    before release**: say what the app does, ask whether they are comfortable with direct reads, and ask about preferred rate limits.
 2. **Load on SPC's server.** Be a good client: HTTP caching, no polling faster than new cycles, a descriptive User-Agent with a contact
    address, one request per frame, a politeness limit on parallel downloads.
-3. **Licence.** wxqt is GPLv3, so a build that reuses its code must also be GPLv3 (fine for F-Droid / GitHub releases; Google Play allows
+3. **License.** wxqt is GPLv3, so a build that reuses its code must also be GPLv3 (fine for F-Droid / GitHub releases; Google Play allows
    GPL apps but needs the source offer and attention to the store terms). The alternative is a clean re-implementation (the algorithms are
-   public and small) under a permissive licence. **Decision needed.** The vendored zstd is BSD / GPLv2 dual-licensed - fine either way.
+   public and small) under a permissive license. **Decision needed.** The vendored zstd is BSD / GPLv2 dual-licensed - fine either way.
 4. **Branding.** Name and icon must not imply NOAA / NWS / SPC endorsement or use their marks; credit "Data: NOAA/NWS Storm Prediction Center"
    in the app and store listing. Not a warning or decision-support tool: show a disclaimer and "experimental guidance" on the product pages.
 5. **Mobile data cost.** A loop is ~15 MB. Offer a data-saver (half-resolution frames: decimate the grid in the core, ~4x less memory; the
@@ -91,7 +91,7 @@ Effort is for one experienced developer and assumes the C++ core is reused.
 |---|---|---|
 | M0 spike | Repo + CI for core / Android / iOS; fetch + decode + draw one product on a phone and in the iOS Simulator (screenshot in CI); confirm speed and memory | 1 week |
 | M1 MVP | Product list, cycle / time, map with lines and key, tap popup, pinch-zoom, settings, caching | 2-3 weeks |
-| M2 | Loop with prefetch, sectors, share / export (image, animated WebP / MP4), favourites, themes, tablet-friendly layout | 2 weeks |
+| M2 | Loop with prefetch, sectors, share / export (image, animated WebP / MP4), favorites, themes, tablet-friendly layout | 2 weeks |
 | M3 release | Disclaimers and credits, crash reporting (opt-in), accessibility, store listing, beta test | 1-2 weeks |
 | M4 (optional) | Saved places + point strip, widget, threshold notifications, GREFS / thunder probability | 3-4 weeks |
 
@@ -115,7 +115,7 @@ person able to test Android only.
 ### Repository layout
 ```
 core/            C++ core + tests (CMake; also built by CI on Linux)
-shared/          Kotlin Multiplatform: catalogue, state, networking (Ktor), export, Compose UI
+shared/          Kotlin Multiplatform: catalog, state, networking (Ktor), export, Compose UI
 androidApp/      Android entry point and resources
 iosApp/          Xcode project (thin SwiftUI host for the shared Compose UI)
 fixtures/        real SPC chunks + expected decoded values / golden images
@@ -156,7 +156,7 @@ secrets and are only available to tag builds.
 
 ## 8. Open questions for the owner
 1. Name, and free / donation / paid? (No ads and no tracking is assumed.)
-2. Licence: GPLv3 (reuse the desktop code) or clean re-implementation under a permissive licence?
+2. License: GPLv3 (reuse the desktop code) or clean re-implementation under a permissive license?
 3. Distribution: F-Droid / GitHub APK only, or Google Play too?
 4. Is the alert / notification feature wanted in v1? It is the biggest differentiator and the biggest source of complexity and liability.
 5. ~~iOS / Apple membership~~ - decided: no membership, iOS best effort (unsigned builds, Simulator-tested in CI).
@@ -170,4 +170,4 @@ secrets and are only available to tag builds.
 3. Extract the C++ core (`zarr/`, `spcrefs/`) as a standalone library with its own unit tests: the real chunks used
    to verify the decoder (`cref_max`, `qpf_01h_acc_mean`, `uh25_04h_max_overlap_max`, a member field, a coordinate array) become fixtures.
 4. M0 spike on a physical phone; record decode time, memory and a screenshot per product kind (blended, banded, paintball, probability).
-5. Decide licence and name, then M1. (Apple membership: decided against; iOS is best effort.)
+5. Decide license and name, then M1. (Apple membership: decided against; iOS is best effort.)

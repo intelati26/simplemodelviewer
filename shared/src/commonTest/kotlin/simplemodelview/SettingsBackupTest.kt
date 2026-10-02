@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 class SettingsBackupTest {
     private val full = SettingsBackup(
         wifiOnlyLoop = true, dataSaver = true, cacheMegabytes = 300, contactEmail = "me@example.com",
-        favourites = listOf("cref_max", "grefs-4hr/tor_prob"), places = listOf(BackupPlace("Norman, OK", 35.22, -97.44)),
+        favorites = listOf("cref_max", "grefs-4hr/tor_prob"), places = listOf(BackupPlace("Norman, OK", 35.22, -97.44)),
         product = "uh25_04h_max_overlap_max", sector = "South Central",
     )
 
@@ -36,17 +36,23 @@ class SettingsBackupTest {
 
     @Test fun valuesAreCleanedNotTrusted() {
         val dirty = SettingsBackup(
-            cacheMegabytes = 5_000_000, contactEmail = "not an email", favourites = listOf("a", "a", "", "b"),
+            cacheMegabytes = 5_000_000, contactEmail = "not an email", favorites = listOf("a", "a", "", "b"),
             places = listOf(BackupPlace("ok", 10.0, 20.0), BackupPlace("off globe", 95.0, 0.0), BackupPlace("", 1.0, 1.0), BackupPlace("ok", 1.0, 1.0)),
             sector = "Mordor", product = "x".repeat(500),
         )
         val clean = assertNotNull(SettingsBackup.decode(SettingsBackup.encode(dirty)))
         assertEquals(2000, clean.cacheMegabytes)
         assertEquals("", clean.contactEmail)
-        assertEquals(listOf("a", "b"), clean.favourites)
+        assertEquals(listOf("a", "b"), clean.favorites)
         assertEquals(listOf("ok"), clean.places.map { it.name })
         assertEquals(10.0, clean.places.single().lat)       // the first "ok" wins
         assertNull(clean.sector)
         assertNull(clean.product)
+    }
+
+    @Test fun readsFilesWrittenWithTheOldSpelling() {
+        val old = """{"app":"simplemodelview","format":1,"favourites":["cref","qpf_06h_acc_mean"]}"""
+        assertEquals(listOf("cref", "qpf_06h_acc_mean"), SettingsBackup.decode(old)!!.favorites)
+        assertTrue("\"favorites\"" in SettingsBackup.encode(SettingsBackup(favorites = listOf("x"))))   // new files use the new spelling
     }
 }

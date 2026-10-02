@@ -247,7 +247,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
     }
 
     if (s.contactPrompt) ContactDialog(onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt)
-    if (picker) ProductPicker(s.products, s.product, s.favourites, onToggle = vm::toggleFavourite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
+    if (picker) ProductPicker(s.products, s.product, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
         AlertDialog(
@@ -311,7 +311,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
                 "simplemodelview is an unofficial viewer for the Storm Prediction Center's experimental REFS ensemble products.\n\n" +
                     "Data: NOAA/NWS Storm Prediction Center. Not affiliated with or endorsed by NOAA, the NWS or SPC. " +
                     "Experimental guidance only: do not use it for warnings or safety decisions; follow official NWS products.\n\n" +
-                    "Licence: GPLv3."
+                    "License: GPLv3."
             )
         },
     )
@@ -336,10 +336,10 @@ internal fun Legend(style: Style, members: List<String>) {
         if (style.kind == Kind.Paintball) {
             Row(Modifier.fillMaxWidth()) {
                 for (i in 0 until 10) Box(
-                    Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or (Palettes.memberColours[members.getOrNull(i)] ?: 0x808080))),
+                    Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or (Palettes.memberColors[members.getOrNull(i)] ?: 0x808080))),
                 )
             }
-            Text("Each colour: a member over the threshold", style = MaterialTheme.typography.labelSmall)
+            Text("Each color: a member over the threshold", style = MaterialTheme.typography.labelSmall)
             return
         }
         if (style.stops.isEmpty()) return
@@ -361,7 +361,7 @@ internal fun Legend(style: Style, members: List<String>) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(MapRenderer.label(style.stops.first(), style), style = MaterialTheme.typography.labelSmall)
             Text(style.units, style = MaterialTheme.typography.labelSmall)
-            Text(MapRenderer.label(style.stops.last(), style), style = MaterialTheme.typography.labelSmall)
+            Text(MapRenderer.label(style.top?.let { simplemodelview.Stop(it, 0) } ?: style.stops.last(), style), style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -400,13 +400,13 @@ private fun MemberMenu(members: List<String>, current: Int, onPick: (Int) -> Uni
     }
 }
 
-internal const val FAVOURITES = "Favourites"
+internal const val FAVORITES = "Favorites"
 
-/** The product list in collapsible buckets like SPC's own menu (Guidance, Synoptic, Severe, ...), with Favourites first. All start collapsed. */
+/** The product list in collapsible buckets like SPC's own menu (Guidance, Synoptic, Severe, ...), with Favorites first. All start collapsed. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ProductPicker(
-    products: List<Product>, current: Product?, favourites: Set<String>,
+    products: List<Product>, current: Product?, favorites: Set<String>,
     onToggle: (Product) -> Unit, onPick: (Product) -> Unit, onDismiss: () -> Unit, groups: List<String> = Groups.ordered,
 ) {
     var query by remember { mutableStateOf("") }
@@ -416,12 +416,12 @@ internal fun ProductPicker(
     val shown = products.filter { p -> words.all { p.title.contains(it, ignoreCase = true) } }
     // while searching, every bucket with a match is open; otherwise only the ones the user opened
     val buckets: List<Pair<String, List<Product>>> =
-        listOf(FAVOURITES to shown.filter { it.id in favourites }) + groups.map { g -> g to shown.filter { it.group == g } }
+        listOf(FAVORITES to shown.filter { it.id in favorites }) + groups.map { g -> g to shown.filter { it.group == g } }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true, label = { Text("Search products") })
         LazyColumn(Modifier.fillMaxWidth()) {
             for ((name, list) in buckets) {
-                if (list.isEmpty() && (name != FAVOURITES || searching)) continue
+                if (list.isEmpty() && (name != FAVORITES || searching)) continue
                 val expanded = if (searching) true else name in open
                 item(key = "h-$name") {
                     BucketHeader(name, list.size, expanded) { if (!searching) open = if (expanded) open - name else open + name }
@@ -430,7 +430,7 @@ internal fun ProductPicker(
                 if (list.isEmpty()) {
                     item(key = "e-$name") { Text("Tap the star on a product to keep it here.", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
                 } else {
-                    items(list, key = { "$name/${it.id}" }) { ProductRow(it, it.id == current?.id, it.id in favourites, onToggle, onPick) }
+                    items(list, key = { "$name/${it.id}" }) { ProductRow(it, it.id == current?.id, it.id in favorites, onToggle, onPick) }
                 }
             }
         }
@@ -450,10 +450,10 @@ private fun BucketHeader(name: String, count: Int, expanded: Boolean, onClick: (
 }
 
 @Composable
-private fun ProductRow(product: Product, selected: Boolean, favourite: Boolean, onToggle: (Product) -> Unit, onPick: (Product) -> Unit) {
+private fun ProductRow(product: Product, selected: Boolean, favorite: Boolean, onToggle: (Product) -> Unit, onPick: (Product) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onPick(product) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(product.title, Modifier.weight(1f), fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
-        TextButton(onClick = { onToggle(product) }) { Text(if (favourite) "★" else "☆", fontSize = 20.sp) }
+        TextButton(onClick = { onToggle(product) }) { Text(if (favorite) "★" else "☆", fontSize = 20.sp) }
     }
     HorizontalDivider()
 }
@@ -526,8 +526,8 @@ internal fun SettingsDialog(
                         FilterChip(units.metricLength, { onUnits(units.copy(metricLength = true)) }, label = { Text("mm") })
                         FilterChip(!units.celsius, { onUnits(units.copy(celsius = false)) }, label = { Text("Temp: \u00B0F") })
                         FilterChip(units.celsius, { onUnits(units.copy(celsius = true)) }, label = { Text("\u00B0C") })
-                        FilterChip(!units.kilometres, { onUnits(units.copy(kilometres = false)) }, label = { Text("Height: kft") })
-                        FilterChip(units.kilometres, { onUnits(units.copy(kilometres = true)) }, label = { Text("km") })
+                        FilterChip(!units.kilometers, { onUnits(units.copy(kilometers = false)) }, label = { Text("Height: kft") })
+                        FilterChip(units.kilometers, { onUnits(units.copy(kilometers = true)) }, label = { Text("km") })
                     }
                 }
                 var email by remember { mutableStateOf(settings.contactEmail) }
@@ -542,7 +542,7 @@ internal fun SettingsDialog(
                 )
                 Column {
                     Text("Back up or move your settings")
-                    Text("Favourites, saved places, last product and area, and these options, as a JSON file you choose where to save.", style = MaterialTheme.typography.bodySmall)
+                    Text("Favorites, saved places, last product and area, and these options, as a JSON file you choose where to save.", style = MaterialTheme.typography.bodySmall)
                     Row {
                         TextButton(onClick = onExport) { Text("Export") }
                         TextButton(onClick = onImport) { Text("Import") }

@@ -8,7 +8,7 @@ implemented yet; it is a plan to pick from.
 | Layer | SPC-specific parts |
 |---|---|
 | `core/` (C++) | Only the grid constants: `SPC_GRID_REFS` / `SPC_GRID_GREFS` and their Lambert parameters (`core/src/grids.h`, `lambert_grid.h`). Blosc decoding, dtype conversion, the rasteriser and the globe are generic. |
-| `shared/` (Kotlin) | Store URL patterns and cycle probing (`Cycles.kt`, `StoreKind`), the Zarr layout assumptions (`Repository.kt`), the product catalogue and titles (`Catalogue.kt`, `CuratedList.kt`), palettes (`Palettes.kt`), member names and paintball colours, the `Grid` enum. Zarr metadata parsing (`ZarrMeta.kt`), views, sectors, the globe and read-outs are generic. |
+| `shared/` (Kotlin) | Store URL patterns and cycle probing (`Cycles.kt`, `StoreKind`), the Zarr layout assumptions (`Repository.kt`), the product catalog and titles (`Catalog.kt`, `CuratedList.kt`), palettes (`Palettes.kt`), member names and paintball colors, the `Grid` enum. Zarr metadata parsing (`ZarrMeta.kt`), views, sectors, the globe and read-outs are generic. |
 | `androidApp/` | The User-Agent text, the disclaimer / credit strings, the app title, the widget text, default product (`cref_max`), the sector list (US meso areas), the bundled US / Canada / Mexico line data. |
 | Docs / CI | Names and prose in `README.md` and `docs/outline.md`. |
 
@@ -32,10 +32,10 @@ interface Provider {
 }
 ```
 
-- `SpcProvider` holds today's `Cycle`, `StoreKind`, URL patterns, `Catalogue`, `Palettes` and the `.zgroup` probing.
+- `SpcProvider` holds today's `Cycle`, `StoreKind`, URL patterns, `Catalog`, `Palettes` and the `.zgroup` probing.
 - A `Run` replaces `Cycle` in the generic code (an id, a label, an init time).
-- `Product` keeps its fields, but its `id` becomes provider-scoped (`spc:cref_max`) so favourites and saved places cannot collide between providers.
-- Preferences are stored per provider (last product, sector, favourites).
+- `Product` keeps its fields, but its `id` becomes provider-scoped (`spc:cref_max`) so favorites and saved places cannot collide between providers.
+- Preferences are stored per provider (last product, sector, favorites).
 
 ### 2. Keep the core generic
 
@@ -64,19 +64,19 @@ interface Provider {
 
 ## What does not need to change
 
-- The line geometry and sector boxes are US-centred. They are data assets, so another provider can bring its own (the sector list is already a list).
+- The line geometry and sector boxes are US-centered. They are data assets, so another provider can bring its own (the sector list is already a list).
 - Time handling, cycle probing, HTTP caching, the loop / export code and the globe do not depend on SPC.
 - The "no easy MRMS" finding stands: MRMS is GRIB2 (`.grib2.gz`), which would need a new decoder in the core, so it is a different kind of provider rather than another Zarr one. Other Zarr-based model stores are the realistic second providers.
 
 ## Risks and costs
 
 - The `Provider` interface should be shaped by two real providers. Designing it from SPC alone risks baking in SPC's assumptions (cycles every 6 hours, one valid-time array per product, 10 members). Keep it small and change it when the second provider arrives.
-- Registering grids at runtime adds a small amount of state to the C API; the existing core tests cover the numeric behaviour.
+- Registering grids at runtime adds a small amount of state to the C API; the existing core tests cover the numeric behavior.
 - Rough size: step 1 and the package move are about a day of mechanical refactoring with the existing tests as a safety net; steps 2 and 4 are smaller; the application ID rename is an hour but touches many files.
 
 ## Suggested order
 
-1. Move SPC code into its own package (no behaviour change).
+1. Move SPC code into its own package (no behavior change).
 2. Introduce `Provider` / `Run` and make `SpcProvider` the only implementation.
 3. Move strings and branding behind the provider.
 4. Register grids with the core at start-up.

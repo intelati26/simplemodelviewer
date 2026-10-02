@@ -9,7 +9,7 @@ import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Where the globe is looking: the point at its centre and the sphere's radius in pixels. */
+/** Where the globe is looking: the point at its center and the sphere's radius in pixels. */
 data class GlobeCamera(val lat: Double, val lon: Double, val radius: Double) {
     /** Drags the surface under the finger: [dx] / [dy] pixels (right / down) turn the globe the other way. */
     fun dragged(dx: Double, dy: Double): GlobeCamera {

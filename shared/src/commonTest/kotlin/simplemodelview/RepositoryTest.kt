@@ -29,8 +29,8 @@ class MetaTest {
         assertEquals(listOf("valid_time", "y", "x"), c.dims)
     }
 
-    @Test fun catalogueKeepsGridFieldsOnly() {
-        val products = Catalogue.build(parseZMetadata(zmeta).values)
+    @Test fun catalogKeepsGridFieldsOnly() {
+        val products = Catalog.build(parseZMetadata(zmeta).values)
         assertEquals(listOf("cref_max", "uh25_04h_max_overlap_pb_t>99.85p"), products.map { it.id })
         assertEquals("Composite Reflectivity (ensemble maximum)", products[0].title)
         assertEquals(Kind.Banded, products[0].style.kind)
@@ -41,13 +41,13 @@ class MetaTest {
     }
 
     @Test fun styles() {
-        assertEquals(-1.0, Catalogue.styleFor("uh25min_04h_min_overlap_min", "meter ** 2 / second ** 2").factor)
-        assertEquals(100.0, Catalogue.styleFor("qpf_06h_acc_prob_t>001", "dimensionless").factor)
-        assertEquals(0.01, Catalogue.styleFor("pmsl_mean", "pascal").factor)
-        assertEquals("kt", Catalogue.styleFor("gust_mean", "knot").units)
+        assertEquals(-1.0, Catalog.styleFor("uh25min_04h_min_overlap_min", "meter ** 2 / second ** 2").factor)
+        assertEquals(100.0, Catalog.styleFor("qpf_06h_acc_prob_t>001", "dimensionless").factor)
+        assertEquals(0.01, Catalog.styleFor("pmsl_mean", "pascal").factor)
+        assertEquals("kt", Catalog.styleFor("gust_mean", "knot").units)
     }
 
-    @Test fun grefsStoresAreKeyedAndCatalogued() {
+    @Test fun grefsStoresAreKeyedAndCatalogd() {
         val grefs = """{"metadata":{
           "tor_prob/.zarray":{"shape":[57,129,185],"chunks":[1,129,185],"dtype":"<f4","fill_value":"NaN","compressor":{"id":"blosc"}},
           "tor_prob/.zattrs":{"_ARRAY_DIMENSIONS":["valid_time","y","x"],"units":"percent"},
@@ -62,7 +62,7 @@ class MetaTest {
         assertEquals(Grid.GREFS, tor.grid)
         assertEquals(Grid.REFS, all.getValue("cref_max").grid)
         assertEquals(null, all.getValue("grefs-4hr/latitude").grid)   // coordinates are not products
-        val products = Catalogue.build(all.values)
+        val products = Catalog.build(all.values)
         val p = products.first { it.id == "grefs-4hr/tor_prob" }
         assertEquals("4-h Tornado Probability (GREFS)", p.title)
         assertEquals(Groups.GUIDANCE, p.group)
@@ -70,8 +70,8 @@ class MetaTest {
         assertEquals("grefs-4hr/valid_time", p.timeDimension)
         assertEquals(Kind.Banded, p.style.kind)
         assertEquals(1.0, p.style.factor)                           // GREFS values are already percent (unlike REFS probability fractions)
-        assertEquals(2.0, p.style.hideBelow)                        // tornado probabilities start at 2%
-        assertEquals(5.0, products.first { it.id == "grefs-4hr/wind_prob" }.style.hideBelow)
+        assertEquals(2.0, p.style.stops.first().value)             // tornado probabilities start at 2% (the viewer's own table: nothing is drawn below it)
+        assertEquals(5.0, products.first { it.id == "grefs-4hr/wind_prob" }.style.stops.first().value)
         // buckets follow the site's menu order: Guidance (GREFS) comes first
         assertEquals(Groups.GUIDANCE, products.first().group)
     }
@@ -88,12 +88,12 @@ class MetaTest {
           "thunder_prob/.zarray":{"shape":[60,129,185],"chunks":[1,129,185],"dtype":"<f4","fill_value":"NaN","compressor":{"id":"blosc"}},
           "thunder_prob/.zattrs":{"_ARRAY_DIMENSIONS":["valid_time","y","x"],"units":"percent"}}}"""
         val all = parseZMetadata(zmeta) + parseZMetadata(ct, StoreKind.REFSCT1)
-        val p = Catalogue.build(all.values).first { it.id == "refsct-1hr/thunder_prob" }
+        val p = Catalog.build(all.values).first { it.id == "refsct-1hr/thunder_prob" }
         assertEquals("1-h Thunder Probability (REFSCT)", p.title)
         assertEquals(Groups.GUIDANCE, p.group)
         assertEquals(Grid.GREFS, p.grid)
         assertEquals(1.0, p.style.factor)                  // already percent: not multiplied by 100 like the REFS probability fractions
-        assertEquals(10.0, p.style.hideBelow)
+        assertEquals(10.0, p.style.stops.first().value)
         assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/refsct-1hr_20261001_1800.zarr", Cycle(2026, 10, 1, 18).storeUrl(StoreKind.REFSCT1))
         assertEquals("https://www.spc.noaa.gov/exper/refs/data/2026/10/01/refsct-full_20261001_1800.zarr", Cycle(2026, 10, 1, 18).storeUrl(StoreKind.REFSCT_FULL))
     }

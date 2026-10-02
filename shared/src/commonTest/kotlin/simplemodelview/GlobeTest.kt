@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 class GlobeTest {
     private val cam = GlobeCamera(38.5, -97.5, 300.0)
 
-    @Test fun centreMapsToTheMiddle() {
+    @Test fun centerMapsToTheMiddle() {
         val p = assertNotNull(globeForward(cam, 800, 600, 38.5, -97.5))
         assertEquals(400.0, p[0], 1e-9); assertEquals(300.0, p[1], 1e-9)
     }
@@ -34,7 +34,7 @@ class GlobeTest {
     @Test fun outsideTheSphereHasNoLocation() = assertNull(globeInverse(cam, 800, 600, 5.0, 5.0))
 
     @Test fun draggingTurnsTheGlobe() {
-        // dragging the surface to the right brings western longitudes to the centre; dragging down brings the north into view
+        // dragging the surface to the right brings western longitudes to the center; dragging down brings the north into view
         val c = cam.dragged(dx = 100.0, dy = 0.0)
         assertTrue(c.lon < cam.lon)
         val d = cam.dragged(dx = 0.0, dy = 100.0)

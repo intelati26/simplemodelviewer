@@ -7,8 +7,8 @@ One job: pick an SPC REFS product, see it on a phone map, step or loop the forec
 No account, server, ads or other weather features.
 
 ## 2. Features
-- **v1 (must):** product picker (groups, favourites, last choice, ~40 curated + "Other"); cycle and time (newest default,
-  slider, Play); map (3 km CONUS, pinch-zoom/pan, state/county lines, colour key, mesoscale sectors); tap-for-value
+- **v1 (must):** product picker (groups, favorites, last choice, ~40 curated + "Other"); cycle and time (newest default,
+  slider, Play); map (3 km CONUS, pinch-zoom/pan, state/county lines, color key, mesoscale sectors); tap-for-value
   (paintball: members exceeding); share/save (image, or loop as WebP/MP4, with product/run/valid border); member picker;
   dark/light.
 - **v1.x (nice):** saved places + point strip; threshold alerts (poll-on-new-cycle); widget; GREFS and REFSCT stores; tablet layout.
@@ -33,7 +33,7 @@ LRU disk cache 100-200 MB; data-saver (half-res) mode.
 ## 6. Risks and decisions
 1. Unofficial data source -> read metadata not hard-coded names, schema check, **write to SPC before release**.
 2. Server load -> HTTP cache/ETags, no polling faster than new cycles, User-Agent with contact, limited parallelism.
-3. **[decide] Licence:** GPLv3 (reuse wxqt code, as this first pass does) vs clean re-implementation under a permissive licence.
+3. **[decide] License:** GPLv3 (reuse wxqt code, as this first pass does) vs clean re-implementation under a permissive license.
 4. Branding: no NOAA/NWS/SPC marks or implied endorsement; credit data; "experimental guidance" disclaimer.
 5. Mobile data cost -> data-saver, Wi-Fi-only prefetch.
 6. Play Store scrutiny for weather apps (disclaimers, no alert claims).
@@ -44,12 +44,12 @@ LRU disk cache 100-200 MB; data-saver (half-res) mode.
 |---|---|---|
 | M0 | repo + CI; fetch/decode/draw one product on phone and iOS Simulator | 1 wk |
 | M1 | product list, cycle/time, map + lines + key, tap popup, zoom, settings, caching | 2-3 wk |
-| M2 | loop + prefetch, sectors, share/export, favourites, themes, tablet | 2 wk |
+| M2 | loop + prefetch, sectors, share/export, favorites, themes, tablet | 2 wk |
 | M3 | disclaimers/credits, opt-in crash reports, accessibility, listing, beta | 1-2 wk |
 | M4 (opt) | places + point strip, widget, alerts, GREFS/thunder | 3-4 wk |
 
 ## 8. Open questions
-Name and pricing; licence; distribution (F-Droid/GitHub only vs Play); alerts in v1?; first-screen products
+Name and pricing; license; distribution (F-Droid/GitHub only vs Play); alerts in v1?; first-screen products
 (default: 4-h max UH, composite reflectivity ensemble max, CAPE/shear/STP means).
 
 ## 9. First pass status (this repo)
@@ -62,11 +62,11 @@ Name and pricing; licence; distribution (F-Droid/GitHub only vs Play); alerts in
 | CI: `core-tests` workflow; `android` skeleton | `android-ui`, `ios`, `release` workflows |
 
 Next: (1) fetch real chunks as fixtures and add golden tests, (2) Gradle Android + iOS targets and the JNI/cinterop hello app, (3) port SPC titles
-and colour tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
+and color tables from wxqt `UtilitySpcRefs.cpp`, (4) M0 spike on a phone.
 
 ## 10. Notes
 - **No easy MRMS (checked 2026-10-01).** NSSL's QVS product viewer (mrms.nssl.noaa.gov/qvs/product_viewer/) does not serve data
-  grids: a server-side C++ renderer returns finished map pictures per request (product, time, centre, zoom, pixel size). It is
+  grids: a server-side C++ renderer returns finished map pictures per request (product, time, center, zoom, pixel size). It is
   a rendering service for their page, not an API, and gives no values to tap. Real MRMS values are `.grib2.gz` on NCEP's server
   and the `noaa-mrms-pds` AWS bucket (needs a gunzip + GRIB2 decoder; radar is out of scope for v1). Not pursued.
   **Update 2026-10-02:** the public GRIB2 files turned out to be PNG-packed (template 5.41), so decoding is small (`docs/mrms-site-outline.md`). An MRMS page now

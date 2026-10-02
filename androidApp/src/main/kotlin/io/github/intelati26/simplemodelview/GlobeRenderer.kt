@@ -39,7 +39,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
         // data
         if (buffer.size < width * height) buffer = IntArray(width * height)
-        val memberRgb = IntArray(10) { Palettes.memberColours[members.getOrNull(it)] ?: 0x808080 }
+        val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
         core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
         canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)

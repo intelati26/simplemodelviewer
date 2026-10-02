@@ -141,10 +141,10 @@ namespace Mrms {
                         width = static_cast<int>(be32(body));
                         height = static_cast<int>(be32(body + 4));
                         depth = body[8];
-                        const int colourType = body[9];
+                        const int colorType = body[9];
                         const int interlace = body[12];
                         // grayscale 8 / 16 bit, or 8-bit RGB / RGBA (the files' 24 and 32 bit samples are the pixel's bytes, in order)
-                        channels = colourType == 0 ? 1 : colourType == 2 ? 3 : colourType == 6 ? 4 : 0;
+                        channels = colorType == 0 ? 1 : colorType == 2 ? 3 : colorType == 6 ? 4 : 0;
                         if (channels == 0 || (depth != 8 && !(depth == 16 && channels == 1)) || interlace != 0) {
                             error = "unsupported PNG (need a plain 8 / 16 bit grayscale or 8-bit RGB / RGBA image)";
                             return false;
@@ -326,10 +326,10 @@ namespace Mrms {
         }
 
         const double dLat = info.dLat * step, dLon = info.dLon * step;
-        const double westCentre = info.westLon + (x0 + (step - 1) / 2.0) * info.dLon;
-        const double northCentre = info.northLat - (y0 + (step - 1) / 2.0) * info.dLat;
-        const double southCentre = northCentre - (outRows - 1) * dLat;
-        result.grid = Grids::defineLatLon(static_cast<int>(outCols), static_cast<int>(outRows), southCentre, westCentre, dLat, dLon);
+        const double westCenter = info.westLon + (x0 + (step - 1) / 2.0) * info.dLon;
+        const double northCenter = info.northLat - (y0 + (step - 1) / 2.0) * info.dLat;
+        const double southCenter = northCenter - (outRows - 1) * dLat;
+        result.grid = Grids::defineLatLon(static_cast<int>(outCols), static_cast<int>(outRows), southCenter, westCenter, dLat, dLon);
         result.columns = static_cast<int>(outCols);
         result.rows = static_cast<int>(outRows);
         result.valid_time = info.validTime;

@@ -10,7 +10,7 @@ class ReadoutTest {
     private val grid = FloatArray(GRID_COLUMNS * GRID_ROWS) { Float.NaN }
 
     private fun product(id: String, units: String) =
-        Product(id, id, Groups.OTHER, Catalogue.styleFor(id, units), false, "valid_time")
+        Product(id, id, Groups.OTHER, Catalog.styleFor(id, units), false, "valid_time")
 
     @Test fun fixedText() {
         assertEquals("42.50", fixed(42.5, 2))
