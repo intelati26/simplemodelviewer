@@ -125,16 +125,23 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     fun load() {
         viewModelScope.launch {
             update { it.copy(busy = true, error = null) }
-            try {
-                val cycles = repo.findCycles(System.currentTimeMillis() / 1000)
-                if (cycles.isEmpty()) throw RefsException("Could not reach SPC's REFS data. Check the connection and try again.")
-                update { it.copy(cycles = cycles) }
-                openCycle(cycles.first())
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                update { it.copy(busy = false, error = e.message ?: "Something went wrong") }
+            // a network that is not ready yet (just after boot, a train tunnel) fixes itself: try again a few times before giving up
+            var failure: Exception? = null
+            for (attempt in 0..3) {
+                try {
+                    val cycles = repo.findCycles(System.currentTimeMillis() / 1000)
+                    if (cycles.isEmpty()) throw RefsException("Could not reach SPC's REFS data. Check the connection and try again.")
+                    update { it.copy(cycles = cycles) }
+                    openCycle(cycles.first())
+                    return@launch
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failure = e
+                    if (attempt < 3) delay(2000L shl attempt)      // 2 s, 4 s, 8 s
+                }
             }
+            update { it.copy(busy = false, error = failure?.message ?: "Something went wrong") }
         }
     }
 

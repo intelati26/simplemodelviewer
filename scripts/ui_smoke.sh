@@ -8,6 +8,7 @@ mkdir -p "$OUT"
 source "$(dirname "$0")/emu.sh"   # adb on PATH + emu_tap_text
 APK=${APK:-androidApp/build/outputs/apk/debug/simplemodelview-debug.apk}
 fail=0
+PKG=io.github.intelati26.simplemodelview
 
 adb install -r "$APK" >/dev/null || { echo "install failed"; exit 1; }
 adb shell settings put global hide_error_dialogs 1       # a slow CI emulator can trip "System UI isn't responding"
@@ -38,6 +39,7 @@ wait_for_picture() {   # $1 = name, $2 = seconds to wait
     sleep 4
     shot "$name"
     if [ "$(middle "$OUT/$name.png")" -gt 150 ]; then return 0; fi
+    emu_tap_text "Retry" 2>/dev/null && echo "  tapped Retry (the first load failed)"   # a person would
   done
   return 1
 }
@@ -53,7 +55,7 @@ shot email-dialog-dismissed
 [ $found = 1 ] || { echo "FAIL: no email dialog on a fresh launch"; fail=1; }
 
 echo "waiting for the map (up to 6 min)"
-wait_for_picture map 360 || { echo "FAIL: the map never appeared"; fail=1; }
+wait_for_picture map 360 || { echo "FAIL: the map never appeared"; echo "network check from the device:"; adb shell ping -c 2 -W 3 www.spc.noaa.gov 2>&1 | tail -3; fail=1; }
 
 tap 40 7;  sleep 4; shot product-picker       # product chip
 adb shell input keyevent 4; sleep 2
@@ -64,8 +66,9 @@ tap 92 11; sleep 3; shot share-dialog           # Share
 adb shell input keyevent 4; sleep 2
 tap 91 7;  sleep 3; shot more-menu
 
-if adb logcat -d -s AndroidRuntime:E | grep -q FATAL; then
-  echo "FAIL: the app crashed"; adb logcat -d -s AndroidRuntime:E | head -30; fail=1
+# only crashes of this app count (the emulator image's own apps, e.g. Gmail, may crash too)
+if adb logcat -d -s AndroidRuntime:E | grep -A2 "FATAL EXCEPTION" | grep -q "Process: $PKG"; then
+  echo "FAIL: the app crashed"; adb logcat -d -s AndroidRuntime:E | grep -B1 -A12 "Process: $PKG" | head -30; fail=1
 fi
 if adb logcat -d | grep -q "ANR in io.github.intelati26.simplemodelview"; then
   echo "FAIL: the app was not responding"; adb logcat -d | grep "ANR in io.github.intelati26.simplemodelview" | head -3; fail=1
