@@ -51,7 +51,8 @@ internal fun ZoomableMap(
 
     Box(
         Modifier.fillMaxSize().clipToBounds().onSizeChanged { size = it }
-            .pointerInput(Unit) {
+            // keyed to the picture's size like the zoom state above: a handler started for the previous picture would keep driving that picture's (old) state
+            .pointerInput(bitmap.width, bitmap.height) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     val newScale = (scale * zoom).coerceIn(1f, 12f)
                     // keep the point under the fingers fixed, then pan

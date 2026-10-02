@@ -26,6 +26,12 @@ The SPC page uses the color tables of SPC's own viewer (levels, band colors, the
 ## Play and loop length
 Play starts at once on the frames that have already arrived and widens the cycle as the rest download (1-5, then 1-10, then 1-20, ...), going back to frame 1 at the end. "Loop: N" next to Play chooses how many frames it covers: the first N of a model run, or the newest N radar scans (6 / 12 / 24 / 36 or all); only those frames are downloaded, and a loop video export covers the same frames. The choice is remembered per page.
 
+## UI tests (device or emulator)
+```
+./gradlew :androidApp:connectedDebugAndroidTest
+```
+`ZoomableMapTest` checks pinch and double-tap zoom on pictures of every shape, including a picture that changes shape while the screen is up. `AppZoomTest` pinches the real screen on CONUS and on a regional sector and needs the network; neither runs in CI.
+
 ## Build and test the core
 ```
 cmake -S core -B build && cmake --build build && ctest --test-dir build --output-on-failure
