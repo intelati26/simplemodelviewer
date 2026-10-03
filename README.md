@@ -31,6 +31,9 @@ On the MRMS page, "Overlay" draws other products over the first. Choose **no ove
 
 The **lightning nest** stacks strike density by recency, drawn in order so the freshest is on top: the last 30 minutes as a 20 % shadow, the last 5 minutes at 50 %, the last minute solid. Each strike is a dot (one strike is a single 1 km cell, too small to see) and the older windows get larger dots, so the layers read as nested rings: a solid core, a half-strength ring, a faint halo, each with a thin dark rim. Overlay files are small: strike density 1-2 KB, rotation tracks about 100-160 KB (30 min to 1 h), against about 1.4 MB for a radar frame. Overlays are not drawn on the globe.
 
+## Alerts
+On the MRMS page, "Alerts" outlines NWS products over the radar. Three layers, all **off by default**: **Warnings** (tornado, severe thunderstorm, flash flood, extreme wind, special marine, snow squall; storm-based polygons from NOAA's public watch/warning map service), **Watches** (tornado, severe thunderstorm, flash flood) and **Discussions** (SPC mesoscale discussions and WPC precipitation discussions, dashed, read from their public pages). Outlines use the NWS colors with a dark casing, and are drawn on the **newest frame only** with an "as of" time; they refresh about once a minute while the page is open. Tap inside an outline for a card with the type and times, and **Read** for the full text. Alerts are not tied to your location, and this is an unofficial copy that can be late or incomplete: the dialog says so, and weather.gov is the official source. Not drawn on the globe.
+
 ## UI tests (device or emulator)
 ```
 ./gradlew :androidApp:connectedDebugAndroidTest

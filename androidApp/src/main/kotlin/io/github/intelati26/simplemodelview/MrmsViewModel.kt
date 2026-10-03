@@ -38,7 +38,10 @@ import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
 import simplemodelview.formatClock
 import simplemodelview.loopWindowEndingAt
+import simplemodelview.AlertKind
+import simplemodelview.AlertShape
 import simplemodelview.OverlayLayer
+import simplemodelview.shapesAt
 import simplemodelview.OverlayPresets
 import simplemodelview.OverlaySpec
 import simplemodelview.decodeOverlays
@@ -93,6 +96,12 @@ data class MrmsState(
     val overlayFiles: Map<String, List<MrmsFile>> = emptyMap(),   // per overlay product directory: the files in the span of the radar frames
     val overlayStyles: List<Style> = emptyList(),     // as drawn (units, minimum, opacity), for the legend
     val overlayInfo: String? = null,                  // which overlay files are on the picture, or why one is missing
+    val alertKinds: Set<AlertKind> = emptySet(),      // which alert layers are on (none by default)
+    val alertShapes: List<AlertShape> = emptyList(),  // everything read for those layers
+    val alertsAsOf: Long? = null,                     // when they were read (epoch seconds)
+    val alertNote: String? = null,                    // why a layer could not be read
+    val alertHits: List<AlertShape> = emptyList(),    // the outlines under the tapped point
+    val alertDetail: Pair<String, String?>? = null,   // title and text of the alert being read (text null: loading)
 ) {
     val overlayName: String get() = overlayName(overlays)
     val file: MrmsFile? get() = files.getOrNull(index)
@@ -102,6 +111,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.mrms
+    private val alertsRepo = AppContainer.alerts
     private val renderer = MapRenderer(core, AppContainer.lines)
     private val globeRenderer = GlobeRenderer(core, AppContainer.lines)
 
@@ -157,8 +167,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val wifiOnlyLoop get() = prefs.getBoolean("wifi_only", false)
 
     init {
-        update { it.copy(overlays = layersFrom(decodeOverlays(prefs.getString("mrms_overlays", null)))) }
+        update { it.copy(overlays = layersFrom(decodeOverlays(prefs.getString("mrms_overlays", null))), alertKinds = savedAlertKinds()) }
         load(); promptForContact()
+        if (_state.value.alertKinds.isNotEmpty()) viewModelScope.launch { refreshAlerts(force = true); showFrameIfNewest() }
     }
 
     /** The SPC page may have changed favorites, places or settings while this page was away. */
@@ -233,6 +244,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 delay((_state.value.product.cadenceMinutes * 30L).coerceIn(60L, 300L) * 1000)
                 checkForNewer()
+                if (_state.value.alertKinds.isNotEmpty()) { refreshAlerts(force = false); showFrameIfNewest() }
             }
         }
     }
@@ -253,6 +265,74 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("mrms_level_${current.id}", level).apply()
         update { it.copy(product = current.copy(level = level)) }
         load()
+    }
+
+    // ---- alerts: warnings, watches and discussions drawn over the newest frame ----
+    private fun savedAlertKinds(): Set<AlertKind> =
+        prefs.getString("mrms_alerts", "").orEmpty().split(',').mapNotNull { n -> AlertKind.entries.firstOrNull { it.name == n } }.toSet()
+
+    private var lastDiscussionRead = 0L
+
+    /** Turns the alert layers on or off (all off by default); the chosen ones are read at once and refreshed while the page is on screen. */
+    fun setAlertKinds(kinds: Set<AlertKind>) {
+        prefs.edit().putString("mrms_alerts", kinds.joinToString(",") { it.name }).apply()
+        update { it.copy(alertKinds = kinds, alertShapes = it.alertShapes.filter { s -> s.kind in kinds }, alertHits = emptyList(), alertNote = null) }
+        viewModelScope.launch { refreshAlerts(force = true); showFrameIfNewest() }
+    }
+
+    private fun showFrameIfNewest() { val st = _state.value; if (st.files.isNotEmpty() && st.index == st.files.lastIndex && !st.playing) showFrame() }
+
+    /** Reads the enabled layers: watches / warnings every call, discussions at most every five minutes (unless [force]). A failure is a note, never an error screen. */
+    private suspend fun refreshAlerts(force: Boolean) {
+        val kinds = _state.value.alertKinds
+        if (kinds.isEmpty()) { update { it.copy(alertShapes = emptyList(), alertsAsOf = null, alertNote = null, alertHits = emptyList()) }; return }
+        val now = System.currentTimeMillis() / 1000
+        var note: String? = null
+        val shapes = ArrayList<AlertShape>()
+        if (AlertKind.Warning in kinds || AlertKind.Watch in kinds) {
+            try { shapes += alertsRepo.warningsAndWatches(now).filter { it.kind in kinds } }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { note = "Watches and warnings could not be read" }
+        }
+        if (AlertKind.Discussion in kinds) {
+            if (force || now - lastDiscussionRead > 300) {
+                lastDiscussionRead = now
+                try { shapes += alertsRepo.discussions(now) } catch (e: CancellationException) { throw e } catch (_: Exception) { note = (note ?: "") + " Discussions could not be read" }
+            } else shapes += _state.value.alertShapes.filter { it.kind == AlertKind.Discussion }
+        }
+        update { it.copy(alertShapes = shapes, alertsAsOf = now, alertNote = note?.trim()) }
+    }
+
+    /** Opens the full text of an alert (a warning's text is fetched from the NWS; a discussion's is already known). */
+    fun showAlertText(shape: AlertShape) {
+        update { it.copy(alertDetail = shape.title to shape.text) }
+        if (shape.text != null) return
+        viewModelScope.launch {
+            val text = try { alertsRepo.text(shape) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            update { st -> if (st.alertDetail?.first == shape.title) st.copy(alertDetail = shape.title to (text ?: "No text is available for this alert.")) else st }
+        }
+    }
+
+    fun dismissAlertText() = update { it.copy(alertDetail = null) }
+
+    /** The outlines to draw on the picture [base]: only on the newest frame (they are of now, not of an older scan). */
+    private fun alertDraws(base: View): List<AlertDraw> {
+        val st = _state.value
+        if (st.alertKinds.isEmpty() || st.files.isEmpty() || st.index != st.files.lastIndex) return emptyList()
+        val s = base.scale.toFloat()
+        return st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
+            val rings = shape.rings.map { ring ->
+                val out = FloatArray(ring.size)
+                var i = 0
+                while (i + 1 < ring.size) {
+                    val g = core.latLonToGrid(base.grid, ring[i], ring[i + 1])
+                    out[i] = ((g[0] + 0.5) * s).toFloat()
+                    out[i + 1] = ((base.rows - 0.5 - g[1]) * s).toFloat()
+                    i += 2
+                }
+                out
+            }
+            AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind != AlertKind.Discussion)
+        }
     }
 
     // ---- overlay: other products over the first ----
@@ -457,7 +537,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }) }
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v)) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -501,7 +581,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val v = shownValue(op.style, ovValues, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
             text += "   \u00B7 $name: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
         }
-        update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon) }
+        val st = _state.value
+        val hits = if (st.alertKinds.isNotEmpty() && st.index == st.files.lastIndex) shapesAt(st.alertShapes.filter { it.kind in st.alertKinds }, lat, lon) else emptyList()
+        update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon, alertHits = hits) }
     }
 
     fun onGlobeTap(px: Float, py: Float) {
@@ -517,7 +599,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(readout = text, tapLatLon = ll[0] to ll[1]) }
     }
 
-    fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
+    fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null, alertHits = emptyList()) }
 
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))

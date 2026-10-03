@@ -16,9 +16,12 @@ import simplemodelview.fixed
 /** A second field drawn over the data (under the map lines): [bitmap] has one pixel per cell of its own window and is stretched onto [dst], in pixels of the base picture. */
 class Overlay(val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean, val marker: Boolean = false, val markerScale: Float = 1f)
 
+/** An alert outline in pixels of the base picture: [rings] as x0, y0, x1, y1, ... A watch or warning is filled faintly; a discussion is dashed. */
+class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean)
+
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList()): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList()): Bitmap {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
@@ -38,7 +41,33 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             }
         }
         lines.draw(canvas, view, dark)
+        if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
+    }
+
+    /** Alert outlines over everything else: a dark casing under a colored line so they read on any background. */
+    private fun drawAlerts(canvas: Canvas, alerts: List<AlertDraw>, pictureWidth: Int) {
+        val width = maxOf(2f, pictureWidth / 600f)
+        val casing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width + 2f; color = 0x99000000.toInt(); strokeJoin = Paint.Join.ROUND }
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width; strokeJoin = Paint.Join.ROUND }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        for (a in alerts) {
+            line.color = 0xFF000000.toInt() or a.color
+            line.pathEffect = if (a.dashed) android.graphics.DashPathEffect(floatArrayOf(width * 4f, width * 3f), 0f) else null
+            casing.pathEffect = line.pathEffect
+            fill.color = (0x28 shl 24) or a.color
+            for (ring in a.rings) {
+                if (ring.size < 6) continue
+                val path = android.graphics.Path()
+                path.moveTo(ring[0], ring[1])
+                var i = 2
+                while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
+                path.close()
+                if (a.fill) canvas.drawPath(path, fill)
+                canvas.drawPath(path, casing)
+                canvas.drawPath(path, line)
+            }
+        }
     }
 
     /** One dot per non-empty cell (strikes): a cell is far too small to see at map scale. The dot keeps the cell's color and opacity and has a thin dark rim. */

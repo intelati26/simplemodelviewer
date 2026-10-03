@@ -31,6 +31,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,6 +57,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontFamily
+import simplemodelview.AlertKind
+import simplemodelview.AlertShape
 import simplemodelview.MrmsCatalog
 import simplemodelview.Stop
 import simplemodelview.overlayThresholdChoices
@@ -76,6 +82,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
     var overlayDialog by remember { mutableStateOf(false) }
+    var alertsDialog by remember { mutableStateOf(false) }
     var overlayPicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
@@ -140,6 +147,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
             }
         }
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) {
+            for (shape in s.alertHits.take(3)) AlertCard(shape, onRead = { vm.showAlertText(shape) })
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -149,6 +157,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
             }
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
             OverlayRow(s.overlays, s.overlayStyles, onPick = { overlayDialog = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
+            AlertsRow(s.alertKinds, s.alertsAsOf, s.alertNote, newestOnly = s.index != s.files.lastIndex, onClick = { alertsDialog = true })
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
                 s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
@@ -226,6 +235,20 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                 Column {
                     Text("Frame $done of $total")
                     LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+            },
+        )
+    }
+    if (alertsDialog) AlertsDialog(s.alertKinds, onChange = vm::setAlertKinds, onDismiss = { alertsDialog = false })
+    s.alertDetail?.let { (title, text) ->
+        AlertDialog(
+            onDismissRequest = vm::dismissAlertText,
+            confirmButton = { TextButton(onClick = vm::dismissAlertText) { Text("Close") } },
+            title = { Text(title) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(text ?: "Loading\u2026", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    Text("Unofficial copy: the official product is on weather.gov.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall)
                 }
             },
         )
@@ -312,6 +335,69 @@ private fun OverlayDialog(current: String, onNone: () -> Unit, onNest: () -> Uni
                 choice("No overlay", null, current.isEmpty(), onNone)
                 choice("Lightning nest", "Strikes by recency: the last minute solid, the last 5 minutes at 50 %, the last 30 minutes as a 20 % shadow", current == "Lightning nest", onNest)
                 choice("Choose a product\u2026", "Rotation tracks (with a minimum value), strikes, hail size, any other field", current.isNotEmpty() && current != "Lightning nest", onProduct)
+            }
+        },
+    )
+}
+
+/** "Alerts: off", or the chosen layers with when they were read. They are drawn on the newest frame only. */
+@Composable
+private fun AlertsRow(kinds: Set<AlertKind>, asOf: Long?, note: String?, newestOnly: Boolean, onClick: () -> Unit) {
+    Column {
+        TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp)) {
+            Text(
+                if (kinds.isEmpty()) "Alerts: off" else "Alerts: " + kinds.sortedBy { it.ordinal }.joinToString(", ") { it.label } +
+                    (asOf?.let { " \u00B7 as of ${formatClock(it)}" } ?: ""),
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (kinds.isNotEmpty() && (note != null || newestOnly)) {
+            Text(note ?: "Alerts are shown on the newest frame only.", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** The outlines under the tapped point: a color key, the title and times, and a button for the full text. */
+@Composable
+private fun AlertCard(shape: AlertShape, onRead: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(12.dp).background(Color(0xFF000000.toInt() or shape.color)))
+        Column(Modifier.weight(1f).padding(start = 8.dp, top = 2.dp, bottom = 2.dp)) {
+            Text(shape.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (shape.summary.isNotEmpty()) Text(shape.summary, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        TextButton(onClick = onRead, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Read") }
+    }
+}
+
+/** Which alert layers to draw (all off by default), with what each is and the caution that this is not the official source. */
+@Composable
+private fun AlertsDialog(kinds: Set<AlertKind>, onChange: (Set<AlertKind>) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        title = { Text("Alerts") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val detail = mapOf(
+                    AlertKind.Warning to "Tornado, severe thunderstorm, flash flood and other warnings (NWS)",
+                    AlertKind.Watch to "Tornado, severe thunderstorm and flash flood watches (NWS / SPC)",
+                    AlertKind.Discussion to "SPC mesoscale discussions and WPC precipitation discussions, dashed",
+                )
+                for (kind in AlertKind.entries) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(kind.label, fontWeight = FontWeight.Bold)
+                            Text(detail.getValue(kind), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = kind in kinds, onCheckedChange = { on -> onChange(if (on) kinds + kind else kinds - kind) })
+                    }
+                }
+                Text(
+                    "Drawn on the newest frame only, as of the time shown; tap an outline for its text. This is an unofficial copy of public NWS, SPC and WPC data and can be late " +
+                        "or incomplete: use weather.gov and official channels for warnings.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
     )
