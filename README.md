@@ -14,7 +14,7 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 | `shared/` | Platform-independent Kotlin: cycle probing, Zarr metadata, ~120 SPC product titles and color tables, repository, read-out text, sectors. Unit tests pass (`./gradlew :shared:jvmTest`). |
 | `androidApp/` | Jetpack Compose app + JNI bridge to the core: product picker (search, favorites), cycle / member / sector menus, **GREFS** probability products (second grid), **globe view** (drag to turn, pinch to zoom), time slider and loop with prefetch, pinch-zoom, tap for value, saved places (bookmarks), **export** of the screen area, the whole map, any meso sector or the globe as a PNG or MP4 loop, home-screen widget, a "new run available" banner, two-pane tablet layout, settings (Wi-Fi-only loops, data saver, cache size). Builds and lints in CI; exercised on an emulator against live SPC data. |
 | `iosApp/` | Not started. |
-| `.github/workflows/` | `core-tests`, `android` (debug APK as artifact; attached to a release on `v*` tags), `android-ui` (emulator smoke test with screenshots), `ios` (core on macOS + iOS Simulator). |
+| `.github/workflows/` | `core-tests`, `android` (debug APK as artifact; attached to a release on `v*` tags), `ios` (core on macOS + iOS Simulator). |
 | `scripts/` | `emu.sh` (drive an emulator with adb), `ui_smoke.sh` (the CI smoke test). |
 
 ## MRMS page

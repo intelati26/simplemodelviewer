@@ -128,7 +128,7 @@ docs/
 |---|---|---|---|
 | `core-tests` | ubuntu | build the core, decode the fixtures, compare with golden values and golden PNGs | pass / fail |
 | `android` | ubuntu | Gradle assemble (debug on every push, signed release on tags), lint, unit tests | APK + AAB as artifacts; a GitHub Release with the APK on a tag |
-| `android-ui` | ubuntu + KVM emulator | install the debug APK on an emulator, run UI tests, take screenshots | screenshot artifacts (so a UI change can be eyeballed without a device) |
+| `android-ui` (removed; the smoke test now runs locally via `scripts/ui_smoke.sh`) | ubuntu + KVM emulator | install the debug APK on an emulator, run UI tests, take screenshots | screenshot artifacts (so a UI change can be eyeballed without a device) |
 | `ios` | macos (arm64) | build the app for the simulator, run the shared tests, run the same UI tests on a simulator, take screenshots | screenshot artifacts; an unsigned `.app` |
 | `release` (on tag) | both | Android: sign + upload to GitHub Releases (optional Play upload). iOS: unsigned `.app` / `.ipa` only; the signing / TestFlight job is secret-gated and off | release assets |
 Nightly / per-commit **debug APKs as release assets** let the Android tester update with a release-watching installer (Obtainium or
