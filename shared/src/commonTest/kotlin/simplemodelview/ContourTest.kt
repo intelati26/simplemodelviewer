@@ -73,3 +73,12 @@ class ContourTest {
         assertEquals(null, Contours.specFor("sbcape_mean", "J/kg"))
     }
 }
+
+class MrmsContourSpecTest {
+    @Test fun modelFieldsGetLines() {
+        assertEquals(2.0, Contours.specFor("Model_0degC_Height_00.50", "kft")!!.interval)
+        assertEquals(0.5, Contours.specFor("Model_0degC_Height_00.50", "km")!!.interval)
+        assertEquals(5.0, Contours.specFor("Model_WetBulbTemp_00.50", "C")!!.interval)
+        assertEquals(null, Contours.specFor("MergedReflectivityQCComposite_00.50", "dBZ"))
+    }
+}

@@ -514,7 +514,7 @@ internal fun SettingsDialog(
                 SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
                     onChange(settings.copy(dataSaver = it))
                 }
-                if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors.", settings.contours) {
+                if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors (REFS), and for the freezing level and model temperatures (MRMS).", settings.contours) {
                     onChange(settings.copy(contours = it))
                 }
                 Column {

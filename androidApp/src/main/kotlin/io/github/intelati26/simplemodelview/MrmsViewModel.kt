@@ -537,7 +537,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v)) }
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v), contours = _state.value.settings.contours) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -697,10 +697,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).apply()
+            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver
+        val linesChanged = settings.contours != _state.value.settings.contours
         update { it.copy(settings = settings) }
-        if (redraw) { decoded.clear(); if (shown != null) showFrame() }
+        if (redraw) { decoded.clear(); if (shown != null) showFrame() } else if (linesChanged && shown != null) showFrame()
     }
 
     private fun backup(): SettingsBackup {
@@ -877,7 +878,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
         }
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer })
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, contours = _state.value.settings.contours)
         }
         return bitmap to style
     }

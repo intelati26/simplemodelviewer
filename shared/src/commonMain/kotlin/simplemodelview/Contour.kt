@@ -53,6 +53,9 @@ object Contours {
             if (units == "F") ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0) else ContourSpec(5.0, boldEvery = 1000.0)
         id.startsWith("t2m") || id.startsWith("td2m") ->
             if (units == "F") ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0) else ContourSpec(5.0, boldEvery = 1000.0)
+        id.startsWith("Model_0degC_Height") -> if (units == "km") ContourSpec(0.5, boldEvery = 2.0) else ContourSpec(2.0, boldEvery = 10.0)   // the MRMS model fields
+        id.startsWith("Model_SurfaceTemp") || id.startsWith("Model_WetBulbTemp") ->
+            if (units == "F") ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0) else ContourSpec(5.0, boldEvery = 1000.0)
         else -> null
     }
 
