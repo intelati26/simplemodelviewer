@@ -149,7 +149,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (product.levels.isEmpty()) product else product.copy(level = prefs.getInt("mrms_level_${product.id}", product.level).coerceIn(0, product.levels.size - 1))
 
     private fun readSettings() = Settings(
-        prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(),
+        prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true),
     )
 
     private fun readUnits() = Units(prefs.getBoolean("u_metric_length", false), prefs.getBoolean("u_celsius", false), prefs.getBoolean("u_km", false))
@@ -728,7 +728,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val b = text?.let { SettingsBackup.decode(it) }
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
-        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }))
+        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         b.product?.let { prefs.edit().putString("product", it).apply() }       // (the SPC page's own choices)
         b.sector?.let { prefs.edit().putString("sector", it).apply() }

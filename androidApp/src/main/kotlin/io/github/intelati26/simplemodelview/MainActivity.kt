@@ -263,7 +263,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
         onGo = { places = false; vm.goToPlace(it) },
         onDelete = vm::deletePlace,
     )
-    if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) { settings = false }
+    if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
         initialSize = vm.videoSize,
@@ -500,7 +500,7 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
 @Composable
 internal fun SettingsDialog(
     settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
-    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, onDismiss: () -> Unit,
+    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, showContours: Boolean = false, onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -513,6 +513,9 @@ internal fun SettingsDialog(
                 }
                 SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
                     onChange(settings.copy(dataSaver = it))
+                }
+                if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors.", settings.contours) {
+                    onChange(settings.copy(contours = it))
                 }
                 Column {
                     Text("Cache size (applies on the next launch)")

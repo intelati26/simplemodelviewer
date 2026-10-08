@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import simplemodelview.ContourLine
+import simplemodelview.Contours
 import simplemodelview.Core
 import simplemodelview.Kind
 import simplemodelview.Palettes
@@ -21,7 +23,7 @@ class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList()): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false): Bitmap {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
@@ -41,8 +43,35 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             }
         }
         lines.draw(canvas, view, dark)
+        if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContours(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
+    }
+
+    /** Contour lines over the data and the map lines: a halo under each line so it reads on any color, heavier for the bold levels, one label per level. */
+    private fun drawContours(canvas: Canvas, contours: List<ContourLine>, color: Int, dark: Boolean, pictureWidth: Int) {
+        val width = maxOf(1.5f, pictureWidth / 900f)
+        val ink = if (dark) 0xFFF0F0F0.toInt() else 0xFF000000.toInt() or color
+        val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+        val labels = ArrayList<ContourLine>()
+        for (c in contours) {
+            val path = android.graphics.Path()
+            path.moveTo(c.points[0], c.points[1])
+            var i = 2
+            while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
+            val w = if (c.bold) width * 1.8f else width
+            line.strokeWidth = w + 2f; line.color = halo; canvas.drawPath(path, line)
+            line.strokeWidth = w; line.color = ink; canvas.drawPath(path, line)
+            if (c.labelAt >= 0) labels.add(c)
+        }
+        for (c in labels) {
+            val x = c.points[c.labelAt]; val y = c.points[c.labelAt + 1]
+            if (x < 0 || y < 0 || x > pictureWidth) continue
+            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(c.label, x, y + text.textSize / 3, text)
+            text.style = Paint.Style.FILL; text.color = ink; canvas.drawText(c.label, x, y + text.textSize / 3, text)
+        }
     }
 
     /** Alert outlines over everything else: a dark casing under a colored line so they read on any background. */

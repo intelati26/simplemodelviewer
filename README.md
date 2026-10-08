@@ -34,6 +34,9 @@ The **lightning nest** stacks strike density by recency, drawn in order so the f
 ## Alerts
 On the MRMS page, "Alerts" outlines NWS products over the radar. Three layers, all **off by default**: **Warnings** (tornado, severe thunderstorm, flash flood, extreme wind, special marine, snow squall; storm-based polygons from NOAA's public watch/warning map service), **Watches** (tornado, severe thunderstorm, flash flood) and **Discussions** (SPC mesoscale discussions and WPC precipitation discussions, dashed, read from their public pages). Outlines use the NWS colors with a dark casing, and are drawn on the **newest frame only** with an "as of" time; they refresh about once a minute while the page is open. Tap inside an outline for a card with the type and times, and **Read** for the full text. Alerts are not tied to your location, and this is an unofficial copy that can be late or incomplete: the dialog says so, and weather.gov is the official source. Not drawn on the globe.
 
+## Contour lines
+On the SPC REFS page, heights (500 / 700 / 850 mb), mean sea-level pressure and temperatures (850 / 700 / 500 mb, 2 m temperature and dewpoint) also get contour lines over the colors: 6 dam for 500 mb heights, 3 dam for 700 / 850 mb, 4 hPa for pressure, 5 C or 10 F for temperatures; every fifth height / pressure line and the freezing line are heavier, and the longest line of each level carries a label (heights in decameters). Lines come from marching squares on the field itself (`shared/.../Contour.kt`, tested), so they follow the data in every sector and in shared pictures. Settings has a "Contour lines" switch (on by default). Not yet on the MRMS page or the globe.
+
 ## UI tests (device or emulator)
 ```
 ./gradlew :androidApp:connectedDebugAndroidTest
