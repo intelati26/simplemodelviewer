@@ -3,6 +3,7 @@
 // *****************************************************************************
 
 #include "spcrefs_core.h"
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -68,14 +69,31 @@ int spc_plan_lambert_crop(int base_grid, double col_min, double row_min, double 
 void spc_reproject(const float * src, int src_grid, int dst_grid, float * dst) {
     const GridBase& from = Grids::get(src_grid);
     const GridBase& to = Grids::get(dst_grid);
+    std::vector<unsigned char> sampled(static_cast<size_t>(from.columns) * from.rows, 0);
     for (int r = 0; r < to.rows; r += 1) {
         for (int c = 0; c < to.columns; c += 1) {
             double lat, lon, sc, sr;
             to.toLatLon(c, r, lat, lon);
             from.toGrid(lat, lon, sc, sr);
             const long ic = std::lround(sc), ir = std::lround(sr);
-            dst[static_cast<size_t>(r) * to.columns + c] =
-                (ic < 0 || ir < 0 || ic >= from.columns || ir >= from.rows) ? std::nanf("") : src[static_cast<size_t>(ir) * from.columns + ic];
+            const bool inside = ic >= 0 && ir >= 0 && ic < from.columns && ir < from.rows;
+            if (inside) sampled[static_cast<size_t>(ir) * from.columns + ic] = 1;
+            dst[static_cast<size_t>(r) * to.columns + c] = inside ? src[static_cast<size_t>(ir) * from.columns + ic] : std::nanf("");
+        }
+    }
+    // The target is rotated against the source, so nearest-cell sampling can step over a source cell: a thin feature (a strike, a narrow track) would
+    // vanish. Every valid source cell nobody sampled is written into its nearest target cell (the larger value wins a clash).
+    for (int r = 0; r < from.rows; r += 1) {
+        for (int c = 0; c < from.columns; c += 1) {
+            const size_t k = static_cast<size_t>(r) * from.columns + c;
+            if (sampled[k] || std::isnan(src[k])) continue;
+            double lat, lon, tc, tr;
+            from.toLatLon(c, r, lat, lon);
+            to.toGrid(lat, lon, tc, tr);
+            const long ic = std::lround(tc), ir = std::lround(tr);
+            if (ic < 0 || ir < 0 || ic >= to.columns || ir >= to.rows) continue;
+            float& d = dst[static_cast<size_t>(ir) * to.columns + ic];
+            if (std::isnan(d) || src[k] > d) d = src[k];
         }
     }
 }

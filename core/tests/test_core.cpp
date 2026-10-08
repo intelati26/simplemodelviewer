@@ -1,6 +1,7 @@
 // Core unit tests: blosc decode (against libblosc when available), dtype conversion, Lambert grid, rasteriser.
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -408,6 +409,32 @@ static void testReproject() {
     CHECK(spc_plan_lambert_crop(src, 0, 0, 5, 5, 3000.0, &none, &nr) == -1);   // a lat / lon grid has no Lambert crop
 }
 
+static void testReprojectKeepsSingleCells() {
+    // isolated one-cell features (a strike, a thin track) must survive: every one of them lands in at least one Lambert cell
+    const int cols = 601, rows = 401;
+    const double dLat = 0.05, dLon = 0.05;
+    const int src = spc_define_latlon_grid(cols, rows, 30.0, -105.0, dLat, dLon);
+    std::vector<float> values(static_cast<size_t>(cols) * rows, std::nanf(""));
+    int placed = 0;
+    for (int r = 5; r < rows - 5; r += 7) for (int c = 5; c < cols - 5; c += 7) { values[static_cast<size_t>(r) * cols + c] = static_cast<float>(1 + placed); placed += 1; }
+    const double cell = 111000.0 * dLat * std::min(1.0, std::cos(37.5 * 3.14159265358979 / 180.0)) * 0.95;     // as the app chooses it
+    int lc = 0, lr = 0;
+    const int dst = spc_plan_lambert_box(-104.0, 31.0, -76.0, 49.0, cell, &lc, &lr);
+    std::vector<float> out(static_cast<size_t>(lc) * lr);
+    spc_reproject(values.data(), src, dst, out.data());
+    std::vector<char> seen(static_cast<size_t>(placed) + 2, 0);
+    for (float v : out) if (!std::isnan(v)) seen[static_cast<size_t>(v)] = 1;
+    // inside the planned box (away from its curved edges) nothing may be lost
+    int inBox = 0, lost = 0, id = 0;
+    for (int r = 5; r < rows - 5; r += 7) for (int c = 5; c < cols - 5; c += 7) {
+        id += 1;
+        const double lat = 30.0 + r * dLat, lon = -105.0 + c * dLon;
+        if (lat > 32.0 && lat < 47.5 && lon > -102.0 && lon < -79.0) { inBox += 1; if (!seen[static_cast<size_t>(id)]) lost += 1; }
+    }
+    CHECK(inBox > 100);
+    CHECK(lost == 0);
+}
+
 int main() {
     testHalf();
     testDtypes();
@@ -419,6 +446,7 @@ int main() {
     testCategorical();
     testOpacityAndTop();
     testReproject();
+    testReprojectKeepsSingleCells();
 #ifdef HAVE_LIBBLOSC
     for (const char * codec : {"lz4", "zstd"}) {
         testBloscRoundTrip(codec, 2);
