@@ -19,7 +19,10 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import simplemodelview.BackupPlace
+import simplemodelview.FrameTarget
 import simplemodelview.Grid
+import simplemodelview.gridCoverBox
+import simplemodelview.lambertCellMeters
 import simplemodelview.GlobeCamera
 import simplemodelview.MrmsCatalog
 import simplemodelview.MrmsFile
@@ -426,19 +429,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         for (layer in layers) {
             val ov = layer.product
             val file = overlayFileFor(layer, baseFile) ?: continue
-            val frame = try { decode(ov, file, "$label|overlay", box, stepOf(ov), cache) } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
+            val frame = try { decode(ov, file, "$label|overlay|${base.grid.id}", gridCoverBox(core, base.grid), stepOf(ov), cache, FrameTarget.Onto(base.grid)) } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
             val g = frame.window.grid
-            val (latA, lonA) = core.gridToLatLon(g, 0.0, 0.0).let { it[0] to it[1] }
-            val (latB, lonB) = core.gridToLatLon(g, g.columns - 1.0, g.rows - 1.0).let { it[0] to it[1] }
-            val a = core.latLonToGrid(base.grid, latA, lonA)
-            val b = core.latLonToGrid(base.grid, latB, lonB)
-            val dc = if (g.columns > 1) (b[0] - a[0]) / (g.columns - 1) else 1.0           // base cells per overlay cell
-            val dr = if (g.rows > 1) (b[1] - a[1]) / (g.rows - 1) else 1.0
-            val s = base.scale.toDouble()
-            val dst = android.graphics.RectF(
-                ((a[0] - 0.5 * dc + 0.5) * s).toFloat(), ((base.rows - (b[1] + 0.5 * dr)) * s).toFloat(),
-                ((b[0] + 0.5 * dc + 0.5) * s).toFloat(), ((base.rows - (a[1] - 0.5 * dr)) * s).toFloat(),
-            )
+            // (on the base's own grid: the picture is the base's, stretched over all of it)
+            val dst = android.graphics.RectF(0f, 0f, (g.columns * base.scale).toFloat(), (g.rows * base.scale).toFloat())
             val style = styleForLayer(layer)
             val one = View("overlay", 0, 0, g.columns, g.rows, 1, 1, g)
             val argb = IntArray(g.columns * g.rows)
@@ -505,10 +499,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun globeStep(product: MrmsProduct) = mrmsStep(product.cellDegrees, globeBox[0], globeBox[2], 1400, dataSaver)
 
     /** The decoded window of [file] for a box and step: cached for the shown sector and the globe, decoded on demand otherwise. */
-    private suspend fun decode(product: MrmsProduct, file: MrmsFile, label: String, box: DoubleArray, step: Int, cache: Boolean = true): MrmsFrame {
+    private suspend fun decode(
+        product: MrmsProduct, file: MrmsFile, label: String, box: DoubleArray, step: Int, cache: Boolean = true, target: FrameTarget = FrameTarget.LatLon,
+    ): MrmsFrame {
         val key = "${file.key}|$label|$step"
         if (cache) decoded[key]?.let { return it }
-        val f = withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step) }
+        val f = withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) }
         if (cache) { decoded[key] = f; trimCache() }
         return f
     }
@@ -531,7 +527,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val sector = st.sector
         val step = stepFor(product, sector)
-        val frame = decode(product, file, sector.name, sectorBox(sector), step)
+        val frame = decode(product, file, sector.name, sectorBox(sector), step, target = FrameTarget.Planned)
         val window = frame.window
         val grid = window.grid
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
@@ -859,20 +855,29 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val box: View
         val overlayResults: List<OverlayResult>
         if (area == ShareArea.Screen && v != null) {
-            // the visible part, as a latitude / longitude box through the shown window's grid
+            // the visible part: a window of the shown (Lambert) grid, with the lat / lon box that surely covers it decoded and put onto it
             val (l, t, r, b) = viewport.toList()
             val g = v.grid
-            val (south, west) = core.gridToLatLon(g, floor(l * g.columns).toDouble(), floor((1f - b) * g.rows).toDouble()).let { it[0] to it[1] }
-            val (north, east) = core.gridToLatLon(g, ceil(r * g.columns) - 1.0, ceil((1f - t) * g.rows) - 1.0).let { it[0] to it[1] }
+            val colMin = floor(l * g.columns).toDouble(); val colMax = ceil(r * g.columns) - 1.0
+            val rowMin = floor((1f - b) * g.rows).toDouble(); val rowMax = ceil((1f - t) * g.rows) - 1.0
+            var south = 90.0; var north = -90.0; var west = 360.0; var east = -360.0
+            for (k in 0..24) {
+                val f = k / 24.0
+                for ((c, rr) in listOf(colMin + f * (colMax - colMin) to rowMin, colMin + f * (colMax - colMin) to rowMax, colMin to rowMin + f * (rowMax - rowMin), colMax to rowMin + f * (rowMax - rowMin))) {
+                    val ll = core.gridToLatLon(g, c, rr)
+                    south = minOf(south, ll[0]); north = maxOf(north, ll[0]); west = minOf(west, ll[1]); east = maxOf(east, ll[1])
+                }
+            }
             val step = mrmsStep(product.cellDegrees, west, east, 2400, false)
-            val coords = doubleArrayOf(west - 0.02, south - 0.02, east + 0.02, north + 0.02)
-            frame = decode(product, file, "screen", coords, step, cache = false)
+            val crop = core.planLambertCrop(g, colMin, rowMin, colMax, rowMax, lambertCellMeters(product.cellDegrees * step, south, north)) ?: return Pair(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), style)
+            val coords = doubleArrayOf(west - 0.05, south - 0.05, east + 0.05, north + 0.05)
+            frame = decode(product, file, "screen", coords, step, cache = false, target = FrameTarget.Onto(crop))
             val g2 = frame.window.grid
             box = View("Screen area", 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
             overlayResults = overlayLayers(file, "screen", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, west, east, 2400, false) }
         } else {
             val sector = sectorOf(area)
-            frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector))
+            frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
             val g2 = frame.window.grid
             box = View(sector.name, 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
             overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }

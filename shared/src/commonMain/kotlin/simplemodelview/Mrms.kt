@@ -51,6 +51,30 @@ data class MrmsFile(val key: String, val validTime: Long, val uploaded: Long?, v
 /** A decoded frame of the shown sector. */
 class MrmsFrame(val window: MrmsWindow, val file: MrmsFile)
 
+/** Where a decoded window is put: as the file's own latitude / longitude cells, on a new Lambert grid planned for the box, or onto an existing grid (an overlay on its base). */
+sealed interface FrameTarget {
+    data object LatLon : FrameTarget
+    data object Planned : FrameTarget
+    class Onto(val grid: Grid) : FrameTarget
+}
+
+/** The latitude / longitude box (west, south, east, north; west-negative) that covers [grid], with a small margin: its outline walked in the projection. */
+fun gridCoverBox(core: Core, grid: Grid, margin: Double = 0.05): DoubleArray {
+    var south = 90.0; var north = -90.0; var west = 360.0; var east = -360.0
+    for (k in 0..40) {
+        val f = k / 40.0
+        for ((c, r) in listOf(f * (grid.columns - 1) to 0.0, f * (grid.columns - 1) to grid.rows - 1.0, 0.0 to f * (grid.rows - 1), grid.columns - 1.0 to f * (grid.rows - 1))) {
+            val ll = core.gridToLatLon(grid, c, r)
+            south = minOf(south, ll[0]); north = maxOf(north, ll[0]); west = minOf(west, ll[1]); east = maxOf(east, ll[1])
+        }
+    }
+    return doubleArrayOf(west - margin, south - margin, east + margin, north + margin)
+}
+
+/** Edge of a square Lambert cell that keeps every cell of a decoded window (a [cellDegrees] step) reachable: the smaller of its north-south and east-west size, a little less. */
+fun lambertCellMeters(cellDegrees: Double, southLat: Double, northLat: Double): Double =
+    cellDegrees * 111_000.0 * minOf(1.0, kotlin.math.cos((southLat + northLat) / 2 * kotlin.math.PI / 180)) * 0.95
+
 private fun two(n: Int) = n.toString().padStart(2, '0')
 private fun four(n: Int) = n.toString().padStart(4, '0')
 
@@ -159,15 +183,24 @@ class MrmsRepository(private val http: Http, private val core: Core) {
 
     /** Downloads the file (an HTTP cache keeps it) and decodes the [west]..[east] x [south]..[north] window, every [step]-th cell. */
     suspend fun loadFrame(
-        product: MrmsProduct, file: MrmsFile, west: Double, south: Double, east: Double, north: Double, step: Int,
+        product: MrmsProduct, file: MrmsFile, west: Double, south: Double, east: Double, north: Double, step: Int, target: FrameTarget = FrameTarget.LatLon,
     ): MrmsFrame {
         val bytes = download(file)
+        // a planned grid is the box's bounding rectangle in the projection: decode the lat / lon box that covers all of it, so its corners have data
+        val planned = if (target == FrameTarget.Planned) core.planLambertBox(west, south, east, north, lambertCellMeters(product.cellDegrees * step, south, north)) else null
+        val cover = planned?.let { gridCoverBox(core, it) }
         val window = try {
-            core.decodeMrms(bytes, west, south, east, north, step, product.pool, product.missingAtOrBelow)
+            if (cover != null) core.decodeMrms(bytes, cover[0], cover[1], cover[2], cover[3], step, product.pool, product.missingAtOrBelow)
+            else core.decodeMrms(bytes, west, south, east, north, step, product.pool, product.missingAtOrBelow)
         } catch (e: Exception) {
             throw RefsException("could not decode ${product.title}: ${e.message}")
         }
-        return MrmsFrame(window, file)
+        val placed = when (target) {
+            FrameTarget.LatLon -> window
+            FrameTarget.Planned -> MrmsWindow(planned!!, core.reproject(window.values, window.grid, planned), window.validTime, window.sourceCellDegrees)
+            is FrameTarget.Onto -> MrmsWindow(target.grid, core.reproject(window.values, window.grid, target.grid), window.validTime, window.sourceCellDegrees)
+        }
+        return MrmsFrame(placed, file)
     }
 
     /** Downloads a file without decoding it, so the HTTP cache has it for a loop. */

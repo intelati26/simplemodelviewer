@@ -38,6 +38,18 @@ interface Core {
      */
     fun decodeMrms(file: ByteArray, west: Double, south: Double, east: Double, north: Double, step: Int, pool: Pool, missingAtOrBelow: Double): MrmsWindow
 
+    /**
+     * A Lambert conformal grid (REFS's projection) covering a latitude / longitude box with square cells of [cellMeters]; the same definition gives the
+     * same grid. MRMS windows are reprojected onto it ([reproject]) so the map is not stretched and every line / outline uses one projection.
+     */
+    fun planLambertBox(west: Double, south: Double, east: Double, north: Double, cellMeters: Double): Grid = throw UnsupportedOperationException()
+
+    /** A window of a Lambert [base] grid (cells [colMin]..[colMax] x [rowMin]..[rowMax]) with cells of [cellMeters], in the same projection; null if [base] is not a Lambert grid. */
+    fun planLambertCrop(base: Grid, colMin: Double, rowMin: Double, colMax: Double, rowMax: Double, cellMeters: Double): Grid? = throw UnsupportedOperationException()
+
+    /** Resamples [values] of grid [from] onto grid [to] (nearest cell; NaN where [to] lies outside [from]). */
+    fun reproject(values: FloatArray, from: Grid, to: Grid): FloatArray = throw UnsupportedOperationException()
+
     /** Fractional grid position (column from the west, row from the south) of a latitude / longitude. Returns [column, row]. */
     fun latLonToGrid(grid: Grid, lat: Double, lon: Double): DoubleArray
 

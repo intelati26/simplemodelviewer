@@ -370,6 +370,44 @@ static void testMrms() {
     testMrmsErrors();
 }
 
+static void testReproject() {
+    // a lat / lon field value = 10 * lat + lon over 30..45 N, 105..85 W (0.05 degrees), put on a Lambert grid
+    const int cols = 401, rows = 301;
+    const int src = spc_define_latlon_grid(cols, rows, 30.0, -105.0, 0.05, 0.05);
+    std::vector<float> values(static_cast<size_t>(cols) * rows);
+    for (int r = 0; r < rows; r += 1) for (int c = 0; c < cols; c += 1) values[static_cast<size_t>(r) * cols + c] = static_cast<float>(10.0 * (30.0 + r * 0.05) + (-105.0 + c * 0.05));
+    int lc = 0, lr = 0;
+    const int dst = spc_plan_lambert_box(-104.0, 31.0, -86.0, 44.0, 3000.0, &lc, &lr);
+    CHECK(dst >= SPC_GRID_FIRST_DYNAMIC && lc > 100 && lr > 100);
+    CHECK(dst == spc_plan_lambert_box(-104.0, 31.0, -86.0, 44.0, 3000.0, &lc, &lr));   // the same definition, the same grid
+    std::vector<float> out(static_cast<size_t>(lc) * lr);
+    spc_reproject(values.data(), src, dst, out.data());
+    int inside = 0;
+    for (int r = 0; r < lr; r += 17) for (int c = 0; c < lc; c += 17) {
+        double lat, lon;
+        spc_grid_to_latlon(dst, c, r, &lat, &lon);
+        const float v = out[static_cast<size_t>(r) * lc + c];
+        if (std::isnan(v)) continue;
+        inside += 1;
+        CHECK(std::fabs(v - (10.0 * lat + lon)) < 0.35);          // nearest cell of a 0.05 degree grid
+    }
+    CHECK(inside > 100);
+    // the box's corners are inside the planned grid and the grid's own cells map back onto themselves
+    double c0, r0;
+    spc_latlon_to_grid(dst, 44.0, -104.0, &c0, &r0);
+    CHECK(c0 >= -1.0 && c0 <= lc && r0 >= -1.0 && r0 <= lr);
+    // a crop: its cell (0, 0) sits where the base's cell (col_min, row_min) is, for the same cell size
+    int cc = 0, cr = 0;
+    const int crop = spc_plan_lambert_crop(dst, 10.0, 20.0, 59.0, 69.0, 3000.0, &cc, &cr);
+    CHECK(crop >= SPC_GRID_FIRST_DYNAMIC && cc == 50 && cr == 50);
+    double a, b, a2, b2;
+    spc_grid_to_latlon(crop, 0.0, 0.0, &a, &b);
+    spc_grid_to_latlon(dst, 10.0, 20.0, &a2, &b2);
+    CHECK(std::fabs(a - a2) < 1e-6 && std::fabs(b - b2) < 1e-6);
+    int none = 0, nr = 0;
+    CHECK(spc_plan_lambert_crop(src, 0, 0, 5, 5, 3000.0, &none, &nr) == -1);   // a lat / lon grid has no Lambert crop
+}
+
 int main() {
     testHalf();
     testDtypes();
@@ -380,6 +418,7 @@ int main() {
     testMrms();
     testCategorical();
     testOpacityAndTop();
+    testReproject();
 #ifdef HAVE_LIBBLOSC
     for (const char * codec : {"lz4", "zstd"}) {
         testBloscRoundTrip(codec, 2);

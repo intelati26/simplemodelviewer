@@ -83,6 +83,18 @@ void spc_render(const float * values, const spc_view * view, const spc_style * s
  * row 0 = south, west-negative longitudes. Returns its grid id (the same definition gives the same id). */
 int spc_define_latlon_grid(int columns, int rows, double south_lat, double west_lon, double d_lat, double d_lon);
 
+/* Reprojection of lat / lon fields (MRMS) onto a Lambert conformal grid (REFS's projection), so the map looks like the REFS one and lines /
+ * outlines / contours use the same projection. Each registers a grid (same definition, same id) and reports its size.
+ * spc_plan_lambert_box: covers the lat / lon box (west-negative degrees) with square cells of `cell_meters`.
+ * spc_plan_lambert_crop: a window of base cells col_min..col_max x row_min..row_max (fractional) of a Lambert grid, with cells of `cell_meters`
+ * (the same projection); returns -1 when `base_grid` is a lat / lon grid. */
+int spc_plan_lambert_box(double west, double south, double east, double north, double cell_meters, int * columns, int * rows);
+int spc_plan_lambert_crop(int base_grid, double col_min, double row_min, double col_max, double row_max, double cell_meters, int * columns, int * rows);
+
+/* Resamples `src` (the columns x rows of `src_grid`) onto `dst_grid` (nearest cell; NaN where the target is outside the source) into `dst`
+ * (dst_grid columns x rows floats). */
+void spc_reproject(const float * src, int src_grid, int dst_grid, float * dst);
+
 /* ---- MRMS: GRIB2 files with PNG packing (template 5.41) on a regular lat / lon grid (7000 x 3500 at 0.01 degrees, 14000 x 7000 at 0.005) ---- */
 
 typedef struct {

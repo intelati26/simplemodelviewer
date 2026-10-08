@@ -24,6 +24,18 @@ class NativeCore : Core {
         return MrmsWindow(Grid(info[0].toInt(), info[1].toInt(), info[2].toInt()), values, info[3].toLong(), info[4])
     }
 
+    private external fun planLambertBoxNative(west: Double, south: Double, east: Double, north: Double, cell: Double): IntArray
+    private external fun planLambertCropNative(base: Int, colMin: Double, rowMin: Double, colMax: Double, rowMax: Double, cell: Double): IntArray
+    private external fun reprojectNative(values: FloatArray, srcGrid: Int, dstGrid: Int, dstCount: Int): FloatArray
+
+    override fun planLambertBox(west: Double, south: Double, east: Double, north: Double, cellMeters: Double): Grid =
+        planLambertBoxNative(west, south, east, north, cellMeters).let { Grid(it[0], it[1], it[2]) }
+
+    override fun planLambertCrop(base: Grid, colMin: Double, rowMin: Double, colMax: Double, rowMax: Double, cellMeters: Double): Grid? =
+        planLambertCropNative(base.id, colMin, rowMin, colMax, rowMax, cellMeters).let { if (it[0] < 0) null else Grid(it[0], it[1], it[2]) }
+
+    override fun reproject(values: FloatArray, from: Grid, to: Grid): FloatArray = reprojectNative(values, from.id, to.id, to.cells)
+
     private external fun latLonToGridNative(grid: Int, lat: Double, lon: Double): DoubleArray
     private external fun gridToLatLonNative(grid: Int, column: Double, row: Double): DoubleArray
     override fun latLonToGrid(grid: Grid, lat: Double, lon: Double) = latLonToGridNative(grid.id, lat, lon)

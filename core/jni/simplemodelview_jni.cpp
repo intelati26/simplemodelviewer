@@ -77,6 +77,38 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     return out;
 }
 
+JNIEXPORT jintArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_planLambertBoxNative(
+    JNIEnv * env, jobject, jdouble west, jdouble south, jdouble east, jdouble north, jdouble cell) {
+    int columns = 0, rows = 0;
+    const int id = spc_plan_lambert_box(west, south, east, north, cell, &columns, &rows);
+    const jint v[3] = {id, columns, rows};
+    jintArray result = env->NewIntArray(3);
+    env->SetIntArrayRegion(result, 0, 3, v);
+    return result;
+}
+
+JNIEXPORT jintArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_planLambertCropNative(
+    JNIEnv * env, jobject, jint base, jdouble colMin, jdouble rowMin, jdouble colMax, jdouble rowMax, jdouble cell) {
+    int columns = 0, rows = 0;
+    const int id = spc_plan_lambert_crop(base, colMin, rowMin, colMax, rowMax, cell, &columns, &rows);
+    const jint v[3] = {id, columns, rows};
+    jintArray result = env->NewIntArray(3);
+    env->SetIntArrayRegion(result, 0, 3, v);
+    return result;
+}
+
+JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_reprojectNative(
+    JNIEnv * env, jobject, jfloatArray values, jint srcGrid, jint dstGrid, jint dstCount) {
+    const jsize n = env->GetArrayLength(values);
+    std::vector<float> in(static_cast<size_t>(n));
+    env->GetFloatArrayRegion(values, 0, n, in.data());
+    std::vector<float> out(static_cast<size_t>(dstCount));
+    spc_reproject(in.data(), srcGrid, dstGrid, out.data());
+    jfloatArray result = env->NewFloatArray(dstCount);
+    env->SetFloatArrayRegion(result, 0, dstCount, out.data());
+    return result;
+}
+
 JNIEXPORT jdoubleArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_latLonToGridNative(JNIEnv * env, jobject, jint grid, jdouble lat, jdouble lon) {
     double c = 0, r = 0;
     spc_latlon_to_grid(grid, lat, lon, &c, &r);

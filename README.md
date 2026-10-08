@@ -26,6 +26,9 @@ The SPC page uses the color tables of SPC's own viewer (levels, band colors, the
 ## Play and loop length
 Play starts at once on the frames that have already arrived and widens the cycle as the rest download (1-5, then 1-10, then 1-20, ...), going back to frame 1 at the end. "Loop: N" next to Play chooses how many frames it covers: the first N of a model run, or the newest N radar scans (6 / 12 / 24 / 36 or all); only those frames are downloaded, and a loop video export covers the same frames. The choice is remembered per page.
 
+## Projection
+The REFS page draws the model's own Lambert conformal grid. The MRMS files are plain latitude / longitude grids, which look stretched when drawn as they are, so the MRMS page **reprojects each decoded window onto a Lambert conformal grid** (REFS's projection: parallel 38.5, central meridian 97.5 W) in the core (`spc_plan_lambert_box`, `spc_reproject`, nearest cell). A sector becomes the bounding rectangle of its box in that projection, filled to the corners. Overlay products and the share / export crops are put onto the same grid (`spc_plan_lambert_crop` for a zoomed crop), so map lines, alert outlines, contours, places and the tap read-out all use one projection. Cells are a little smaller than the file's, so no cell is skipped. The MRMS globe still uses the file's own grid.
+
 ## Overlay
 On the MRMS page, "Overlay" draws other products over the first. Choose **no overlay**, the **lightning nest**, or **one product** of your choice (any MRMS product: strikes, lightning probability, any of the 14 rotation products, hail size, ...). A chosen product has a **minimum value** ("show only rotation of at least 10") picked from its own band edges. The overlays are cut from the same area and matched to each radar frame by the nearest valid time (strike files come every minute, radar every 2); loops prefetch them too, exports include them, and the tap read-out shows every layer's value.
 

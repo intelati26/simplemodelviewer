@@ -19,7 +19,7 @@
 // reflectivity gives ~0.37 on this grid and ~0.08 on the arrays' mapping. Use these parameters, not that store's coordinate arrays.
 struct LambertGrid : GridBase {
     LambertGrid(int cols, int rows, double cellMeters, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
-        : GridBase(cols, rows), cell(cellMeters), lon0Rad(degrees(centralMeridianDeg)) {
+        : GridBase(cols, rows), cell(cellMeters), parallel(parallelDeg), centralMeridian(centralMeridianDeg), lon0Rad(degrees(centralMeridianDeg)) {
         const double phi1 = degrees(parallelDeg);
         n = std::sin(phi1);
         f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
@@ -30,6 +30,7 @@ struct LambertGrid : GridBase {
     }
 
     const double cell;   // meters
+    const double parallel, centralMeridian;   // degrees (the definition, to make grids of the same projection)
 
     // fractional grid position (column from the west, row from the south) of a latitude / west-negative longitude
     void toGrid(double lat, double lon, double& column, double& row) const override {

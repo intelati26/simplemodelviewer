@@ -57,6 +57,29 @@ void spc_grid_to_latlon(int grid, double column, double row, double * lat, doubl
     Grids::get(grid).toLatLon(column, row, *lat, *lon);
 }
 
+int spc_plan_lambert_box(double west, double south, double east, double north, double cell_meters, int * columns, int * rows) {
+    return Grids::planLambertBox(west, south, east, north, cell_meters, columns, rows);
+}
+
+int spc_plan_lambert_crop(int base_grid, double col_min, double row_min, double col_max, double row_max, double cell_meters, int * columns, int * rows) {
+    return Grids::planLambertCrop(base_grid, col_min, row_min, col_max, row_max, cell_meters, columns, rows);
+}
+
+void spc_reproject(const float * src, int src_grid, int dst_grid, float * dst) {
+    const GridBase& from = Grids::get(src_grid);
+    const GridBase& to = Grids::get(dst_grid);
+    for (int r = 0; r < to.rows; r += 1) {
+        for (int c = 0; c < to.columns; c += 1) {
+            double lat, lon, sc, sr;
+            to.toLatLon(c, r, lat, lon);
+            from.toGrid(lat, lon, sc, sr);
+            const long ic = std::lround(sc), ir = std::lround(sr);
+            dst[static_cast<size_t>(r) * to.columns + c] =
+                (ic < 0 || ir < 0 || ic >= from.columns || ir >= from.rows) ? std::nanf("") : src[static_cast<size_t>(ir) * from.columns + ic];
+        }
+    }
+}
+
 int spc_define_latlon_grid(int columns, int rows, double south_lat, double west_lon, double d_lat, double d_lon) {
     return Grids::defineLatLon(columns, rows, south_lat, west_lon, d_lat, d_lon);
 }
