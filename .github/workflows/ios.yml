@@ -9,7 +9,7 @@ jobs:
   core:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Core tests on macOS
         run: |
           cmake -S core -B build-mac -DCMAKE_BUILD_TYPE=Release

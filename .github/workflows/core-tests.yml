@@ -5,9 +5,9 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y libblosc-dev zlib1g-dev
       - run: cmake -S core -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build -j
