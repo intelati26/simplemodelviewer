@@ -8,7 +8,7 @@ Code
 - gradlew, gradlew.bat and gradle/wrapper: Gradle, Apache License 2.0.
 
 Map lines (androidApp/src/main/assets/statev2.f32, county.f32, ca.f32, mx.f32)
-- Taken from the wX project (GPLv3, https://gitlab.com/joshua.tee/wxl23). wX's own source for the underlying boundaries has not been
+- Taken from the wX project (GPLv3, https://gitlab.com/joshua.tee/wx). wX's own source for the underlying boundaries has not been
   traced; if you know it, please record it here.
 
 Data (fetched at run time, not redistributed except small test fixtures)
