@@ -81,8 +81,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
-    var overlayDialog by remember { mutableStateOf(false) }
-    var alertsDialog by remember { mutableStateOf(false) }
+    var overlayTree by remember { mutableStateOf(false) }
     var overlayPicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
@@ -91,7 +90,6 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     val lightningState by AppContainer.lightning.state.collectAsStateWithLifecycle()
-    var outlookDialog by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
@@ -160,10 +158,10 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                 }
             }
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
-            OverlayRow(s.overlays, s.overlayStyles, onPick = { overlayDialog = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
-            AlertsRow(s.alertKinds, s.alertsAsOf, s.alertNote, newestOnly = s.index != s.files.lastIndex, onClick = { alertsDialog = true })
-            OutlookRow(outlookState, s.file?.validTime, onClick = { outlookDialog = true })
-            LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
+            // every overlay lives in one tree popup, so the strip under the map is a single line
+            TextButton(onClick = { overlayTree = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
                 s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
@@ -245,8 +243,15 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             },
         )
     }
-    if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
-    if (alertsDialog) AlertsDialog(s.alertKinds, onChange = vm::setAlertKinds, onDismiss = { alertsDialog = false })
+    if (overlayTree) OverlayTreeDialog(
+        layers = s.overlays, styles = s.overlayStyles,
+        onRadarNone = { vm.pickOverlay(null) }, onRadarNest = { vm.pickOverlayPreset(simplemodelview.OverlayPresets.LIGHTNING_NEST) },
+        onRadarProduct = { overlayPicker = true }, onThreshold = vm::setOverlayThreshold,
+        alertKinds = s.alertKinds, alertsAsOf = s.alertsAsOf, alertNote = s.alertNote, newestOnly = s.index != s.files.lastIndex, onAlertKinds = vm::setAlertKinds,
+        outlook = outlookState, valid = s.file?.validTime, onOutlook = { AppContainer.outlook.setType(it) },
+        lightning = lightningState, onLightning = { AppContainer.lightning.setEnabled(it) },
+        onDismiss = { overlayTree = false },
+    )
     s.alertDetail?.let { (title, text) ->
         AlertDialog(
             onDismissRequest = vm::dismissAlertText,
@@ -260,11 +265,6 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             },
         )
     }
-    if (overlayDialog) OverlayDialog(
-        current = s.overlayName, onNone = { overlayDialog = false; vm.pickOverlay(null) },
-        onNest = { overlayDialog = false; vm.pickOverlayPreset(simplemodelview.OverlayPresets.LIGHTNING_NEST) },
-        onProduct = { overlayDialog = false; overlayPicker = true }, onDismiss = { overlayDialog = false },
-    )
     if (overlayPicker) ProductPicker(
         products, products.firstOrNull { it.id == s.overlays.singleOrNull()?.product?.id }, s.favorites, onToggle = vm::toggleFavorite,
         onPick = { picked -> overlayPicker = false; MrmsCatalog.byId(picked.id)?.let(vm::pickOverlay) }, onDismiss = { overlayPicker = false },
@@ -298,72 +298,6 @@ internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () 
     }
 }
 
-/** "Overlay: none", or its name with (for a single product) its minimum value, and a clear button. Overlays: other fields (lightning, rotation, ...) drawn over the first. */
-@Composable
-private fun OverlayRow(layers: List<simplemodelview.OverlayLayer>, styles: List<simplemodelview.Style>, onPick: () -> Unit, onThreshold: (Int) -> Unit, onClear: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onPick, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.weight(1f, fill = false)) {
-            Text(if (layers.isEmpty()) "Overlay: none" else "Overlay: ${simplemodelview.overlayName(layers)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        val style = styles.singleOrNull()
-        if (layers.size == 1 && style != null) {
-            val choices = overlayThresholdChoices(style)
-            val index = layers[0].thresholdIndex
-            if (choices.isNotEmpty()) {
-                var open by remember { mutableStateOf(false) }
-                Box {
-                    TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u2265 ${MapRenderer.label(Stop(choices[index.coerceIn(0, choices.size - 1)], 0), style)} ${style.units} \u25BE") }
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                        choices.forEachIndexed { i, v -> DropdownMenuItem(text = { Text("\u2265 ${MapRenderer.label(Stop(v, 0), style)} ${style.units}") }, onClick = { open = false; onThreshold(i) }) }
-                    }
-                }
-            }
-        }
-        if (layers.isNotEmpty()) TextButton(onClick = onClear, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u2715") }
-    }
-}
-
-/** What to draw over the map: nothing, the lightning nest (strikes by recency), or one product of your choice. */
-@Composable
-private fun OverlayDialog(current: String, onNone: () -> Unit, onNest: () -> Unit, onProduct: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        title = { Text("Overlay") },
-        text = {
-            Column {
-                @Composable fun choice(title: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
-                    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp)) {
-                        Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 16.sp)
-                        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    HorizontalDivider()
-                }
-                choice("No overlay", null, current.isEmpty(), onNone)
-                choice("Lightning nest", "Strikes by recency: the last minute solid, the last 5 minutes at 50 %, the last 30 minutes as a 20 % shadow", current == "Lightning nest", onNest)
-                choice("Choose a product\u2026", "Rotation tracks (with a minimum value), strikes, hail size, any other field", current.isNotEmpty() && current != "Lightning nest", onProduct)
-            }
-        },
-    )
-}
-
-/** "Alerts: off", or the chosen layers with when they were read. They are drawn on the newest frame only. */
-@Composable
-private fun AlertsRow(kinds: Set<AlertKind>, asOf: Long?, note: String?, newestOnly: Boolean, onClick: () -> Unit) {
-    Column {
-        TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp)) {
-            Text(
-                if (kinds.isEmpty()) "Alerts: off" else "Alerts: " + kinds.sortedBy { it.ordinal }.joinToString(", ") { it.label } +
-                    (asOf?.let { " \u00B7 as of ${formatClock(it)}" } ?: ""),
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (kinds.isNotEmpty() && (note != null || newestOnly)) {
-            Text(note ?: "Alerts are shown on the newest frame only.", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-        }
-    }
-}
-
 /** The outlines under the tapped point: a color key, the title and times, and a button for the full text. */
 @Composable
 private fun AlertCard(shape: AlertShape, onRead: () -> Unit) {
@@ -375,39 +309,6 @@ private fun AlertCard(shape: AlertShape, onRead: () -> Unit) {
         }
         TextButton(onClick = onRead, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Read") }
     }
-}
-
-/** Which alert layers to draw (all off by default), with what each is and the caution that this is not the official source. */
-@Composable
-private fun AlertsDialog(kinds: Set<AlertKind>, onChange: (Set<AlertKind>) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-        title = { Text("Alerts") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                val detail = mapOf(
-                    AlertKind.Warning to "Tornado, severe thunderstorm, flash flood and other warnings (NWS)",
-                    AlertKind.Watch to "Tornado, severe thunderstorm and flash flood watches (NWS / SPC)",
-                    AlertKind.Discussion to "SPC mesoscale discussions and WPC precipitation discussions, dashed",
-                )
-                for (kind in AlertKind.entries) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(kind.label, fontWeight = FontWeight.Bold)
-                            Text(detail.getValue(kind), style = MaterialTheme.typography.bodySmall)
-                        }
-                        Switch(checked = kind in kinds, onCheckedChange = { on -> onChange(if (on) kinds + kind else kinds - kind) })
-                    }
-                }
-                Text(
-                    "Drawn on the newest frame only, as of the time shown; tap an outline for its text. This is an unofficial copy of public NWS, SPC and WPC data and can be late " +
-                        "or incomplete: use weather.gov and official channels for warnings.",
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-    )
 }
 
 /** The height of a 3D mosaic field: - / + buttons and a slider over its levels (loading starts when the slider is let go) with the height in km and kft. */
