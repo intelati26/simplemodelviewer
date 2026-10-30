@@ -126,6 +126,18 @@ class NbmTest {
         assertTrue(NbmCatalog.groups.all { g -> NbmCatalog.all.any { it.group == g } })
     }
 
+    @Test fun contourLinesOnlyForTheTemperatureFields() {
+        for (id in listOf("nbm_temp", "nbm_appttemp", "nbm_dewpoint", "nbm_maxt", "nbm_mint", "nbm_tempp90")) assertNotNull(Contours.specFor(id, "F"), id)
+        assertNull(Contours.specFor("nbm_temp", "C"))
+        assertNull(Contours.specFor("nbm_qpf06", "in"))
+        assertNull(Contours.specFor("nbm_windspd", "kt"))
+        // every temperature field of the catalog gets lines, and nothing else does
+        for (p in NbmCatalog.all) {
+            val lines = Contours.specFor(p.pickerId, p.style.units) != null
+            assertEquals(p.style.units == "F", lines, p.id)
+        }
+    }
+
     private class FakeHttp(val handler: (String) -> HttpResult) : Http {
         val urls = ArrayList<String>()
         override suspend fun get(url: String): HttpResult { urls += url; return handler(url) }

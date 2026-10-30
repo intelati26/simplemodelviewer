@@ -76,7 +76,7 @@ private const val MRMS_DISCLAIMER = "Data: NOAA/NSSL MRMS. Experimental viewer, 
 
 /** The MRMS page: composite reflectivity, rotation tracks and 24 h rainfall (and variants) over the same map machinery as the REFS page. */
 @Composable
-internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
+internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -125,7 +125,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AssistChip(onClick = { picker = true }, label = { Text(s.product.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
-                    TextButton(onClick = onSpc, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("SPC REFS") }
+                    TextButton(onClick = onSpc, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("REFS") }
+                    TextButton(onClick = onNbm, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("NBM") }
                     MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
                 }
                 s.notice?.let {
@@ -279,7 +280,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit) {
 }
 
 @Composable
-private fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }

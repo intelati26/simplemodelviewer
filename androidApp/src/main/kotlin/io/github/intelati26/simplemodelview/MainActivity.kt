@@ -109,6 +109,7 @@ import simplemodelview.Style
 class MainActivity : ComponentActivity() {
     private val viewModel: RefsViewModel by viewModels()
     private val mrmsViewModel: MrmsViewModel by viewModels()
+    private val nbmViewModel: NbmViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,15 +118,16 @@ class MainActivity : ComponentActivity() {
         val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (start == "mrms") "mrms" else "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm").firstOrNull { it == start } ?: "spc") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     // each page's view model is created only when the page is first opened
-                    if (page == "mrms") MrmsScreen(mrmsViewModel, onSpc = { open("spc"); viewModel.reloadFromPrefs() })
+                    if (page == "nbm") NbmScreen(nbmViewModel, onSpc = { open("spc"); viewModel.reloadFromPrefs() }, onMrms = { open("mrms"); mrmsViewModel.reloadFromPrefs() })
+                    else if (page == "mrms") MrmsScreen(mrmsViewModel, onSpc = { open("spc"); viewModel.reloadFromPrefs() }, onNbm = { open("nbm"); nbmViewModel.reloadFromPrefs() })
                     else {
                         LaunchedEffect(dark) { viewModel.setDark(dark) }
-                        RefsScreen(viewModel, onMrms = { open("mrms"); mrmsViewModel.reloadFromPrefs() })
+                        RefsScreen(viewModel, onMrms = { open("mrms"); mrmsViewModel.reloadFromPrefs() }, onNbm = { open("nbm"); nbmViewModel.reloadFromPrefs() })
                     }
                 }
             }
@@ -135,7 +137,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
+private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -171,6 +173,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit) {
                     modifier = Modifier.weight(1f))
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
                 TextButton(onClick = onMrms, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("MRMS") }
+                TextButton(onClick = onNbm, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("NBM") }
                 MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
@@ -367,12 +370,12 @@ internal fun Legend(style: Style, members: List<String>) {
 }
 
 @Composable
-internal fun SectorMenu(current: String, onGlobe: () -> Unit, onPick: (Sector) -> Unit) {
+internal fun SectorMenu(current: String, onGlobe: (() -> Unit)?, onPick: (Sector) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(current) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Globe") }, onClick = { open = false; onGlobe() })
+            if (onGlobe != null) DropdownMenuItem(text = { Text("Globe") }, onClick = { open = false; onGlobe() })
             for (sector in Sector.all) DropdownMenuItem(text = { Text(sector.name) }, onClick = { open = false; onPick(sector) })
         }
     }

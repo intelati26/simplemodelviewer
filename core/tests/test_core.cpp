@@ -415,6 +415,15 @@ static void testGeotiffFile(const char * name) {
     double col, row;
     spc_latlon_to_grid(result.grid, 39.0, -95.0, &col, &row);
     CHECK(col > 1000 && col < 1500 && row > 700 && row < 1000);
+    // the map is the right way up and in the right place: the temperature field (31 Oct, 17Z) is warm over Florida and cold over Minnesota
+    if (std::string(name) == "nbm_temp.tif") {
+        auto at = [&](double lat, double lon) {
+            double c, r;
+            spc_latlon_to_grid(result.grid, lat, lon, &c, &r);
+            return values[static_cast<size_t>(std::lround(r)) * result.columns + static_cast<size_t>(std::lround(c))];
+        };
+        CHECK(at(26.0, -81.0) > at(46.5, -93.5) + 10.0f);
+    }
     spc_free(values);
     // the same file registers the same grid
     float * again = nullptr;

@@ -44,9 +44,12 @@ class LoopExporter(private val file: File, width: Int, height: Int, private val 
         codec.start()
     }
 
-    /** Adds one picture; the [last] one is posted several times so it stays on screen for [lastMillis] more. */
-    fun add(picture: Bitmap, last: Boolean) {
-        repeat(if (last) 1 + lastMillis / frameMillis else 1) {
+    /**
+     * Adds one picture, shown for [hold] frame slots (a loop whose frames stand for different spans of time holds each for its span); the [last] one
+     * is posted several times so it stays on screen for [lastMillis] more.
+     */
+    fun add(picture: Bitmap, last: Boolean, hold: Int = 1) {
+        repeat(maxOf(1, hold) + (if (last) lastMillis / frameMillis else 0)) {
             val canvas: Canvas = surface.lockCanvas(null)
             canvas.drawColor(Color.WHITE)
             canvas.drawBitmap(picture, 0f, 0f, null)
