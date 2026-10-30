@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import simplemodelview.BackupPlace
+import simplemodelview.GlobeCamera
 import simplemodelview.Grid
 import simplemodelview.GridField
 import simplemodelview.NbmCatalog
@@ -32,6 +33,7 @@ import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
+import simplemodelview.globeInverse
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
 import simplemodelview.nbmDwellMillis
@@ -69,6 +71,8 @@ data class NbmState(
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
     val loopSpanHours: Int = 0,                       // how much of the run Play and a loop video cover, from its start; 0 = all
+    val globe: Boolean = false,
+    val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
 }
@@ -78,6 +82,9 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.nbm
     private val renderer = MapRenderer(core, AppContainer.lines)
+    private val globeRenderer = GlobeRenderer(core, AppContainer.lines)
+    private var globeW = 0
+    private var globeH = 0
     private val outlook = AppContainer.outlook
 
     private var dark = false
@@ -117,7 +124,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing) showFrame() } }
+        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing && !_state.value.globe) showFrame() } }
     }
 
     /** The other pages may have changed favorites, places or settings while this page was away. */
@@ -221,7 +228,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     fun pickSector(sector: Sector) {
         prefs.edit().putString("nbm_sector", sector.name).apply()
         stopPlaying()
-        update { it.copy(sector = sector, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(sector = sector, globe = false, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
 
@@ -291,6 +298,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(busy = true, error = null) }
         val field = decode(file)
         val grid = field.grid
+        if (st.globe) {
+            shown = synthetic(st.product, grid) to field.values
+            if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
+            return
+        }
         outlook.want(file.valid)
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
@@ -317,6 +329,74 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
 
+    // ---- the globe ----
+    fun onGlobeTap(px: Float, py: Float) {
+        val (product, values) = shown ?: return
+        val ll = globeInverse(_state.value.cam, globeW, globeH, px.toDouble(), py.toDouble())
+        if (ll == null) { clearTap(); return }
+        val grid = product.grid
+        val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
+        val column = Math.round(c).toInt()
+        val row = Math.round(r).toInt()
+        val text = if (column !in 0 until grid.columns || row !in 0 until grid.rows)
+            "${placeLabel(ll[0], ll[1])}   outside the National Blend of Models area" else readout(core, product, values, emptyList(), column, row)
+        update { it.copy(readout = text, tapLatLon = ll[0] to ll[1]) }
+    }
+
+    fun setGlobe(on: Boolean) {
+        if (_state.value.globe == on) return
+        stopPlaying()
+        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        showFrame()
+    }
+
+    fun setGlobeSize(w: Int, h: Int) {
+        if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
+        val first = globeW == 0
+        globeW = w; globeH = h
+        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        if (_state.value.globe && shown != null) requestGlobe(coarse = false)
+    }
+
+    private var settleJob: Job? = null
+    private var globeBusy = false
+    private var globeDirty = false
+    private var globeCoarse = false
+
+    fun globeGesture(dx: Float, dy: Float, zoom: Float) {
+        val minR = 0.3 * minOf(globeW, globeH)
+        update { it.copy(cam = it.cam.dragged(dx.toDouble(), dy.toDouble()).zoomed(zoom.toDouble(), minR, minR * 60)) }
+        requestGlobe(coarse = true)
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
+    }
+
+    /** One render at a time; while one runs, further requests collapse into a single follow-up with the newest camera. */
+    private fun requestGlobe(coarse: Boolean) {
+        globeDirty = true
+        globeCoarse = coarse
+        if (globeBusy) return
+        globeBusy = true
+        viewModelScope.launch {
+            try {
+                while (globeDirty) {
+                    globeDirty = false
+                    renderGlobeNow(if (globeCoarse) 4 else 1)
+                }
+            } finally { globeBusy = false }
+        }
+    }
+
+    private suspend fun renderGlobeNow(stride: Int) {
+        val (product, values) = shown ?: return
+        if (globeW == 0 || values.size < product.grid.cells) return
+        val st = _state.value
+        val bitmap = withContext(Dispatchers.Default) {
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark)
+        }
+        update { it.copy(map = bitmap, busy = false) }
+    }
+
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
     }
@@ -337,6 +417,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
     fun goToPlace(place: Place) {
         val st = _state.value
+        if (st.globe) {
+            update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }
+            requestGlobe(coarse = false)
+            return
+        }
         val box = st.sector
         val inSector = place.lon in box.west..box.east && place.lat in box.south..box.north
         viewModelScope.launch {
@@ -525,6 +610,14 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun areaImage(area: ShareArea, file: NbmFile): Triple<Bitmap, Product, Style> {
         val st = _state.value
         val field = decode(file, cache = false)
+        if (area == ShareArea.Globe && globeW > 0) {
+            val size = 1500
+            val globeProduct = synthetic(st.product, field.grid)
+            val bitmap = withContext(Dispatchers.Default) {
+                globeRenderer.render(field.grid, field.values, globeProduct.style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false)
+            }
+            return Triple(bitmap, globeProduct, globeProduct.style)
+        }
         outlook.ensure(file.valid)
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
@@ -575,9 +668,10 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** Estimated size of a loop video of the current field and area, for the share dialog. */
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
         val grid = shown?.first?.grid ?: return 0.0
-        val box = areaView(area, grid)
         val st = _state.value
         val frames = nbmLoopWindow(st.frames, st.loopSpanHours).count()
+        if (area == ShareArea.Globe) { val w = 1500; return VideoSize.estimateMegabytes(size, w, 1500 * maxOf(globeH, 1) / maxOf(globeW, 1) + w / 6, frames) }
+        val box = areaView(area, grid)
         return VideoSize.estimateMegabytes(size, box.pixelWidth, box.pixelHeight + box.pixelWidth / 6, frames)   // + header and legend
     }
 

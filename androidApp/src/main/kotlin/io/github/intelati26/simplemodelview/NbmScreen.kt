@@ -109,6 +109,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                     Text(s.error!!, color = MaterialTheme.colorScheme.error)
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
+                s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "National Blend of Models globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "National Blend of Models map", onViewport = vm::setViewport, onTap = vm::onTap)
                 else -> CircularProgressIndicator()
             }
@@ -141,7 +142,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                         label = { Text(s.cycle?.let { "Run " + it.shortLabel + (if (s.following) "" else " · set") } ?: "Run") },
                         modifier = Modifier.height(32.dp),
                     )
-                    SectorMenu(s.sector.name, onGlobe = null, onPick = vm::pickSector)
+                    SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
                 NbmTimesLine(s.cycle, s.file)
@@ -202,7 +203,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
         onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, disclaimer = NBM_DISCLAIMER, showContours = true,
     ) { settings = false }
     if (sharing) ShareDialog(
-        canLoop = s.frames.size > 1, current = s.sector.name, globe = false, onDismiss = { sharing = false },
+        canLoop = s.frames.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
         initialSize = vm.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
             vm.videoSize = size
