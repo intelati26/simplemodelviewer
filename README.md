@@ -23,6 +23,9 @@ The "MRMS" button in the header opens a second page over the same renderers: 136
 ## NBM page
 The "NBM" button opens a third page over the same renderers: NOAA's National Blend of Models out to 11 days, 29 fields in six buckets (temperature, wind, rain and snow, sky and visibility, storms, probabilities such as "chance of 90 F or more"), from the open data bucket `noaa-nbm-pds`. The files are small GeoTIFFs, one per field and forecast hour, on NCEP's 2.5 km Lambert grid; the core decodes them itself (no GRIB). **Runs:** a new run every hour; the "Run" button lists them newest first and marks the **extended** ones (a week or more) with a star and how far each reaches; the default is the newest run that has arrived in full. **Loop:** frames come every hour, then every 3, then every 6 h, so Play holds each frame for as long as the forecast hours it stands for (a day of forecast takes the same time at any spacing); "Loop: N" picks how much of the run to play. Tap for a value, contour lines on temperatures, sectors, share / export of a picture or loop video. Details and measurements: `docs/nbm-products.md`.
 
+## SPC outlook overlay
+"SPC outlook" on the REFS, MRMS and NBM pages draws the Storm Prediction Center's outlook for a day over the map: Day 1-2 categorical risk and tornado / wind / hail chances, Day 3 categorical and severe chance, Days 4-8 severe chance. One choice for all pages (saved), faint fill with outline and a color key, tap for what it says at the point, included in exports, not on the globes. The comparison with wxqt's MRMS overlays, and what in the SPC file format is unverified from the build environment: `docs/spc-outlooks.md`.
+
 ## Colors
 The SPC page uses the color tables of SPC's own viewer (levels, band colors, the colors beyond both ends and the 0.9 opacity), captured from its script: see `docs/spc-colormaps.md`.
 

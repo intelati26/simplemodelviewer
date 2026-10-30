@@ -138,7 +138,16 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    init { load(); promptForContact() }
+    private val outlook = AppContainer.outlook
+
+    init {
+        load(); promptForContact()
+        // a newly read (or changed) SPC outlook is drawn at once
+        viewModelScope.launch {
+            var last = outlook.state.value.data
+            outlook.state.collect { st -> if (st.data !== last) { last = st.data; if (values != null && !_state.value.globe) rerender() } }
+        }
+    }
 
     fun load() {
         viewModelScope.launch {
@@ -274,7 +283,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             val g = product.grid
             val v = if (sector.name == "CONUS") View.whole(g).decimated(if (_state.value.settings.dataSaver && g == Grid.REFS) 2 else 1) else sector.view(core, g)
             val style = withAutoStops(product.style, data)
-            Triple(renderer.render(product, style, data, members, v, dark, contours = _state.value.settings.contours), style, v)
+            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook.state.value, v), contours = _state.value.settings.contours), style, v)
         }
         view = v
         update { it.copy(map = bitmap, style = style, busy = false) }
@@ -365,7 +374,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val column = view.col0 + floor(fx * view.cols).toInt().coerceIn(0, view.cols - 1)
         val row = view.row0 + view.rows - 1 - floor(fy * view.rows).toInt().coerceIn(0, view.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, data, it.members, column, row), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, data, it.members, column, row) + (outlook.readoutAt(lat, lon)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -647,7 +656,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             val size = 1500
             val h = size * globeH / globeW
             globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
-        } else renderer.render(product, style, data, st.members, v, dark = false, contours = st.settings.contours)
+        } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook.state.value, v), contours = st.settings.contours)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {

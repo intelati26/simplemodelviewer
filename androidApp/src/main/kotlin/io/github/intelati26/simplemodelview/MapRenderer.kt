@@ -18,8 +18,11 @@ import simplemodelview.fixed
 /** A second field drawn over the data (under the map lines): [bitmap] has one pixel per cell of its own window and is stretched onto [dst], in pixels of the base picture. */
 class Overlay(val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean, val marker: Boolean = false, val markerScale: Float = 1f)
 
-/** An alert outline in pixels of the base picture: [rings] as x0, y0, x1, y1, ... A watch or warning is filled faintly; a discussion is dashed. */
-class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean)
+/**
+ * An alert outline in pixels of the base picture: [rings] as x0, y0, x1, y1, ... A watch or warning is filled faintly; a discussion is dashed.
+ * [combined]: the rings are one polygon (the outer ring, then its holes), filled together by the even-odd rule so a hole stays empty (SPC outlooks).
+ */
+class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false)
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
@@ -85,6 +88,17 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             line.pathEffect = if (a.dashed) android.graphics.DashPathEffect(floatArrayOf(width * 4f, width * 3f), 0f) else null
             casing.pathEffect = line.pathEffect
             fill.color = (0x28 shl 24) or a.color
+            if (a.combined && a.fill) {
+                val whole = android.graphics.Path().apply { fillType = android.graphics.Path.FillType.EVEN_ODD }
+                for (ring in a.rings) {
+                    if (ring.size < 6) continue
+                    whole.moveTo(ring[0], ring[1])
+                    var i = 2
+                    while (i + 1 < ring.size) { whole.lineTo(ring[i], ring[i + 1]); i += 2 }
+                    whole.close()
+                }
+                canvas.drawPath(whole, fill)
+            }
             for (ring in a.rings) {
                 if (ring.size < 6) continue
                 val path = android.graphics.Path()
@@ -92,7 +106,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 var i = 2
                 while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
                 path.close()
-                if (a.fill) canvas.drawPath(path, fill)
+                if (a.fill && !a.combined) canvas.drawPath(path, fill)
                 canvas.drawPath(path, casing)
                 canvas.drawPath(path, line)
             }

@@ -82,6 +82,8 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
+    val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
+    var outlookDialog by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
@@ -89,7 +91,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
     }
-    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
     val dark = isSystemInDarkTheme()
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
@@ -152,6 +154,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+            OutlookRow(outlookState, onClick = { outlookDialog = true })
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -176,6 +179,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
         onPick = { picked -> picker = false; NbmCatalog.byPickerId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
         groups = NbmCatalog.groups,
     )
+    if (outlookDialog) OutlookDialog(outlookState.choice, onPick = { outlookDialog = false; AppContainer.outlook.set(it) }, onDismiss = { outlookDialog = false })
     if (cyclePicker) {
         LaunchedEffect(Unit) { vm.loadLeads() }
         CycleDialog(s.cycles, s.cycle, s.following, s.leads, onPick = { cyclePicker = false; vm.pickCycle(it) }, onDismiss = { cyclePicker = false })

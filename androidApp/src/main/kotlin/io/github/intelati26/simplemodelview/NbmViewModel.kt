@@ -78,6 +78,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.nbm
     private val renderer = MapRenderer(core, AppContainer.lines)
+    private val outlook = AppContainer.outlook
 
     private var dark = false
     private var frameJob: Job? = null
@@ -113,7 +114,14 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private val dataSaver get() = prefs.getBoolean("data_saver", false)
     private val wifiOnlyLoop get() = prefs.getBoolean("wifi_only", false)
 
-    init { load(); promptForContact() }
+    init {
+        load(); promptForContact()
+        // a newly read (or changed) SPC outlook is drawn at once
+        viewModelScope.launch {
+            var last = outlook.state.value.data
+            outlook.state.collect { st -> if (st.data !== last) { last = st.data; if (shown != null && !_state.value.playing) showFrame() } }
+        }
+    }
 
     /** The other pages may have changed favorites, places or settings while this page was away. */
     fun reloadFromPrefs() = update {
@@ -289,7 +297,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), v, dark, contours = _state.value.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook.state.value, v), contours = _state.value.settings.contours)
         }
         view = v
         shown = product to field.values
@@ -306,7 +314,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val column = v.col0 + floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.row0 + v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -521,7 +529,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, contours = st.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook.state.value, box), contours = st.settings.contours)
         }
         return Triple(map, product, product.style)
     }

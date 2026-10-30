@@ -5,6 +5,7 @@ import android.content.Context
 import simplemodelview.AlertsRepository
 import simplemodelview.MrmsRepository
 import simplemodelview.NbmRepository
+import simplemodelview.OutlookRepository
 import simplemodelview.RefsRepository
 
 /** One HTTP client (and its disk cache), core and repository for the whole process: the UI and the alert worker share them. */
@@ -36,5 +37,6 @@ object AppContainer {
     val repo by lazy { RefsRepository(http, core) }
     val mrms by lazy { MrmsRepository(http, core) }
     val nbm by lazy { NbmRepository(http, core) }
+    val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
     val alerts by lazy { AlertsRepository(http) }
 }
