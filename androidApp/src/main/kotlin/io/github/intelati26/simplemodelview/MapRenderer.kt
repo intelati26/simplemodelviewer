@@ -71,9 +71,9 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             path.moveTo(c.points[0], c.points[1])
             var i = 2
             while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
-            val w = if (c.bold) width * 1.8f else width
-            line.strokeWidth = w + 2f; line.color = halo; canvas.drawPath(path, line)
-            line.strokeWidth = w; line.color = ink; canvas.drawPath(path, line)
+            val w = if (c.bold) width * 1.8f else width * 0.8f       // the ordinary levels are the quiet ones
+            line.strokeWidth = w + 2f; line.color = if (c.bold) halo else (halo and 0x00FFFFFF) or 0x70000000; canvas.drawPath(path, line)
+            line.strokeWidth = w; line.color = if (c.bold) ink else (ink and 0x00FFFFFF) or 0xB0000000.toInt(); canvas.drawPath(path, line)
             if (c.labelAt >= 0) labels.add(c)
         }
         for (c in labels) {

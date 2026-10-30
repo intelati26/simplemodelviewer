@@ -3,6 +3,7 @@ package simplemodelview
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -65,7 +66,7 @@ object Contours {
      * The contour lines of [values] (a [grid] field, row 0 = south, stored units) inside [view], in picture pixels. [style] converts the
      * stored values to the shown ones the [spec] is written in. NaN cells break the lines.
      */
-    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec): List<ContourLine> {
+    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = SMOOTHING_PASSES): List<ContourLine> {
         val cols = grid.columns
         val rows = grid.rows
         if (values.size < cols * rows) return emptyList()
@@ -85,17 +86,20 @@ object Contours {
             if (s > hi) hi = s
         }
         val levels = spec.levels(lo, hi)
+        // the lines follow a lightly smoothed field, so the cell-to-cell noise of a model does not turn them into scribble
+        val field = smoothed(values, cols, c0, r0, c1, r1, smoothing)
         val scale = view.scale.toFloat() / view.step
         val out = ArrayList<ContourLine>()
         for (level in levels) {
             val stored = ((level - style.offset) / f).toFloat()
-            val chains = trace(values, cols, c0, r0, c1, r1, stored)
+            val chains = trace(field, cols, c0, r0, c1, r1, stored)
             var best = -1
             var bestLen = -1
             chains.forEachIndexed { i, ch -> if (ch.size > bestLen) { best = i; bestLen = ch.size } }
-            chains.forEachIndexed { i, ch ->
-                if (ch.size < 8) return@forEachIndexed                       // fewer than four points: a speck
-                val closed = ch[0] == ch[ch.size - 2] && ch[1] == ch[ch.size - 1]
+            chains.forEachIndexed { i, raw ->
+                if (raw.size < 8 || length(raw) < MIN_LINE_CELLS) return@forEachIndexed   // fewer than four points, or a few cells long: a speck
+                val closed = raw[0] == raw[raw.size - 2] && raw[1] == raw[raw.size - 1]
+                val ch = if (smoothing > 0) chaikin(raw, closed, 2) else raw                // round the corners the grid leaves
                 val px = FloatArray(ch.size)
                 var k = 0
                 while (k < ch.size) {
@@ -108,6 +112,72 @@ object Contours {
             }
         }
         return out
+    }
+
+    /** How many times the field is blurred (3 x 3, 1-2-1 weights) before it is traced. */
+    const val SMOOTHING_PASSES = 2
+
+    /** Lines shorter than this many cells are dropped: on a noisy field they are specks and short squiggles. */
+    const val MIN_LINE_CELLS = 8.0
+
+    private fun length(p: FloatArray): Double {
+        var sum = 0.0
+        var i = 2
+        while (i + 1 < p.size) { sum += hypot((p[i] - p[i - 2]).toDouble(), (p[i + 1] - p[i - 1]).toDouble()); i += 2 }
+        return sum
+    }
+
+    /**
+     * [values] blurred [passes] times inside the window (c0..c1, r0..r1), a cell's neighbors weighing half of it, NaN cells staying NaN and not
+     * counting as neighbors. A straight ramp is left as it is. Cells outside the window are copied.
+     */
+    internal fun smoothed(values: FloatArray, cols: Int, c0: Int, r0: Int, c1: Int, r1: Int, passes: Int): FloatArray {
+        if (passes <= 0) return values
+        val w = c1 - c0 + 1
+        val h = r1 - r0 + 1
+        var cur = values
+        val tmp = FloatArray(w * h)
+        repeat(passes) {
+            val src = cur
+            for (r in 0 until h) for (c in 0 until w) {
+                val v = src[(r0 + r) * cols + c0 + c]
+                if (v.isNaN()) { tmp[r * w + c] = v; continue }
+                var sum = 2 * v; var wt = 2f
+                if (c > 0) src[(r0 + r) * cols + c0 + c - 1].let { if (!it.isNaN()) { sum += it; wt += 1f } }
+                if (c < w - 1) src[(r0 + r) * cols + c0 + c + 1].let { if (!it.isNaN()) { sum += it; wt += 1f } }
+                tmp[r * w + c] = sum / wt
+            }
+            val dst = values.copyOf()
+            for (r in 0 until h) for (c in 0 until w) {
+                val v = tmp[r * w + c]
+                if (v.isNaN()) { dst[(r0 + r) * cols + c0 + c] = v; continue }
+                var sum = 2 * v; var wt = 2f
+                if (r > 0) tmp[(r - 1) * w + c].let { if (!it.isNaN()) { sum += it; wt += 1f } }
+                if (r < h - 1) tmp[(r + 1) * w + c].let { if (!it.isNaN()) { sum += it; wt += 1f } }
+                dst[(r0 + r) * cols + c0 + c] = sum / wt
+            }
+            cur = dst
+        }
+        return cur
+    }
+
+    /** Corner cutting: each pass replaces every corner of the line by two points at a quarter and three quarters of its segments. An open line keeps its ends. */
+    internal fun chaikin(p: FloatArray, closed: Boolean, passes: Int): FloatArray {
+        var cur = p
+        repeat(passes) {
+            val n = cur.size / 2
+            if (n < 3) return cur
+            val out = ArrayList<Float>(cur.size * 2)
+            if (!closed) { out.add(cur[0]); out.add(cur[1]) }
+            for (i in 0 until n - 1) {
+                val x0 = cur[2 * i]; val y0 = cur[2 * i + 1]; val x1 = cur[2 * i + 2]; val y1 = cur[2 * i + 3]
+                out.add(0.75f * x0 + 0.25f * x1); out.add(0.75f * y0 + 0.25f * y1)
+                out.add(0.25f * x0 + 0.75f * x1); out.add(0.25f * y0 + 0.75f * y1)
+            }
+            if (closed) { out.add(out[0]); out.add(out[1]) } else { out.add(cur[2 * n - 2]); out.add(cur[2 * n - 1]) }
+            cur = out.toFloatArray()
+        }
+        return cur
     }
 
     /**
