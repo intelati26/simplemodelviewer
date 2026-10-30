@@ -149,6 +149,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
+    val lightningState by AppContainer.lightning.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
     // settings export / import go through the system file pickers: the app needs no storage permission
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -157,7 +158,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
     }
-    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); AppContainer.lightning.refreshIfStale(); onPauseOrDispose { } }
 
     val dark = isSystemInDarkTheme()
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)     // the map picture's own background: no dead white around it
@@ -227,6 +228,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
                 }
             }
             OutlookRow(outlookState, onClick = { outlookDialog = true })
+            LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
             s.style?.let { Legend(it, s.members) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

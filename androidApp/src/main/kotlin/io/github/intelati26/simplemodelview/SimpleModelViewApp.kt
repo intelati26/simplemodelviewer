@@ -3,6 +3,7 @@ package io.github.intelati26.simplemodelview
 import android.app.Application
 import android.content.Context
 import simplemodelview.AlertsRepository
+import simplemodelview.LightningCastRepository
 import simplemodelview.MrmsRepository
 import simplemodelview.NbmRepository
 import simplemodelview.OutlookRepository
@@ -38,5 +39,6 @@ object AppContainer {
     val mrms by lazy { MrmsRepository(http, core) }
     val nbm by lazy { NbmRepository(http, core) }
     val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
+    val lightning by lazy { LightningCastModel(LightningCastRepository(http), prefs) }
     val alerts by lazy { AlertsRepository(http) }
 }

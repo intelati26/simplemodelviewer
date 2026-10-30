@@ -67,7 +67,10 @@ fun decodeOverlays(text: String?): List<OverlaySpec> = text.orEmpty().split(';')
     OverlaySpec(f[0], f[1].toIntOrNull() ?: 0, f[2].toIntOrNull() ?: -1, (f[3].toDoubleOrNull() ?: 1.0).coerceIn(0.05, 1.0))
 }.take(6)
 
-/** Strike density is drawn as a dot per strike (a strike is one 1 km cell: far too small to see as a cell); area fields such as the lightning probability are not. */
+/** Hail swaths and rotation tracks are edged in black with a white halo outside it (wxqt's swath style), so they read over any reflectivity color. */
+fun mrmsHasHalo(product: MrmsProduct) = product.group == MrmsCatalog.ROTATION || product.group == MrmsCatalog.HAIL
+
+/** Strike density is drawn as a cross per strike (a strike is one 1 km cell: far too small to see as a cell); area fields are not. */
 fun overlayIsMarker(product: MrmsProduct) = product.id.startsWith("NLDN_")
 
 /**

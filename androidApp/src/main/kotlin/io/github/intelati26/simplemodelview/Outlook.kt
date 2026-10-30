@@ -8,6 +8,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import simplemodelview.Core
 import simplemodelview.OutlookChoice
@@ -106,3 +108,82 @@ internal fun outlookDraws(core: Core, state: OutlookState, view: View): List<Ale
         }
     }
 }
+
+/** The LightningCast overlay (the chance of lightning in the next hour, GOES-East): on or off, the last hour of 5-minute scans, and when they were read. */
+data class LightningState(
+    val enabled: Boolean = false,
+    val frames: List<simplemodelview.LightningFrame> = emptyList(),
+    val asOf: Long? = null,
+    val note: String? = null,
+    val busy: Boolean = false,
+)
+
+/**
+ * Holds the LightningCast overlay for the whole process, so every page can draw it (the on / off choice is saved). CIMSS updates the placefile every few
+ * minutes, so a page coming back to the screen (and the MRMS page, while it follows the radar) reads it again when it is over two minutes old.
+ */
+class LightningCastModel(private val repo: simplemodelview.LightningCastRepository, private val prefs: SharedPreferences) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val _state = MutableStateFlow(LightningState(enabled = prefs.getBoolean("lightningcast", false)))
+    val state: StateFlow<LightningState> = _state
+    private var job: Job? = null
+
+    init { if (_state.value.enabled) refresh() }
+
+    private fun now() = System.currentTimeMillis() / 1000
+
+    fun setEnabled(on: Boolean) {
+        prefs.edit().putBoolean("lightningcast", on).apply()
+        job?.cancel()
+        _state.value = LightningState(enabled = on, busy = on)
+        if (on) refresh()
+    }
+
+    fun refresh() {
+        if (!_state.value.enabled) return
+        job?.cancel()
+        job = scope.launch {
+            _state.value = _state.value.copy(busy = true, note = null)
+            try {
+                val frames = repo.load()
+                if (_state.value.enabled) _state.value = LightningState(true, frames, now())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (_state.value.enabled) _state.value = _state.value.copy(busy = false, note = e.message ?: "LightningCast could not be read")
+            }
+        }
+    }
+
+    fun refreshIfStale() {
+        val st = _state.value
+        if (st.enabled && !st.busy && (st.asOf == null || now() - st.asOf > 120)) refresh()
+    }
+}
+
+/**
+ * The contours of the scan for [at] (epoch seconds; null: the newest) as lines in the pixels of the picture of [view], lowest chance first, in the colors of the
+ * placefile. On the MRMS page [at] is the radar frame's time; the other pages show the newest scan.
+ */
+internal fun lightningDraws(core: Core, state: LightningState, view: View, at: Long?): List<AlertDraw> {
+    if (!state.enabled) return emptyList()
+    val frame = simplemodelview.lightningFrameFor(state.frames, at) ?: return emptyList()
+    val pixels = view.scale.toFloat() / view.step
+    return frame.contours.sortedBy { it.percent }.map { contour ->
+        val p = contour.points
+        val out = FloatArray(p.size)
+        var i = 0
+        while (i + 1 < p.size) {
+            val g = core.latLonToGrid(view.grid, p[i], p[i + 1])
+            out[i] = ((g[0] + 0.5 - view.col0) * pixels).toFloat()
+            out[i + 1] = ((view.row0 + view.rows - 0.5 - g[1]) * pixels).toFloat()
+            i += 2
+        }
+        AlertDraw(listOf(out), contour.color, dashed = false, fill = false, open = true)
+    }
+}
+
+/** Emits when something that changes the overlays' pictures changes (a new outlook or scan, or a choice), so a page redraws. The current state is not emitted. */
+internal fun overlayChanges(): kotlinx.coroutines.flow.Flow<List<Any?>> =
+    kotlinx.coroutines.flow.combine(AppContainer.outlook.state, AppContainer.lightning.state) { o, l -> listOf(o.choice, o.asOf, l.enabled, l.asOf) }
+        .distinctUntilChanged().drop(1)

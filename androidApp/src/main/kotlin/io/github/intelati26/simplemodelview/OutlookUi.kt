@@ -95,3 +95,31 @@ internal fun OutlookDialog(current: OutlookChoice?, onPick: (OutlookChoice?) -> 
         },
     )
 }
+
+/**
+ * "LightningCast: off", or on with the scan shown and a color key of its contours: the chance of lightning in the next hour from GOES-East (NOAA and CIMSS),
+ * lines at 10, 30, 50, 70 and 90 percent. Tapping switches it on or off; it is drawn on every page.
+ */
+@Composable
+internal fun LightningCastRow(state: LightningState, onToggle: () -> Unit) {
+    val frame = simplemodelview.lightningFrameFor(state.frames, null)
+    Column(Modifier.fillMaxWidth()) {
+        TextButton(onClick = onToggle, contentPadding = PaddingValues(horizontal = 12.dp)) {
+            Text(
+                if (!state.enabled) "LightningCast: off" else
+                    "LightningCast: lightning chance, next 60 min" + (frame?.let { " · scan ${formatClock(it.start)}" } ?: "") + if (state.busy) " · reading…" else "",
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        val levels = frame?.contours.orEmpty().distinctBy { it.percent }.sortedBy { it.percent }
+        if (state.enabled && levels.isNotEmpty()) {
+            Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (c in levels) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(width = 14.dp, height = 3.dp).background(Color(0xFF000000.toInt() or c.color)))
+                    Text(" ${c.percent}%", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        if (state.enabled) state.note?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+    }
+}

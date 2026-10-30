@@ -2,7 +2,7 @@
 
 Surveyed 2026-10-02 from the newest real file of each directory of `noaa-mrms-pds/CONUS/` (243 directories; the 99 per-level 3D-mosaic ones
 `MergedReflectivityQC_*`, `MergedRhoHV_*`, `MergedZdr_*` and the `ANC_*` ones, which had no files, are not offered). The app's catalog
-(`shared/.../MrmsCatalog.kt`) holds 136 products in nine buckets. Every one decodes with the same core decoder
+(`shared/.../MrmsCatalog.kt`) holds 134 products in nine buckets. Every one decodes with the same core decoder
 (`core/src/mrms_decode.cpp`); the 24 / 32 bit ones were checked bit for bit against GDAL on the full files.
 
 ## File format facts
@@ -20,7 +20,6 @@ Surveyed 2026-10-02 from the newest real file of each directory of `noaa-mrms-pd
 | QPE, precipitation rate, rotation, quality, warm rain, heights | -3 (and -1) | <= -0.5 |
 | Gauge influence index | -3 and a negative filler (-0.696 / -1) | <= -0.0005 |
 | FLASH, thickness, model temperature (24 / 32 bit) | -999 / -9999 | <= -500 |
-| Lightning probability | -99900 | <= -50 |
 | NLDN lightning density | -1 | <= -0.5 |
 
 ## Cadence (gaps between files, measured over a day)
@@ -36,7 +35,7 @@ multi-sensor, and 1.4 h for the model fields.
 - **Echo tops and VIL (15):** echo tops 18 / 30 / 50 / 60 dBZ (stored in km, shown in kft), enhanced echo top, VIL (and high resolution), VIL density, VII, VIL swaths (2 h, 24 h), thickness (50 / 60 dBZ top above 0 / -20 C).
 - **Rotation (14):** azimuthal shear (0-2, 3-6 km, instantaneous), rotation tracks of 30 min, 1, 2, 4, 6 and 24 h at both layers.
 - **Hail (9):** MESH (shown in inches), hail swaths 30 min to 24 h, probability of severe hail, severe hail index.
-- **Lightning (6):** NLDN cloud-to-ground density 1 / 5 / 15 / 30 min, lightning probability next 30 / 60 min. (The lightning-jump grids and the `scale_1`
+- **Lightning (4):** NLDN cloud-to-ground density 1 / 5 / 15 / 30 min. (The lightning probability grids were dropped for LightningCast, the CIMSS placefile; see `LightningCast.kt`.) (The lightning-jump grids and the `scale_1`
   naming of the probability directories are as the bucket has them.)
 - **Rainfall (25):** precipitation type (seven categories, codes 96 / 91 / 10 / 7 / 6 / 3 / 1 and NSSL's colors), precipitation rate, radar-only QPE (15 min, 1 / 3 / 6 / 12 / 24 / 48 / 72 h, since 12Z), multi-sensor QPE 1-72 h, Pass 2 (best) and Pass 1 (quicker).
 - **Flash flooding (19):** QPE / flash-flood-guidance ratio, return period (30 min to 24 h, maximum), streamflow and unit streamflow (CREST, SAC-SMA, hydrophobic), soil saturation (CREST, SAC-SMA).

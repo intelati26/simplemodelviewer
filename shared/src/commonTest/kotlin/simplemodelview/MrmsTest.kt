@@ -292,10 +292,11 @@ class MrmsTest {
         assertEquals(6, decodeOverlays((1..20).joinToString(";") { "p$it|0|0|1.0" }).size)     // capped
     }
 
-    @Test fun strikeOverlaysAreDotsAndAreaFieldsAreNot() {
+    @Test fun strikeOverlaysAreMarksAndAreaFieldsAreNot() {
         assertTrue(overlayIsMarker(MrmsCatalog.byId("NLDN_CG_001min_AvgDensity_00.00")!!))
         assertTrue(overlayIsMarker(MrmsCatalog.byId("NLDN_CG_030min_AvgDensity_00.00")!!))
-        assertTrue(!overlayIsMarker(MrmsCatalog.byId("LightningProbabilityNext30minGrid_scale_1")!!))   // a probability area, drawn as cells
+        assertNull(MrmsCatalog.byId("LightningProbabilityNext30minGrid_scale_1"))                      // the lightning chance is LightningCast now
+        assertTrue(!overlayIsMarker(MrmsCatalog.byId("MESH_00.50")!!))
         assertTrue(!overlayIsMarker(MrmsCatalog.byId("RotationTrack60min_00.50")!!))
         // the strike scale starts on a strong color (a pale one disappears on a light map)
         assertEquals(0xff9500, MrmsCatalog.byId("NLDN_CG_005min_AvgDensity_00.00")!!.style.stops.first().rgb)
@@ -307,5 +308,14 @@ class MrmsTest {
         assertTrue(scale("NLDN_CG_001min_AvgDensity_00.00") < scale("NLDN_CG_005min_AvgDensity_00.00"))
         assertTrue(scale("NLDN_CG_005min_AvgDensity_00.00") < scale("NLDN_CG_030min_AvgDensity_00.00"))
         assertEquals(1.0f, overlayMarkerScale(MrmsCatalog.default), 0f)                        // other products: no growth
+    }
+
+    @Test fun hailAndRotationGetTheHalo() {
+        assertTrue(mrmsHasHalo(MrmsCatalog.byId("MESH_00.50")!!))
+        assertTrue(mrmsHasHalo(MrmsCatalog.byId("MESH_Max_60min_00.50")!!))
+        assertTrue(mrmsHasHalo(MrmsCatalog.byId("RotationTrack60min_00.50")!!))
+        assertTrue(mrmsHasHalo(MrmsCatalog.byId("MergedAzShear_0-2kmAGL_00.50")!!))
+        assertTrue(!mrmsHasHalo(MrmsCatalog.byId("MergedReflectivityQCComposite_00.50")!!))
+        assertTrue(!mrmsHasHalo(MrmsCatalog.byId("NLDN_CG_001min_AvgDensity_00.00")!!))
     }
 }

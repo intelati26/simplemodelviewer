@@ -62,6 +62,7 @@ import simplemodelview.fixed
 import simplemodelview.nextPlayable
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
+import simplemodelview.mrmsHasHalo
 import simplemodelview.mrmsStep
 import simplemodelview.placeLabel
 import simplemodelview.readout
@@ -174,10 +175,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(overlays = layersFrom(decodeOverlays(prefs.getString("mrms_overlays", null))), alertKinds = savedAlertKinds()) }
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch {
-            var last = outlook.state.value.data
-            outlook.state.collect { st -> if (st.data !== last) { last = st.data; if (shown != null && !_state.value.playing && !_state.value.globe) showFrame() } }
-        }
+        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing && !_state.value.globe) showFrame() } }
         if (_state.value.alertKinds.isNotEmpty()) viewModelScope.launch { refreshAlerts(force = true); showFrameIfNewest() }
     }
 
@@ -253,6 +251,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 delay((_state.value.product.cadenceMinutes * 30L).coerceIn(60L, 300L) * 1000)
                 checkForNewer()
+                AppContainer.lightning.refreshIfStale()
                 if (_state.value.alertKinds.isNotEmpty()) { refreshAlerts(force = false); showFrameIfNewest() }
             }
         }
@@ -447,7 +446,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val shortName = layerLabel(layer, layers.size)
             val product = Product(ov.directory, ov.displayTitle, ov.group, style, hasMembers = false, timeDimension = null, grid = g)
             // (a translucent layer is not thickened: drawing it several times would stack its opacity)
-            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov)), Triple(shortName, product, frame.window.values), "$shortName ${formatClock(file.validTime)}")
+            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov)), Triple(shortName, product, frame.window.values), "$shortName ${formatClock(file.validTime)}")
         }
         return results
     }
@@ -539,7 +538,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook.state.value, v), contours = _state.value.settings.contours) }
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook.state.value, v) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product)) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -890,7 +889,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
         }
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook.state.value, box), contours = _state.value.settings.contours)
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook.state.value, box) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product))
         }
         return bitmap to style
     }

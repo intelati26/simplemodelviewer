@@ -159,8 +159,7 @@ object MrmsCatalog {
         // lightning (NLDN)
         for (m in listOf(1, 5, 15, 30))
             add(product("NLDN_CG_${m.toString().padStart(3, '0')}min_AvgDensity_00.00", "Cloud-to-Ground Lightning, $m min", LIGHTNING, lightningDensity, 1))
-        for (m in listOf(30, 60))
-            add(product("LightningProbabilityNext${m}minGrid_scale_1", "Lightning Probability, next $m min", LIGHTNING, probability, 2, missing = -50.0))
+        // (the lightning chance is LightningCast, a placefile of GOES-East contours, not MRMS grids: see LightningCast.kt)
 
         // rainfall
         add(product("PrecipFlag_00.00", "Precipitation Type", PRECIP, precipType, 2, Pool.Mode))

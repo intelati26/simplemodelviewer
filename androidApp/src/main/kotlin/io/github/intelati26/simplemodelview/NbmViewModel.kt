@@ -117,10 +117,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch {
-            var last = outlook.state.value.data
-            outlook.state.collect { st -> if (st.data !== last) { last = st.data; if (shown != null && !_state.value.playing) showFrame() } }
-        }
+        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing) showFrame() } }
     }
 
     /** The other pages may have changed favorites, places or settings while this page was away. */
@@ -297,7 +294,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook.state.value, v), contours = _state.value.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook.state.value, v) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours)
         }
         view = v
         shown = product to field.values
@@ -529,7 +526,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook.state.value, box), contours = st.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook.state.value, box) + lightningDraws(core, AppContainer.lightning.state.value, box, null), contours = st.settings.contours)
         }
         return Triple(map, product, product.style)
     }
