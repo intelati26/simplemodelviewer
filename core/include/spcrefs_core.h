@@ -117,6 +117,19 @@ typedef struct {
 int spc_mrms_decode(const uint8_t * data, size_t size, const spc_mrms_request * request, float ** out, spc_mrms_result * result,
                     char * error, size_t error_cap);
 
+/* ---- NBM: GeoTIFF rasters (LZW / deflate, predictor 2 or 3, 8 / 16 / 32-bit integers or floats) on a Lambert conformal grid ---- */
+
+typedef struct {
+    int grid;                          /* the registered Lambert grid of the raster (columns x rows, row 0 = south; the same definition gives the same id) */
+    int columns, rows;
+    int has_nodata;                    /* the file names a nodata value (those cells are NaN in the output either way) */
+    double nodata;
+} spc_geotiff_result;
+
+/* Decodes a whole GeoTIFF raster into floats (row 0 = south, NaN where nothing is stored). On success returns 0 and `*out` is a malloc'd array of
+ * result->columns * result->rows floats (release with spc_free). Otherwise returns -1 with a message in `error`. */
+int spc_geotiff_decode(const uint8_t * data, size_t size, float ** out, spc_geotiff_result * result, char * error, size_t error_cap);
+
 void spc_free(void * pointer);
 
 #ifdef __cplusplus

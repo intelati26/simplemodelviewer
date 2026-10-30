@@ -11,6 +11,7 @@
 #include "chunk_decode.h"
 #include <cstdlib>
 #include "grids.h"
+#include "geotiff_decode.h"
 #include "mrms_decode.h"
 #include "raster.h"
 
@@ -120,6 +121,32 @@ int spc_mrms_decode(const uint8_t * data, size_t size, const spc_mrms_request * 
     }
     std::memcpy(copy, values.data(), values.size() * sizeof(float));
     *out = copy;
+    return 0;
+}
+
+int spc_geotiff_decode(const uint8_t * data, size_t size, float ** out, spc_geotiff_result * result, char * error, size_t error_cap) {
+    std::vector<float> values;
+    Geotiff::Info info;
+    std::string message;
+    if (!Geotiff::decode(data, size, values, info, message)) {
+        if (error && error_cap > 0) {
+            std::strncpy(error, message.c_str(), error_cap - 1);
+            error[error_cap - 1] = 0;
+        }
+        return -1;
+    }
+    float * copy = static_cast<float *>(std::malloc(values.size() * sizeof(float)));
+    if (copy == nullptr) {
+        if (error && error_cap > 0) std::strncpy(error, "out of memory", error_cap - 1);
+        return -1;
+    }
+    std::memcpy(copy, values.data(), values.size() * sizeof(float));
+    *out = copy;
+    result->grid = Grids::defineLambertProjected(info.columns, info.rows, info.cellMeters, info.parallel, info.centralMeridian, info.firstX, info.firstY, info.radius);
+    result->columns = info.columns;
+    result->rows = info.rows;
+    result->has_nodata = info.hasNodata ? 1 : 0;
+    result->nodata = info.nodata;
     return 0;
 }
 

@@ -2,6 +2,7 @@ package io.github.intelati26.simplemodelview
 
 import simplemodelview.Core
 import simplemodelview.Grid
+import simplemodelview.GridField
 import simplemodelview.Kind
 import simplemodelview.MrmsWindow
 import simplemodelview.Pool
@@ -22,6 +23,14 @@ class NativeCore : Core {
         val info = DoubleArray(5)
         val values = decodeMrmsNative(file, west, south, east, north, step, pool.ordinal, missingAtOrBelow, info)
         return MrmsWindow(Grid(info[0].toInt(), info[1].toInt(), info[2].toInt()), values, info[3].toLong(), info[4])
+    }
+
+    private external fun decodeGeotiffNative(file: ByteArray, info: IntArray): FloatArray
+
+    override fun decodeGeotiff(file: ByteArray): GridField {
+        val info = IntArray(3)
+        val values = decodeGeotiffNative(file, info)
+        return GridField(Grid(info[0], info[1], info[2]), values)
     }
 
     private external fun planLambertBoxNative(west: Double, south: Double, east: Double, north: Double, cell: Double): IntArray

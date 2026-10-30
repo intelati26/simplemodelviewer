@@ -20,13 +20,20 @@
 struct LambertGrid : GridBase {
     LambertGrid(int cols, int rows, double cellMeters, double parallelDeg, double centralMeridianDeg, double firstLat, double firstLon)
         : GridBase(cols, rows), cell(cellMeters), parallel(parallelDeg), centralMeridian(centralMeridianDeg), lon0Rad(degrees(centralMeridianDeg)) {
-        const double phi1 = degrees(parallelDeg);
-        n = std::sin(phi1);
-        f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
-        rho0 = rho(phi1);
+        setup(parallelDeg);
         const auto first = project(firstLat, firstLon);
         x0 = first.first;
         y0 = first.second;
+    }
+
+    // The origin given as the projected position (meters from the projection's origin at the parallel and central meridian) of the first cell's
+    // center, on a sphere of `earthRadius` (GeoTIFF files state theirs; NCEP's grids use 6371200 m).
+    struct Projected { double x, y; };
+    LambertGrid(int cols, int rows, double cellMeters, double parallelDeg, double centralMeridianDeg, Projected firstCell, double earthRadius)
+        : GridBase(cols, rows), cell(cellMeters), parallel(parallelDeg), centralMeridian(centralMeridianDeg), earth(earthRadius), lon0Rad(degrees(centralMeridianDeg)) {
+        setup(parallelDeg);
+        x0 = firstCell.x;
+        y0 = firstCell.y;
     }
 
     const double cell;   // meters
@@ -45,16 +52,22 @@ struct LambertGrid : GridBase {
         const double y = y0 + row * cell;
         const double r = std::hypot(x, rho0 - y);
         const double theta = std::atan2(x, rho0 - y);
-        lat = (2.0 * std::atan(std::pow(radius * f / r, 1.0 / n)) - pi / 2.0) * 180.0 / pi;
+        lat = (2.0 * std::atan(std::pow(earth * f / r, 1.0 / n)) - pi / 2.0) * 180.0 / pi;
         lon = (lon0Rad + theta / n) * 180.0 / pi;
         lon = std::fmod(lon + 540.0, 360.0) - 180.0;
     }
 
 private:
     static constexpr double pi = 3.14159265358979323846;
-    static constexpr double radius = 6371229.0;
+    double earth{6371229.0};   // sphere radius, meters
+    void setup(double parallelDeg) {
+        const double phi1 = degrees(parallelDeg);
+        n = std::sin(phi1);
+        f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
+        rho0 = rho(phi1);
+    }
     static double degrees(double d) { return d * pi / 180.0; }
-    double rho(double phi) const { return radius * f / std::pow(std::tan(pi / 4.0 + phi / 2.0), n); }
+    double rho(double phi) const { return earth * f / std::pow(std::tan(pi / 4.0 + phi / 2.0), n); }
     std::pair<double, double> project(double lat, double lon) const {
         double dl = degrees(lon) - lon0Rad;
         dl = std::fmod(dl + 3.0 * pi, 2.0 * pi) - pi;

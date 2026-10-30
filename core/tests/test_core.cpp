@@ -5,11 +5,13 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <limits>
 #include <string>
 #include <vector>
 #include "blosc_decode.h"
 #include "chunk_decode.h"
+#include "geotiff_decode.h"
 #include "grids.h"
 #include "mrms_decode.h"
 #include "spcrefs_core.h"
@@ -371,6 +373,78 @@ static void testMrms() {
     testMrmsErrors();
 }
 
+
+// NBM GeoTIFFs (scripts/make_nbm_fixtures.py): sampled cells read with Pillow must match, for each encoding the files use
+static void testGeotiffFile(const char * name) {
+    const std::string base = std::string(NBM_FIXTURE_DIR) + "/" + name;
+    const std::vector<uint8_t> tif = readFile(base);
+    CHECK(!tif.empty());
+    float * values = nullptr;
+    spc_geotiff_result result{};
+    char error[200] = {0};
+    CHECK(spc_geotiff_decode(tif.data(), tif.size(), &values, &result, error, sizeof error) == 0);
+    if (values == nullptr) { std::printf("  %s: %s\n", name, error); return; }
+    CHECK(result.columns == 2345 && result.rows == 1597);
+    CHECK(spc_grid_columns(result.grid) == 2345 && spc_grid_rows(result.grid) == 1597);
+    std::ifstream samples(base + ".samples.txt");
+    std::string line;
+    int checked = 0, wrong = 0;
+    long nanCount = -1;
+    while (std::getline(samples, line)) {
+        if (line.rfind("# nan_count ", 0) == 0) { nanCount = std::stol(line.substr(12)); continue; }
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream in(line);
+        int c, r;
+        std::string v;
+        in >> c >> r >> v;
+        const float got = values[static_cast<size_t>(r) * result.columns + c];
+        const bool ok = v == "nan" ? std::isnan(got) : std::fabs(got - std::stof(v)) <= 1e-5 * std::fabs(std::stof(v)) + 1e-6;
+        if (!ok) wrong += 1;
+        checked += 1;
+    }
+    CHECK(checked >= 400 && wrong == 0);
+    long nans = 0;
+    for (size_t i = 0; i < static_cast<size_t>(result.columns) * result.rows; i += 1) nans += std::isnan(values[i]) ? 1 : 0;
+    CHECK(nans == nanCount);
+    // the grid: NCEP's NBM CONUS grid starts at 19.229 N, 126.2766 W and its cells are 2.539703 km
+    double lat, lon;
+    spc_grid_to_latlon(result.grid, 0, 0, &lat, &lon);
+    CHECK(std::fabs(lat - 19.229) < 1e-3 && std::fabs(lon + 126.2766) < 1e-3);
+    spc_grid_to_latlon(result.grid, 2344, 1596, &lat, &lon);
+    CHECK(std::fabs(lat - 54.3728) < 1e-3 && std::fabs(lon + 59.0422) < 1e-3);
+    double col, row;
+    spc_latlon_to_grid(result.grid, 39.0, -95.0, &col, &row);
+    CHECK(col > 1000 && col < 1500 && row > 700 && row < 1000);
+    spc_free(values);
+    // the same file registers the same grid
+    float * again = nullptr;
+    spc_geotiff_result second{};
+    CHECK(spc_geotiff_decode(tif.data(), tif.size(), &again, &second, error, sizeof error) == 0 && second.grid == result.grid);
+    spc_free(again);
+}
+
+static void testGeotiff() {
+    for (const char * name : {"nbm_temp.tif", "nbm_qpf06.tif", "nbm_ceil.tif", "nbm_tstm01.tif"}) testGeotiffFile(name);
+    // damaged or cut-off input fails cleanly
+    const std::vector<uint8_t> tif = readFile(std::string(NBM_FIXTURE_DIR) + "/nbm_tstm01.tif");
+    float * values = nullptr;
+    spc_geotiff_result result{};
+    char error[200] = {0};
+    CHECK(spc_geotiff_decode(tif.data(), 10, &values, &result, error, sizeof error) != 0);
+    CHECK(spc_geotiff_decode(tif.data(), tif.size() / 2, &values, &result, error, sizeof error) != 0);
+    const uint8_t junk[64] = {'I', 'I', 42, 0, 8, 0, 0, 0};
+    CHECK(spc_geotiff_decode(junk, sizeof junk, &values, &result, error, sizeof error) != 0);
+    std::vector<uint8_t> flipped = tif;
+    for (size_t i = 3000; i < flipped.size(); i += 97) flipped[i] ^= 0x5A;
+    if (spc_geotiff_decode(flipped.data(), flipped.size(), &values, &result, error, sizeof error) == 0) spc_free(values);   // wrong numbers or an error, never a crash
+    // LZW: the TIFF specification's example "-----A---B" and a literal run
+    const uint8_t spec[] = {0x80, 0x0B, 0x60, 0x50, 0x22, 0x0C, 0x0C, 0x85, 0x01};
+    uint8_t out[16];
+    size_t produced = 0;
+    CHECK(Geotiff::lzwDecode(spec, sizeof spec, out, sizeof out, produced) && produced == 10 && std::memcmp(out, "-----A---B", 10) == 0);
+    CHECK(!Geotiff::lzwDecode(spec, sizeof spec, out, 4, produced));   // too small an output buffer is refused
+}
+
 static void testReproject() {
     // a lat / lon field value = 10 * lat + lon over 30..45 N, 105..85 W (0.05 degrees), put on a Lambert grid
     const int cols = 401, rows = 301;
@@ -443,6 +517,7 @@ int main() {
     testRender();
     testGlobe();
     testMrms();
+    testGeotiff();
     testCategorical();
     testOpacityAndTop();
     testReproject();

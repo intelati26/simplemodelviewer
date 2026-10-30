@@ -73,6 +73,12 @@ namespace Grids {
         return id == SPC_GRID_GREFS ? grefs : refs;
     }
 
+    int defineLambertProjected(int columns, int rows, double cellMeters, double parallel, double centralMeridian, double firstX, double firstY, double radius) {
+        auto grid = std::make_unique<LambertGrid>(columns, rows, cellMeters, parallel, centralMeridian, LambertGrid::Projected{firstX, firstY}, radius);
+        const Window win = boundsOf(*grid);
+        return addEntry(std::move(grid), win, {3.0, static_cast<double>(columns), static_cast<double>(rows), cellMeters, parallel, centralMeridian, firstX, firstY, radius});
+    }
+
     int defineLatLon(int columns, int rows, double southLat, double westLon, double dLat, double dLon) {
         const Window win{southLat - dLat, southLat + (rows + 1) * dLat, westLon - dLon, westLon + (columns + 1) * dLon};
         return addEntry(std::make_unique<LatLonGrid>(columns, rows, southLat, westLon, dLat, dLon), win,

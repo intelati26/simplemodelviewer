@@ -24,6 +24,9 @@ enum class Pool { Max, Mean, Mode }
 /** A decoded MRMS window: [values] fill [grid] (row 0 = south, NaN where there is no value). */
 class MrmsWindow(val grid: Grid, val values: FloatArray, val validTime: Long, val sourceCellDegrees: Double)
 
+/** A decoded raster: [values] fill [grid] (row 0 = south, NaN where nothing is stored). */
+class GridField(val grid: Grid, val values: FloatArray)
+
 /** The native core (C++: blosc decode, grids, MRMS GRIB2 decode, rasteriser). Implemented over JNI on Android and cinterop on iOS. */
 interface Core {
     /** Blosc-decompresses to raw bytes; throws on a malformed buffer. */
@@ -37,6 +40,12 @@ interface Core {
      * (cells combined by [pool]); stored values at or below [missingAtOrBelow] become NaN. Throws on a damaged / unsupported file.
      */
     fun decodeMrms(file: ByteArray, west: Double, south: Double, east: Double, north: Double, step: Int, pool: Pool, missingAtOrBelow: Double): MrmsWindow
+
+    /**
+     * Decodes a GeoTIFF raster (an NBM field: LZW or deflate tiles, integer or float samples, a Lambert conformal grid in the file's own georeferencing)
+     * whole. The grid it lands on is registered by the core. Throws on a damaged / unsupported file.
+     */
+    fun decodeGeotiff(file: ByteArray): GridField = throw UnsupportedOperationException()
 
     /**
      * A Lambert conformal grid (REFS's projection) covering a latitude / longitude box with square cells of [cellMeters]; the same definition gives the

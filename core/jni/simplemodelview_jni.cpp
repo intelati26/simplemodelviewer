@@ -77,6 +77,26 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     return out;
 }
 
+JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_decodeGeotiffNative(JNIEnv * env, jobject, jbyteArray file, jintArray info) {
+    const jsize size = env->GetArrayLength(file);
+    std::vector<uint8_t> in(static_cast<size_t>(size));
+    env->GetByteArrayRegion(file, 0, size, reinterpret_cast<jbyte *>(in.data()));
+    spc_geotiff_result result{};
+    float * values = nullptr;
+    char error[200] = {0};
+    if (spc_geotiff_decode(in.data(), in.size(), &values, &result, error, sizeof error) != 0) {
+        throwRuntime(env, error);
+        return nullptr;
+    }
+    const jsize count = result.columns * result.rows;
+    jfloatArray out = env->NewFloatArray(count);
+    if (out != nullptr) env->SetFloatArrayRegion(out, 0, count, values);
+    spc_free(values);
+    const jint v[3] = {result.grid, result.columns, result.rows};
+    env->SetIntArrayRegion(info, 0, 3, v);
+    return out;
+}
+
 JNIEXPORT jintArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_planLambertBoxNative(
     JNIEnv * env, jobject, jdouble west, jdouble south, jdouble east, jdouble north, jdouble cell) {
     int columns = 0, rows = 0;

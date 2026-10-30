@@ -15,6 +15,10 @@ namespace Grids {
     // registers a regular lat / lon grid (see LatLonGrid) and returns its id; the same definition returns the same id. Never freed (small)
     int defineLatLon(int columns, int rows, double southLat, double westLon, double dLat, double dLon);
 
+    // registers a Lambert conformal grid with one standard parallel (= the origin's latitude) on a sphere of `radius` meters, given by the projected
+    // position (meters from the projection origin) of its first (south-west) cell center; the same definition returns the same id (GeoTIFF files)
+    int defineLambertProjected(int columns, int rows, double cellMeters, double parallel, double centralMeridian, double firstX, double firstY, double radius);
+
     // registers a Lambert conformal grid (REFS's projection and sphere) covering the lat / lon box with square cells of `cellMeters`
     // (window edges follow the box in the projection, so the cut is a curved quadrilateral). Returns its id.
     int planLambertBox(double west, double south, double east, double north, double cellMeters, int * columns, int * rows);
