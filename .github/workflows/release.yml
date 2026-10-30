@@ -1,0 +1,32 @@
+name: simplemodelview / release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.1.0 (must match versionName in androidApp/build.gradle.kts)'
+        required: true
+permissions:
+  contents: write   # creates the tag and the GitHub Release
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the version
+        run: grep -q "versionName = \"${{ inputs.version }}\"" androidApp/build.gradle.kts
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Shared tests and debug APK
+        run: ./gradlew :shared:jvmTest :androidApp:assembleDebug --stacktrace
+      - name: Name the APK
+        run: cp androidApp/build/outputs/apk/debug/*.apk simplemodelview-${{ inputs.version }}.apk
+      - name: Tag and publish the release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: simplemodelview ${{ inputs.version }}
+          generate_release_notes: true
+          prerelease: true
+          files: simplemodelview-${{ inputs.version }}.apk
