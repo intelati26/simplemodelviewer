@@ -162,7 +162,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
             OverlayRow(s.overlays, s.overlayStyles, onPick = { overlayDialog = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
             AlertsRow(s.alertKinds, s.alertsAsOf, s.alertNote, newestOnly = s.index != s.files.lastIndex, onClick = { alertsDialog = true })
-            OutlookRow(outlookState, onClick = { outlookDialog = true })
+            OutlookRow(outlookState, s.file?.validTime, onClick = { outlookDialog = true })
             LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
@@ -245,7 +245,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             },
         )
     }
-    if (outlookDialog) OutlookDialog(outlookState.choice, onPick = { outlookDialog = false; AppContainer.outlook.set(it) }, onDismiss = { outlookDialog = false })
+    if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (alertsDialog) AlertsDialog(s.alertKinds, onChange = vm::setAlertKinds, onDismiss = { alertsDialog = false })
     s.alertDetail?.let { (title, text) ->
         AlertDialog(

@@ -155,7 +155,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
-            OutlookRow(outlookState, onClick = { outlookDialog = true })
+            OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
             LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
@@ -181,7 +181,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
         onPick = { picked -> picker = false; NbmCatalog.byPickerId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
         groups = NbmCatalog.groups,
     )
-    if (outlookDialog) OutlookDialog(outlookState.choice, onPick = { outlookDialog = false; AppContainer.outlook.set(it) }, onDismiss = { outlookDialog = false })
+    if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (cyclePicker) {
         LaunchedEffect(Unit) { vm.loadLeads() }
         CycleDialog(s.cycles, s.cycle, s.following, s.leads, onPick = { cyclePicker = false; vm.pickCycle(it) }, onDismiss = { cyclePicker = false })

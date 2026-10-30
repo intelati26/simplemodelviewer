@@ -538,7 +538,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook.state.value, v) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product)) }
+        outlook.want(file.validTime)
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product)) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -577,7 +578,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val row = v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
         var text = readout(core, product, values, emptyList(), column, row)
-        outlook.readoutAt(lat, lon)?.let { text += "   \u00B7 $it" }
+        outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
         for ((name, op, ovValues) in shownOverlays) {
             val c = core.latLonToGrid(op.grid, lat, lon)
             val v = shownValue(op.style, ovValues, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
@@ -888,8 +889,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             box = View(sector.name, 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
             overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
         }
+        outlook.ensure(file.validTime)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook.state.value, box) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product))
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product))
         }
         return bitmap to style
     }

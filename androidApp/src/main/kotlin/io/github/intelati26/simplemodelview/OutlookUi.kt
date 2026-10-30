@@ -25,28 +25,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import simplemodelview.OutlookChoice
+import simplemodelview.OutlookType
+import simplemodelview.outlookChoiceFor
 import simplemodelview.formatClock
 
 /**
- * "Outlook: off", or the chosen SPC outlook with the times it is valid for, the areas it has (a color key) and a note when it could not be read.
- * The same outlook is drawn on every page; tapping the map adds what it says at that point to the read-out.
+ * "SPC outlook: off", or the kind chosen with the day it is for the frame on screen ([valid]: Day 2 for a frame two days out), the times that outlook is valid
+ * for, the areas it has (a color key) and a note when it could not be read. The polygons change as a loop plays, because each frame has its own day. The same
+ * kind is drawn on every page; tapping the map adds what the outlook says at that point to the read-out.
  */
 @Composable
-internal fun OutlookRow(state: OutlookState, onClick: () -> Unit) {
+internal fun OutlookRow(state: OutlookState, valid: Long?, onClick: () -> Unit) {
+    val now = System.currentTimeMillis() / 1000
+    val type = state.type
+    val choice = type?.let { outlookChoiceFor(it, valid ?: now, now) }
+    val loaded = choice?.let { state.loaded[it.id] }
     Column(Modifier.fillMaxWidth()) {
         TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp)) {
-            val choice = state.choice
-            val data = state.data
-            val now = System.currentTimeMillis() / 1000
             Text(
-                if (choice == null) "SPC outlook: off" else
-                    "SPC outlook: ${choice.label}" + (data?.valid?.let { v -> " · valid ${formatClock(v, now)}" + (data?.expires?.let { e -> " to ${formatClock(e, now)}" } ?: "") } ?: "") +
-                        if (state.busy) " · reading…" else "",
+                when {
+                    type == null -> "SPC outlook: off"
+                    choice == null -> "SPC outlook: ${type.label} \u00B7 none covers this time"
+                    else -> "SPC outlook: ${choice.label}" +
+                        (loaded?.data?.valid?.let { v -> " \u00B7 valid ${formatClock(v, now)}" + (loaded?.data?.expires?.let { e -> " to ${formatClock(e, now)}" } ?: "") } ?: "") +
+                        if (choice.id in state.reading) " \u00B7 reading\u2026" else ""
+                },
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        val shapes = state.data?.shapes.orEmpty().filter { !it.hatched }.distinctBy { it.title }
+        val shapes = loaded?.data?.shapes.orEmpty().filter { !it.hatched }.distinctBy { it.title }
         if (shapes.isNotEmpty()) {
             @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
             androidx.compose.foundation.layout.FlowRow(
@@ -58,37 +65,35 @@ internal fun OutlookRow(state: OutlookState, onClick: () -> Unit) {
                 }
             }
         }
-        state.note?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+        val note = choice?.let { state.notes[it.id] } ?: if (loaded != null && loaded.data.shapes.isEmpty()) "No risk areas in this outlook" else null
+        note?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
     }
 }
 
-/** The outlooks to choose from: none, or a day (1-3) and what it shows, or one of days 4-8. */
+/** The kinds of outlook map to choose from; the day comes from the time of the frame shown. */
 @Composable
-internal fun OutlookDialog(current: OutlookChoice?, onPick: (OutlookChoice?) -> Unit, onDismiss: () -> Unit) {
+internal fun OutlookDialog(current: OutlookType?, onPick: (OutlookType?) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
         title = { Text("SPC outlook") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                @Composable fun row(title: String, selected: Boolean, onClick: () -> Unit) {
-                    Text(title, Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 16.sp)
+                @Composable fun row(title: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
+                    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp)) {
+                        Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 16.sp)
+                        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     HorizontalDivider()
                 }
-                row("No outlook", current == null) { onPick(null) }
-                for (day in 1..8) {
-                    val choices = OutlookChoice.all.filter { it.day == day }
-                    if (day <= 3) {
-                        Text("Day $day", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                        for (c in choices) row(c.type.label, c == current) { onPick(c) }
-                    } else {
-                        if (day == 4) Text("Days 4 to 8", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                        for (c in choices) row("Day $day: chance of severe weather", c == current) { onPick(c) }
-                    }
-                }
+                row("No outlook", null, current == null) { onPick(null) }
+                row("Categorical risk", "Days 1-3; later days show the chance of severe weather", current == OutlookType.Categorical) { onPick(OutlookType.Categorical) }
+                row("Tornado chance", "Days 1-2; later days show the chance of severe weather", current == OutlookType.Tornado) { onPick(OutlookType.Tornado) }
+                row("Damaging wind chance", "Days 1-2; later days show the chance of severe weather", current == OutlookType.Wind) { onPick(OutlookType.Wind) }
+                row("Hail chance", "Days 1-2; later days show the chance of severe weather", current == OutlookType.Hail) { onPick(OutlookType.Hail) }
                 Text(
-                    "Areas the Storm Prediction Center outlines for severe weather on that day (categorical risk, or the chance within 25 miles of a point). " +
-                        "Drawn over the map on every page, in exports too. Unofficial copy: use spc.noaa.gov for the real outlooks.",
+                    "The Storm Prediction Center's outlook areas for the day the frame on screen falls in (Day 1 is the convective day, 12Z to 12Z, that contains now, up to " +
+                        "Day 8). In a loop the areas change as the frames move from day to day. Drawn on every page, in exports too. Unofficial copy: use spc.noaa.gov for the real outlooks.",
                     Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

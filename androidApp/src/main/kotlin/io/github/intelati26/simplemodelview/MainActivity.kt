@@ -227,7 +227,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
-            OutlookRow(outlookState, onClick = { outlookDialog = true })
+            OutlookRow(outlookState, s.times.getOrNull(s.timeIndex), onClick = { outlookDialog = true })
             LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
             s.style?.let { Legend(it, s.members) }
             if (s.times.size > 1) {
@@ -256,7 +256,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
 
     if (s.contactPrompt) ContactDialog(onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt)
     if (picker) ProductPicker(s.products, s.product, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
-    if (outlookDialog) OutlookDialog(outlookState.choice, onPick = { outlookDialog = false; AppContainer.outlook.set(it) }, onDismiss = { outlookDialog = false })
+    if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
         AlertDialog(

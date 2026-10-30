@@ -1,20 +1,26 @@
 # SPC outlook overlay, and a comparison with wxqt's MRMS overlays
 
 ## The outlook overlay (all pages)
-"SPC outlook" on the REFS, MRMS and NBM pages draws the Storm Prediction Center's outlook for a day over the map: the same choice on every page (it is
-saved), lowest level first so the higher ones lie on top, faint fill with an outline, hatched "significant" areas dashed. A color key and the valid times
-sit above the legend; tapping the map adds "SPC Day 1 categorical risk: Slight Risk" (or the probability) to the read-out; exports include it. Not drawn
-on the globes. The file is read again when a page returns to the screen and the data is older than 15 minutes.
+"SPC outlook" on the REFS, MRMS and NBM pages draws the Storm Prediction Center's outlook areas over the map. You choose a **kind** (categorical risk, tornado,
+damaging wind or hail chance); the **day comes from the valid time of the frame on screen**. Day 1 is the convective day (12Z to 12Z) that contains now, so
+an NBM frame two days out shows the Day 3 areas, and **in a loop the polygons change as the frames move from day to day** (a loop's days are fetched when Play
+starts, so they are ready). A radar scan is Day 1; a REFS forecast hour gets the day it falls in. A frame before today's convective day, or past Day 8, has no
+outlook ("none covers this time").
 
-| Day | Choices |
-|---|---|
-| 1, 2 | categorical risk; tornado, damaging wind, hail probabilities |
-| 3 | categorical risk; severe chance |
-| 4-8 | severe chance |
+| Frame falls in | Categorical | Tornado / wind / hail |
+|---|---|---|
+| Day 1, 2 | categorical risk | that hazard's chance |
+| Day 3 | categorical risk | severe chance |
+| Days 4-8 | severe chance | severe chance |
+
+Drawn lowest level first so the higher ones lie on top, faint fill with outline (holes stay empty), hatched "significant" areas dashed. A color key and the
+valid times of the outlook that applies sit above the legend; tapping the map adds "SPC Day 2 tornado: 5% Tornado Risk" to the read-out; exports include the
+outlook for each exported frame. Not drawn on the globes. Each file is read again when a page returns to the screen and it is over 15 minutes old.
 
 Source: SPC's public GIS data, `https://www.spc.noaa.gov/products/outlook/<name>.lyr.geojson` with names `day1otlk_cat`, `day1otlk_torn` / `_wind` / `_hail`, `day3otlk_prob`,
 `day4prob` ... `day8prob`. One feature per level with DN, LABEL, LABEL2, VALID / EXPIRE / ISSUE (yyyyMMddHHmm UTC) and `stroke` / `fill` colors; polygons and
-multipolygons, the first ring of each polygon its outer ring and the others holes (`Outlooks.kt`, tested with built samples).
+multipolygons, the first ring of each polygon its outer ring and the others holes (`Outlooks.kt`, tested with built samples; the day arithmetic is
+`outlookChoiceFor`).
 **Not checked against the live files:** this build environment cannot reach spc.noaa.gov, so the file names and property names are from SPC's published
 GIS documentation, not from a download. The parser skips anything it does not understand; if SPC's files differ, the overlay shows "No risk areas" or a
 "could not be read" note instead of drawing, and `Outlooks.kt` is the one place to adjust. The colors fall back to wxqt's day 1 map (MRGL dark green,

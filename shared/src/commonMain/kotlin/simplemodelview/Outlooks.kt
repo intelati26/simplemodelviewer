@@ -61,6 +61,30 @@ class OutlookShape(
 /** A loaded outlook: its areas and times (epoch seconds, any may be unknown). */
 class OutlookData(val shapes: List<OutlookShape>, val issued: Long?, val valid: Long?, val expires: Long?)
 
+/**
+ * The 12Z that starts the convective day containing [epoch] (the most recent 12Z at or before it). SPC's outlooks cover convective days, 12Z to 12Z: Day 1 is the
+ * one that contains "now", Day 2 the next, and so on to Day 8.
+ */
+fun convectiveDayStart(epoch: Long): Long = floorDiv(epoch - 12 * 3600L, 86400L) * 86400L + 12 * 3600L
+
+/**
+ * The outlook that covers a frame valid at [valid] when [now] is the current time, for the kind of map the user chose ([type]): the day is the convective day
+ * of [valid] counted from today's, and the file is the kind's own where SPC issues one. The hazard maps (tornado, wind, hail) exist for Days 1 and 2 only, and
+ * the categorical map for Days 1 to 3; every later day, and the hazards on Day 3, show the total severe chance. Null when no outlook covers the time (earlier
+ * than today's convective day, or past Day 8).
+ */
+fun outlookChoiceFor(type: OutlookType, valid: Long, now: Long): OutlookChoice? {
+    val day = ((convectiveDayStart(valid) - convectiveDayStart(now)) / 86400L).toInt() + 1
+    if (day !in 1..8) return null
+    val actual = when {
+        day >= 4 -> OutlookType.Probability
+        day == 3 -> if (type == OutlookType.Categorical) OutlookType.Categorical else OutlookType.Probability
+        type == OutlookType.Probability -> OutlookType.Categorical
+        else -> type
+    }
+    return OutlookChoice(day, actual)
+}
+
 object OutlookColors {
     private val categories = listOf("TSTM", "MRGL", "SLGT", "ENH", "MDT", "HIGH")
 

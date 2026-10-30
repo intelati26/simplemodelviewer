@@ -291,10 +291,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(busy = true, error = null) }
         val field = decode(file)
         val grid = field.grid
+        outlook.want(file.valid)
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook.state.value, v) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours)
         }
         view = v
         shown = product to field.values
@@ -311,7 +312,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val column = v.col0 + floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.row0 + v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon, _state.value.file?.valid)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -431,6 +432,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             update { it.copy(playing = true, prefetch = 0f) }
             val frames = st.frames
             val window = nbmLoopWindow(frames, st.loopSpanHours)
+            outlook.wantAll(window.map { frames[it].valid })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(frames.size)
             var finished = false
@@ -523,10 +525,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun areaImage(area: ShareArea, file: NbmFile): Triple<Bitmap, Product, Style> {
         val st = _state.value
         val field = decode(file, cache = false)
+        outlook.ensure(file.valid)
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook.state.value, box) + lightningDraws(core, AppContainer.lightning.state.value, box, null), contours = st.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid) + lightningDraws(core, AppContainer.lightning.state.value, box, null), contours = st.settings.contours)
         }
         return Triple(map, product, product.style)
     }

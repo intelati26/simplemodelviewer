@@ -276,11 +276,13 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (data.size < product.grid.cells) return   // the frame of the previous product is still loaded (another grid)
         val sector = _state.value.sector
         val members = _state.value.members
+        val valid = _state.value.times.getOrNull(_state.value.timeIndex)
+        outlook.want(valid)
         val (bitmap, style, v) = withContext(Dispatchers.Default) {
             val g = product.grid
             val v = if (sector.name == "CONUS") View.whole(g).decimated(if (_state.value.settings.dataSaver && g == Grid.REFS) 2 else 1) else sector.view(core, g)
             val style = withAutoStops(product.style, data)
-            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook.state.value, v) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours), style, v)
+            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours), style, v)
         }
         view = v
         update { it.copy(map = bitmap, style = style, busy = false) }
@@ -371,7 +373,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val column = view.col0 + floor(fx * view.cols).toInt().coerceIn(0, view.cols - 1)
         val row = view.row0 + view.rows - 1 - floor(fy * view.rows).toInt().coerceIn(0, view.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, data, it.members, column, row) + (outlook.readoutAt(lat, lon)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, data, it.members, column, row) + (outlook.readoutAt(lat, lon, _state.value.times.getOrNull(_state.value.timeIndex))?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -536,6 +538,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
             val window = loopWindow(st.times.size, st.loopLength)
+            outlook.wantAll(window.map { st.times[it] })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(st.times.size)
             var finished = false
@@ -629,7 +632,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             for ((k, t) in window.withIndex()) {
                 val data = repo.readFrame(s, product, t, st.member)
                 val style = withAutoStops(product.style, data)
-                val map = areaBitmap(area, product, style, data, st, v)
+                outlook.ensure(st.times[t])
+                val map = areaBitmap(area, product, style, data, st, v, st.times[t])
                 val hour = (st.times[t] - cycle.epochSeconds) / 3600
                 val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
                 var picture = renderer.shareImage(map, product, style, header, st.members)
@@ -648,12 +652,12 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The map picture of an export: a flat grid window, or the globe as turned now at export size. */
-    private fun areaBitmap(area: ShareArea, product: Product, style: Style, data: FloatArray, st: UiState, v: View = resolveView(area)): Bitmap =
+    private fun areaBitmap(area: ShareArea, product: Product, style: Style, data: FloatArray, st: UiState, v: View = resolveView(area), valid: Long? = st.times.getOrNull(st.timeIndex)): Bitmap =
         if (area == ShareArea.Globe && globeW > 0) {
             val size = 1500
             val h = size * globeH / globeW
             globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
-        } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook.state.value, v) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = st.settings.contours)
+        } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = st.settings.contours)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
@@ -662,6 +666,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val data = values ?: return@withContext null
         val cycle = st.cycle ?: return@withContext null
         val style = withAutoStops(product.style, data)
+        outlook.ensure(st.times.getOrNull(st.timeIndex))
         val map = areaBitmap(area, product, style, data, st)
         val header = "Run ${cycle.label}   Valid ${st.validLabel}" + (st.forecastHour?.let { "  (f${it.toString().padStart(2, '0')})" } ?: "") +
             "   Data: NOAA/NWS Storm Prediction Center (experimental)"

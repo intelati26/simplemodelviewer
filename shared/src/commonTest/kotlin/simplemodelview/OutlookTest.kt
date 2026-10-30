@@ -101,4 +101,26 @@ class OutlookTest {
         assertFailsWith<RefsException> { OutlookRepository(FakeHttp(500, "")).load(choice) }
         assertEquals(0, OutlookRepository(FakeHttp(200, """{"features":[]}""")).load(choice).shapes.size)
     }
+
+    @Test fun theOutlookDayFollowsTheValidTime() {
+        val now = epochOf(2026, 10, 30, 17, 40, 0)                       // Day 1 is 12Z on the 30th to 12Z on the 31st
+        assertEquals(epochOf(2026, 10, 30, 12, 0, 0), convectiveDayStart(now))
+        assertEquals(epochOf(2026, 10, 30, 12, 0, 0), convectiveDayStart(epochOf(2026, 10, 30, 12, 0, 0)))
+        assertEquals(epochOf(2026, 10, 29, 12, 0, 0), convectiveDayStart(epochOf(2026, 10, 30, 11, 59, 59)))
+        fun day(type: OutlookType, y: Int, m: Int, d: Int, h: Int) = outlookChoiceFor(type, epochOf(y, m, d, h, 0, 0), now)
+        assertEquals(OutlookChoice(1, OutlookType.Categorical), day(OutlookType.Categorical, 2026, 10, 30, 18))
+        assertEquals(OutlookChoice(1, OutlookType.Categorical), outlookChoiceFor(OutlookType.Categorical, now, now))
+        assertEquals(OutlookChoice(1, OutlookType.Categorical), day(OutlookType.Categorical, 2026, 10, 31, 11))        // still the 30th's convective day
+        assertEquals(OutlookChoice(2, OutlookType.Categorical), day(OutlookType.Categorical, 2026, 10, 31, 12))
+        assertEquals(OutlookChoice(2, OutlookType.Tornado), day(OutlookType.Tornado, 2026, 11, 1, 3))
+        assertEquals(OutlookChoice(3, OutlookType.Categorical), day(OutlookType.Categorical, 2026, 11, 1, 12))
+        assertEquals(OutlookChoice(3, OutlookType.Probability), day(OutlookType.Hail, 2026, 11, 1, 12))              // no hazard maps after Day 2
+        assertEquals(OutlookChoice(4, OutlookType.Probability), day(OutlookType.Categorical, 2026, 11, 2, 12))
+        assertEquals(OutlookChoice(8, OutlookType.Probability), day(OutlookType.Wind, 2026, 11, 6, 20))
+        assertNull(day(OutlookType.Categorical, 2026, 11, 7, 12))                                                   // past Day 8
+        assertNull(day(OutlookType.Categorical, 2026, 10, 30, 11))                                                  // before today's convective day
+        // each day of a 11-day NBM run gets the day it falls in
+        val days = (0..10).map { outlookChoiceFor(OutlookType.Categorical, now + it * 86400L, now)?.day }
+        assertEquals(listOf(1, 2, 3, 4, 5, 6, 7, 8, null, null, null), days)
+    }
 }
