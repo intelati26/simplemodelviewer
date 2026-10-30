@@ -1,0 +1,16 @@
+simplemodelview is licensed under the GNU General Public License v3 (see COPYING).
+
+Code
+- Parts of core/ (blosc/chunk decoding, grids, rasteriser) and the overlay drawing and LightningCast parsing are derived from wxqt-grib
+  (https://github.com/intelati26/wxqt-grib), GPLv3.
+- core/third_party/zstd: Zstandard single-file decompressor, Copyright (c) Meta Platforms, Inc. and affiliates, used under its BSD license
+  (core/third_party/zstd/LICENSE.txt; also available under GPLv2).
+- gradlew, gradlew.bat and gradle/wrapper: Gradle, Apache License 2.0.
+
+Map lines (androidApp/src/main/assets/statev2.f32, county.f32, ca.f32, mx.f32)
+- Taken from the wX project (GPLv3, https://gitlab.com/joshua.tee/wxl23). wX's own source for the underlying boundaries has not been
+  traced; if you know it, please record it here.
+
+Data (fetched at run time, not redistributed except small test fixtures)
+- NOAA / NWS: SPC REFS and outlooks, MRMS, National Blend of Models (public domain).
+- LightningCast: CIMSS / University of Wisconsin-Madison (https://cimss.ssec.wisc.edu); check their terms before redistributing.

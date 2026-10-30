@@ -33,7 +33,7 @@ LRU disk cache 100-200 MB; data-saver (half-res) mode.
 ## 6. Risks and decisions
 1. Unofficial data source -> read metadata not hard-coded names, schema check, **write to SPC before release**.
 2. Server load -> HTTP cache/ETags, no polling faster than new cycles, User-Agent with contact, limited parallelism.
-3. **[decide] License:** GPLv3 (reuse wxqt code, as this first pass does) vs clean re-implementation under a permissive license.
+3. **License (decided):** GPLv3, reusing wxqt code.
 4. Branding: no NOAA/NWS/SPC marks or implied endorsement; credit data; "experimental guidance" disclaimer.
 5. Mobile data cost -> data-saver, Wi-Fi-only prefetch.
 6. Play Store scrutiny for weather apps (disclaimers, no alert claims).

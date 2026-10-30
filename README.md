@@ -5,7 +5,7 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 
 **Data:** NOAA/NWS Storm Prediction Center (experimental guidance, not a warning or decision-support tool).
 **iOS** is best effort and untested on a real device (no Apple Developer membership); CI builds unsigned simulator builds only.
-**License:** GPLv3 while code derived from wxqt is included (decision pending, see outline section 6).
+**License:** GPLv3 (see `COPYING`); third-party code and data credits are in `NOTICE`.
 
 ## Layout
 | Path | State |

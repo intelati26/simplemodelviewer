@@ -76,7 +76,7 @@ Alternatives considered:
    address, one request per frame, a politeness limit on parallel downloads.
 3. **License.** wxqt is GPLv3, so a build that reuses its code must also be GPLv3 (fine for F-Droid / GitHub releases; Google Play allows
    GPL apps but needs the source offer and attention to the store terms). The alternative is a clean re-implementation (the algorithms are
-   public and small) under a permissive license. **Decision needed.** The vendored zstd is BSD / GPLv2 dual-licensed - fine either way.
+   public and small) under a permissive license. **Decided: GPLv3.** The vendored zstd is BSD / GPLv2 dual-licensed - fine either way.
 4. **Branding.** Name and icon must not imply NOAA / NWS / SPC endorsement or use their marks; credit "Data: NOAA/NWS Storm Prediction Center"
    in the app and store listing. Not a warning or decision-support tool: show a disclaimer and "experimental guidance" on the product pages.
 5. **Mobile data cost.** A loop is ~15 MB. Offer a data-saver (half-resolution frames: decimate the grid in the core, ~4x less memory; the
@@ -156,7 +156,7 @@ secrets and are only available to tag builds.
 
 ## 8. Open questions for the owner
 1. Name, and free / donation / paid? (No ads and no tracking is assumed.)
-2. License: GPLv3 (reuse the desktop code) or clean re-implementation under a permissive license?
+2. License: decided, GPLv3.
 3. Distribution: F-Droid / GitHub APK only, or Google Play too?
 4. Is the alert / notification feature wanted in v1? It is the biggest differentiator and the biggest source of complexity and liability.
 5. ~~iOS / Apple membership~~ - decided: no membership, iOS best effort (unsigned builds, Simulator-tested in CI).
