@@ -52,7 +52,7 @@ import simplemodelview.overlayThresholdChoices
 
 /** One line for the strip under the map: what is drawn over it ("Overlays: Rotation, Warnings, Day 2 tornado, LightningCast"), or "Overlays: none". */
 internal fun overlaySummary(
-    layers: List<OverlayLayer>, alertKinds: Set<AlertKind>, outlook: OutlookState, valid: Long?, lightning: LightningState,
+    layers: List<OverlayLayer>, alertKinds: Set<AlertKind>, outlook: OutlookState, valid: Long?, lightning: LightningState, contours: Boolean = false,
 ): String {
     val now = System.currentTimeMillis() / 1000
     val parts = buildList {
@@ -60,6 +60,7 @@ internal fun overlaySummary(
         if (alertKinds.isNotEmpty()) add(alertKinds.sortedBy { it.ordinal }.joinToString(", ") { it.label })
         outlook.type?.let { add(outlookChoiceFor(it, valid ?: now, now)?.label ?: it.label) }
         if (lightning.enabled) add("LightningCast")
+        if (contours) add("Contours")
     }
     return if (parts.isEmpty()) "Overlays: none" else "Overlays: " + parts.joinToString(", ")
 }
@@ -76,6 +77,7 @@ internal fun OverlayTreeDialog(
     alertKinds: Set<AlertKind>, alertsAsOf: Long?, alertNote: String?, newestOnly: Boolean, onAlertKinds: (Set<AlertKind>) -> Unit,
     outlook: OutlookState, valid: Long?, onOutlook: (OutlookType?) -> Unit,
     lightning: LightningState, onLightning: (Boolean) -> Unit,
+    contours: Boolean, contoursAvailable: Boolean, onContours: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var open by remember { mutableStateOf(emptySet<String>()) }
@@ -176,6 +178,19 @@ internal fun OverlayTreeDialog(
                         }
                         if (lightning.busy) Note("Reading…")
                         if (lightning.enabled) lightning.note?.let { Note(it, true) }
+                    }
+                    // contours
+                    TreeNode("Contours", if (!contoursAvailable) "none for this field" else if (contours) "on" else "off", "contours" in open, { toggle("contours") }) {
+                        Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Lines of equal value", fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (contoursAvailable) "Smoothed lines over the field, the freezing level and the 32 F line drawn heavier" else "This field has no contour lines; temperatures, heights and pressure do",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = contours, onCheckedChange = onContours, enabled = contoursAvailable || contours)
+                        }
                     }
                 }
             }
