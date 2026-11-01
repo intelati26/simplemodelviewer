@@ -117,7 +117,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", onViewport = vm::setViewport, onTap = vm::onTap)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
                 else -> CircularProgressIndicator()
             }
         }
@@ -147,7 +147,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                     SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
-                MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.cellKilometers)
+                MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.detail?.cellKilometers ?: s.cellKilometers)
             }
         }
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) {

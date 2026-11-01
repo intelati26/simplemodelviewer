@@ -70,6 +70,9 @@ import java.io.File
 import kotlin.math.ceil
 import kotlin.math.floor
 
+/** A finer picture of the part of the map that is zoomed into, drawn over the whole-sector picture; the edges are fractions of that picture (top-down). */
+class DetailLayer(val bitmap: Bitmap, val left: Float, val top: Float, val right: Float, val bottom: Float, val cellKilometers: Double)
+
 /** The MRMS page: a product, a sector (or the globe), the newest scans of that product and the one being shown. */
 data class MrmsState(
     val busy: Boolean = true,
@@ -80,6 +83,7 @@ data class MrmsState(
     val files: List<MrmsFile> = emptyList(),
     val index: Int = 0,
     val map: Bitmap? = null,
+    val detail: DetailLayer? = null,
     val style: Style? = null,
     val crosshair: Pair<Float, Float>? = null,   // fractions (0..1) of the picture
     val tapLatLon: Pair<Double, Double>? = null,
@@ -122,6 +126,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     private var dark = false
     private var frameJob: Job? = null
+    private var detailJob: Job? = null
     private var playJob: Job? = null
     private var shown: Pair<Product, FloatArray>? = null     // what the picture shows, for the read-out
     private var shownGrid: Grid? = null                      // the grid of what the (flat or globe) picture shows
@@ -496,8 +501,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // a meso sector keeps every cell of the files (1 km, rotation 500 m); the whole of CONUS is too wide for that, and gets finer cells as it is zoomed into (see scheduleDetail)
     private fun stepFor(product: MrmsProduct, sector: Sector) =
-        mrmsStep(product.cellDegrees, sector.west, sector.east, 2000, dataSaver)
+        mrmsStep(product.cellDegrees, sector.west, sector.east, if (sector.east - sector.west > 30.0) 3500 else 3000, dataSaver)
 
     // the globe shows everything the files cover (20-55 N, 130-60 W) at about 1400 cells across
     private val globeBox = doubleArrayOf(-130.0, 20.0, -60.0, 55.0)
@@ -544,8 +550,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         shownGrid = grid
         shown = synthetic to window.values
         shownOverlays = ov.map { it.shown }
-        update { it.copy(map = bitmap, style = synthetic.style, busy = false, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = st.overlays.map { l -> styleForLayer(l) }, overlayInfo = overlayInfoFor(ov)) }
+        update { it.copy(map = bitmap, detail = null, style = synthetic.style, busy = false, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = st.overlays.map { l -> styleForLayer(l) }, overlayInfo = overlayInfoFor(ov)) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
+        scheduleDetail()
     }
 
     private fun synthetic(product: MrmsProduct, grid: Grid) =
@@ -606,6 +613,71 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        scheduleDetail()
+    }
+
+    /**
+     * When the picture is zoomed into and its cells are coarser than the files', decode the visible part afresh at the finest step that
+     * fits (as an export of the screen area does) and show it over the overview once the zoom has settled. Meso sectors are already at
+     * every cell, so this is mostly CONUS.
+     */
+    private fun scheduleDetail() {
+        detailJob?.cancel()
+        val st = _state.value
+        val v = view
+        val file = st.file
+        val (l, t, r, b) = viewport.toList()
+        val zoomedIn = (r - l) * (b - t) < 0.5f
+        if (!zoomedIn || v == null || file == null || st.globe || st.playing || st.map == null || stepFor(st.product, st.sector) <= 1) {
+            if (st.detail != null) update { it.copy(detail = null) }
+            return
+        }
+        val product = st.product
+        val sector = st.sector
+        detailJob = viewModelScope.launch {
+            delay(400)
+            try {
+                val layer = detailLayer(product, file, v)
+                val now = _state.value
+                if (now.file?.key == file.key && now.product == product && now.sector == sector && !now.globe && view === v) update { it.copy(detail = layer) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
+    }
+
+    private suspend fun detailLayer(product: MrmsProduct, file: MrmsFile, v: View): DetailLayer? {
+        val w = visibleWindow(v)
+        val step = mrmsStep(product.cellDegrees, w.west, w.east, 3500, false)
+        val crop = core.planLambertCrop(v.grid, w.colMin, w.rowMin, w.colMax, w.rowMax, lambertCellMeters(product.cellDegrees * step, w.south, w.north)) ?: return null
+        val coords = doubleArrayOf(w.west - 0.05, w.south - 0.05, w.east + 0.05, w.north + 0.05)
+        val frame = decode(product, file, "detail", coords, step, cache = false, target = FrameTarget.Onto(crop))
+        val g2 = frame.window.grid
+        val box = View("Detail", 0, 0, g2.columns, g2.rows, pixelScale(g2), 1, g2)
+        val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
+        val synthetic = synthetic(product, g2)
+        val bitmap = withContext(Dispatchers.Default) {
+            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product))
+        }
+        val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
+        return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
+    }
+
+    /** The cells of the shown (Lambert) grid that are on screen, and the lat / lon box that surely covers them. */
+    private class VisibleWindow(val colMin: Double, val rowMin: Double, val colMax: Double, val rowMax: Double, val south: Double, val north: Double, val west: Double, val east: Double)
+
+    private fun visibleWindow(v: View): VisibleWindow {
+        val (l, t, r, b) = viewport.toList()
+        val g = v.grid
+        val colMin = floor(l * g.columns).toDouble(); val colMax = ceil(r * g.columns) - 1.0
+        val rowMin = floor((1f - b) * g.rows).toDouble(); val rowMax = ceil((1f - t) * g.rows) - 1.0
+        var south = 90.0; var north = -90.0; var west = 360.0; var east = -360.0
+        for (k in 0..24) {
+            val f = k / 24.0
+            for ((c, rr) in listOf(colMin + f * (colMax - colMin) to rowMin, colMin + f * (colMax - colMin) to rowMax, colMin to rowMin + f * (rowMax - rowMin), colMax to rowMin + f * (rowMax - rowMin))) {
+                val ll = core.gridToLatLon(g, c, rr)
+                south = minOf(south, ll[0]); north = maxOf(north, ll[0]); west = minOf(west, ll[1]); east = maxOf(east, ll[1])
+            }
+        }
+        return VisibleWindow(colMin, rowMin, colMax, rowMax, south, north, west, east)
     }
 
     // ---- the globe ----
@@ -863,18 +935,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val overlayResults: List<OverlayResult>
         if (area == ShareArea.Screen && v != null) {
             // the visible part: a window of the shown (Lambert) grid, with the lat / lon box that surely covers it decoded and put onto it
-            val (l, t, r, b) = viewport.toList()
             val g = v.grid
-            val colMin = floor(l * g.columns).toDouble(); val colMax = ceil(r * g.columns) - 1.0
-            val rowMin = floor((1f - b) * g.rows).toDouble(); val rowMax = ceil((1f - t) * g.rows) - 1.0
-            var south = 90.0; var north = -90.0; var west = 360.0; var east = -360.0
-            for (k in 0..24) {
-                val f = k / 24.0
-                for ((c, rr) in listOf(colMin + f * (colMax - colMin) to rowMin, colMin + f * (colMax - colMin) to rowMax, colMin to rowMin + f * (rowMax - rowMin), colMax to rowMin + f * (rowMax - rowMin))) {
-                    val ll = core.gridToLatLon(g, c, rr)
-                    south = minOf(south, ll[0]); north = maxOf(north, ll[0]); west = minOf(west, ll[1]); east = maxOf(east, ll[1])
-                }
-            }
+            val w = visibleWindow(v)
+            val colMin = w.colMin; val rowMin = w.rowMin; val colMax = w.colMax; val rowMax = w.rowMax
+            val south = w.south; val north = w.north; val west = w.west; val east = w.east
             val step = mrmsStep(product.cellDegrees, west, east, 2400, false)
             val crop = core.planLambertCrop(g, colMin, rowMin, colMax, rowMax, lambertCellMeters(product.cellDegrees * step, south, north)) ?: return Pair(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), style)
             val coords = doubleArrayOf(west - 0.05, south - 0.05, east + 0.05, north + 0.05)
