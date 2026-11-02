@@ -121,7 +121,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                 else -> CircularProgressIndicator()
             }
         }
-        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) {
+        val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -150,7 +150,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                 MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.detail?.cellKilometers ?: s.cellKilometers)
             }
         }
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) {
+        val readoutBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             for (shape in s.alertHits.take(3)) AlertCard(shape, onRead = { vm.showAlertText(shape) })
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -159,6 +159,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+        }
+        val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
             OverlayRow(s.overlays, s.overlayStyles, onPick = { overlayDialog = true }, onThreshold = vm::setOverlayThreshold, onClear = { vm.pickOverlay(null) })
             AlertsRow(s.alertKinds, s.alertsAsOf, s.alertNote, newestOnly = s.index != s.files.lastIndex, onClick = { alertsDialog = true })
@@ -180,6 +182,13 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                 }
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+        }
+        if (s.settings.minimalUi) MinimalChrome(
+            s.file?.let { "Valid at ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}  ${s.index + 1}/${s.files.size}" + if (s.live && s.index == s.files.size - 1) "  \u25CF" else "" } ?: "",
+            s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
+        ) else {
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }
     }
 

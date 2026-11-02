@@ -108,7 +108,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private inline fun update(f: (NbmState) -> NbmState) { _state.value = f(_state.value) }
 
     private fun readSettings() = Settings(
-        prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true),
+        prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false),
     )
 
     private val dataSaver get() = prefs.getBoolean("data_saver", false)
@@ -117,7 +117,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing) showFrame() } }
+        viewModelScope.launch { overlayChanges(lightning = false).collect { if (shown != null && !_state.value.playing) showFrame() } }
     }
 
     /** The other pages may have changed favorites, places or settings while this page was away. */
@@ -295,7 +295,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid), contours = _state.value.settings.contours)
         }
         view = v
         shown = product to field.values
@@ -353,7 +353,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).apply()
+            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver || settings.contours != _state.value.settings.contours
         update { it.copy(settings = settings) }
         if (redraw && shown != null) showFrame()
@@ -384,7 +384,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val b = text?.let { SettingsBackup.decode(it) }
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
-        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours))
+        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours, current.minimalUi))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
@@ -529,7 +529,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid) + lightningDraws(core, AppContainer.lightning.state.value, box, null), contours = st.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid), contours = st.settings.contours)
         }
         return Triple(map, product, product.style)
     }
