@@ -116,7 +116,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun readSettings() = Settings(
         prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false),
-    )
+    ).withDisplayPrefs(prefs)
 
     private val dataSaver get() = prefs.getBoolean("data_saver", false)
     private val wifiOnlyLoop get() = prefs.getBoolean("wifi_only", false)
@@ -307,7 +307,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid), contours = _state.value.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity)
         }
         view = v
         shown = product to field.values
@@ -438,8 +438,8 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).apply()
-        val redraw = settings.dataSaver != _state.value.settings.dataSaver || settings.contours != _state.value.settings.contours
+            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).putDisplay(settings).apply()
+        val redraw = settings.dataSaver != _state.value.settings.dataSaver || settings.contours != _state.value.settings.contours || settings.displayDiffers(_state.value.settings)
         update { it.copy(settings = settings) }
         if (redraw && shown != null) showFrame()
     }
@@ -469,7 +469,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val b = text?.let { SettingsBackup.decode(it) }
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
-        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours, current.minimalUi))
+        setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
@@ -622,7 +622,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid), contours = st.settings.contours)
+            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
         }
         return Triple(map, product, product.style)
     }

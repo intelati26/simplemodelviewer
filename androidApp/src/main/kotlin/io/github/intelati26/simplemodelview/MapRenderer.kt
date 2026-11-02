@@ -33,7 +33,7 @@ class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0): Bitmap {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
@@ -54,23 +54,24 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 canvas.drawBitmap(overlay.bitmap, null, r, paint)
             }
         }
-        lines.draw(canvas, view, dark)
+        lines.draw(canvas, view, dark, counties)
         if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContours(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
         WindProducts.level(product.id)?.let { level ->
-            if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours)
+            if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity)
         }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
     }
 
     /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
-    private fun drawWind(canvas: Canvas, product: Product, values: FloatArray, level: Int, view: View, dark: Boolean, pictureWidth: Int, contours: Boolean) {
+    private fun drawWind(canvas: Canvas, product: Product, values: FloatArray, level: Int, view: View, dark: Boolean, pictureWidth: Int, contours: Boolean, barbDensity: Int) {
         val cells = product.grid.cells
         if (contours) Contours.specFor("z$level", "m")?.let { spec ->
             val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
             drawContours(canvas, lines, spec.color, dark, pictureWidth)
         }
-        val spacing = pictureWidth / 30f
+        // barbs per picture width: 10 (sparse) to 30 (dense)
+        val spacing = pictureWidth / (when (barbDensity) { 1 -> 10f; 2 -> 15f; 3 -> 20f; 4 -> 25f; else -> 30f })
         val barbs = WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.85f)
         val width = maxOf(1.5f, pictureWidth / 900f)
         val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()

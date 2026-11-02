@@ -160,7 +160,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun readSettings() = Settings(
         prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false),
-    )
+    ).withDisplayPrefs(prefs)
 
     private fun readUnits() = Units(prefs.getBoolean("u_metric_length", false), prefs.getBoolean("u_celsius", false), prefs.getBoolean("u_km", false))
 
@@ -545,7 +545,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
         outlook.want(file.validTime)
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product)) }
+        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -655,7 +655,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
         val synthetic = synthetic(product, g2)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product))
+            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product))
         }
         val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
         return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
@@ -772,9 +772,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).apply()
+            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).putDisplay(settings).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver
-        val linesChanged = settings.contours != _state.value.settings.contours
+        val linesChanged = settings.contours != _state.value.settings.contours || settings.displayDiffers(_state.value.settings)
         update { it.copy(settings = settings) }
         if (redraw) { decoded.clear(); if (shown != null) showFrame() } else if (linesChanged && shown != null) showFrame()
     }
@@ -804,7 +804,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val b = text?.let { SettingsBackup.decode(it) }
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
-        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours, current.minimalUi))
+        setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         b.product?.let { prefs.edit().putString("product", it).apply() }       // (the SPC page's own choices)
         b.sector?.let { prefs.edit().putString("sector", it).apply() }
@@ -955,7 +955,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         outlook.ensure(file.validTime)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, halo = mrmsHasHalo(product))
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
         }
         return bitmap to style
     }

@@ -279,7 +279,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
         onGo = { places = false; vm.goToPlace(it) },
         onDelete = vm::deletePlace,
     )
-    if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true) { settings = false }
+    if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
         initialSize = vm.videoSize,
@@ -516,7 +516,7 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
 @Composable
 internal fun SettingsDialog(
     settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
-    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, showContours: Boolean = false, onDismiss: () -> Unit,
+    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, showContours: Boolean = false, showBarbs: Boolean = false, onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -535,6 +535,27 @@ internal fun SettingsDialog(
                 }
                 if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors (REFS), and for the freezing level and model temperatures (MRMS).", settings.contours) {
                     onChange(settings.copy(contours = it))
+                }
+                if (showBarbs) Column {
+                    Text("Wind barb spacing")
+                    androidx.compose.material3.Slider(
+                        value = settings.barbDensity.toFloat(),
+                        onValueChange = { v -> val d = Math.round(v).coerceIn(1, 5); if (d != settings.barbDensity) onChange(settings.copy(barbDensity = d)) },
+                        valueRange = 1f..5f, steps = 3,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Sparse", style = MaterialTheme.typography.labelSmall); Text("Dense", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Column {
+                    Text("County lines")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((mode, name) in listOf(0 to "Auto", 1 to "Always", 2 to "Never")) FilterChip(settings.counties == mode, { onChange(settings.copy(counties = mode)) }, label = { Text(name) })
+                    }
+                    Text("Auto draws them when the map is zoomed to a sector.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
+                    onChange(settings.copy(optionsInExport = it))
                 }
                 Column {
                     Text("Cache size (applies on the next launch)")
