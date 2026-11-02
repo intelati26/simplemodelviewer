@@ -13,6 +13,8 @@ import simplemodelview.Product
 import simplemodelview.Stop
 import simplemodelview.Style
 import simplemodelview.View
+import simplemodelview.WindBarbs
+import simplemodelview.WindProducts
 import simplemodelview.fixed
 
 /** A second field drawn over the data (under the map lines): [bitmap] has one pixel per cell of its own window and is stretched onto [dst], in pixels of the base picture. */
@@ -54,8 +56,41 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         lines.draw(canvas, view, dark)
         if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContours(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
+        WindProducts.level(product.id)?.let { level ->
+            if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours)
+        }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
+    }
+
+    /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
+    private fun drawWind(canvas: Canvas, product: Product, values: FloatArray, level: Int, view: View, dark: Boolean, pictureWidth: Int, contours: Boolean) {
+        val cells = product.grid.cells
+        if (contours) Contours.specFor("z$level", "m")?.let { spec ->
+            val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
+            drawContours(canvas, lines, spec.color, dark, pictureWidth)
+        }
+        val spacing = pictureWidth / 30f
+        val barbs = WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.85f)
+        val width = maxOf(1.5f, pictureWidth / 900f)
+        val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()
+        val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val path = android.graphics.Path()
+        val flags = android.graphics.Path()
+        for (b in barbs) {
+            var i = 0
+            while (i + 3 < b.lines.size) { path.moveTo(b.lines[i], b.lines[i + 1]); path.lineTo(b.lines[i + 2], b.lines[i + 3]); i += 4 }
+            i = 0
+            while (i + 5 < b.pennants.size) {
+                flags.moveTo(b.pennants[i], b.pennants[i + 1]); flags.lineTo(b.pennants[i + 2], b.pennants[i + 3]); flags.lineTo(b.pennants[i + 4], b.pennants[i + 5]); flags.close()
+                i += 6
+            }
+        }
+        line.strokeWidth = width + 2.5f; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
+        line.strokeWidth = width; line.color = ink; canvas.drawPath(path, line)
+        fill.color = ink; canvas.drawPath(flags, fill)
     }
 
     /** Contour lines over the data and the map lines: a halo under each line so it reads on any color, heavier for the bold levels, one label per level. */

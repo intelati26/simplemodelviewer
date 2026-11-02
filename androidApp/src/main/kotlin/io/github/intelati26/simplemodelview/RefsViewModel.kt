@@ -57,7 +57,7 @@ sealed class ShareArea {
     data class Meso(val sector: Sector) : ShareArea()
 }
 
-data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150, val contactEmail: String = "", val contours: Boolean = true)
+data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150, val contactEmail: String = "", val contours: Boolean = true, val minimalUi: Boolean = false)
 
 data class UiState(
     val busy: Boolean = true,
@@ -120,7 +120,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = kotlinx.coroutines.flow.MutableStateFlow(
         UiState(
             favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(),
-            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
+            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false)),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
             loopLength = prefs.getInt("loop_frames", 0),
@@ -134,7 +134,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     fun reloadFromPrefs() = update {
         it.copy(
             favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()),
-            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty()),
+            settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false)),
         )
     }
 
@@ -143,7 +143,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges().collect { if (values != null && !_state.value.globe) rerender() } }
+        viewModelScope.launch { overlayChanges(lightning = false).collect { if (values != null && !_state.value.globe) rerender() } }
     }
 
     fun load() {
@@ -282,7 +282,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             val g = product.grid
             val v = if (sector.name == "CONUS") View.whole(g).decimated(if (_state.value.settings.dataSaver && g == Grid.REFS) 2 else 1) else sector.view(core, g)
             val style = withAutoStops(product.style, data)
-            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = _state.value.settings.contours), style, v)
+            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours), style, v)
         }
         view = v
         update { it.copy(map = bitmap, style = style, busy = false) }
@@ -381,7 +381,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).apply()
+            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).apply()
         val redraw = settings.dataSaver != _state.value.settings.dataSaver || settings.contours != _state.value.settings.contours
         update { it.copy(settings = settings) }
         if (redraw && values != null) viewModelScope.launch { rerender() }
@@ -415,7 +415,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val b = text?.let { SettingsBackup.decode(it) }
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
         val current = _state.value.settings
-        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours))
+        setSettings(Settings(b.wifiOnlyLoop, b.dataSaver, b.cacheMegabytes, b.contactEmail.ifEmpty { current.contactEmail }, current.contours, current.minimalUi))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
@@ -657,7 +657,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             val size = 1500
             val h = size * globeH / globeW
             globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
-        } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid) + lightningDraws(core, AppContainer.lightning.state.value, v, null), contours = st.settings.contours)
+        } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid), contours = st.settings.contours)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {

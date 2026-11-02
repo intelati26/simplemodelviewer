@@ -221,7 +221,10 @@ internal fun lightningDraws(core: Core, state: LightningState, view: View, at: L
     }
 }
 
-/** Emits when something that changes the overlays' pictures changes (a new outlook or scan, or a choice), so a page redraws. The current state is not emitted. */
-internal fun overlayChanges(): kotlinx.coroutines.flow.Flow<List<Any?>> =
-    kotlinx.coroutines.flow.combine(AppContainer.outlook.state, AppContainer.lightning.state) { o, l -> listOf(o.type, o.version, l.enabled, l.asOf) }
+/**
+ * Emits when something that changes the overlays' pictures changes (a new outlook or scan, or a choice), so a page redraws. The current state is not
+ * emitted. [lightning]: LightningCast counts too (the MRMS page only: it is a now-and-next-hour product, so the model pages do not draw it).
+ */
+internal fun overlayChanges(lightning: Boolean = true): kotlinx.coroutines.flow.Flow<List<Any?>> =
+    kotlinx.coroutines.flow.combine(AppContainer.outlook.state, AppContainer.lightning.state) { o, l -> if (lightning) listOf(o.type, o.version, l.enabled, l.asOf) else listOf(o.type, o.version) }
         .distinctUntilChanged().drop(1)

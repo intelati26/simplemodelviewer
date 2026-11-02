@@ -51,6 +51,7 @@ object Groups {
         id.startsWith("grefs-") || id.startsWith("refsct-") -> GUIDANCE
         hasMembers -> MEMBERS
         id.startsWith("s10m_01h") || id.startsWith("rh2m") || id.startsWith("fosberg") || id.startsWith("gust") -> FIRE
+        WindProducts.isWind(id) -> SYNOPTIC
         listOf("z500", "z700", "z850", "t500", "t700", "t850", "t2m", "td2m", "pmsl", "cld_", "pwat").any { id.startsWith(it) } -> SYNOPTIC
         listOf("sbcape", "mucape", "sbcinh", "srh", "shrmag", "stp").any { id.startsWith(it) } -> SEVERE
         id.startsWith("snow") || id.startsWith("frzr") -> WINTER
@@ -146,7 +147,20 @@ object Catalog {
 
     /** Every displayable field of a store (3-D / 4-D on the CONUS grid), in menu order: groups, then SPC's order within a group. */
     fun build(arrays: Collection<ArrayInfo>): List<Product> =
-        arrays.filter { it.isGridField && it.name != "ptype_consensus" }   // (precipitation-type codes have no documented key)
-            .map(::describe)
+        (arrays.filter { it.isGridField && it.name != "ptype_consensus" }   // (precipitation-type codes have no documented key)
+            .map(::describe) + windProducts(arrays))
             .sortedWith(compareBy<Product>({ Groups.ordered.indexOf(it.group) }, { curatedOrder[it.id] ?: Int.MAX_VALUE }, { it.id }))
+
+    /** The wind products of the levels whose height, u and v arrays are all in the store (see [WindProducts]). */
+    private fun windProducts(arrays: Collection<ArrayInfo>): List<Product> {
+        val byName = arrays.associateBy { it.name }
+        return WindProducts.levels.mapNotNull { level ->
+            val (z, u, v) = WindProducts.sources(level)
+            val height = byName[z]?.takeIf { it.isGridField } ?: return@mapNotNull null
+            if (byName[u]?.isGridField != true || byName[v]?.isGridField != true) return@mapNotNull null
+            val id = WindProducts.id(level)
+            Product(id, curated.getValue(id), Groups.SYNOPTIC, Style(Kind.Banded, Palettes.upperWind, hideBelow = 10.0, units = "kt", digits = 0),
+                hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
+        }
+    }
 }

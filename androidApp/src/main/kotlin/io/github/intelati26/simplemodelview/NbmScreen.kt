@@ -83,7 +83,6 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
     var savingPlace by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
-    val lightningState by AppContainer.lightning.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -92,7 +91,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
     }
-    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); AppContainer.lightning.refreshIfStale(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
     val dark = isSystemInDarkTheme()
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
@@ -114,7 +113,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                 else -> CircularProgressIndicator()
             }
         }
-        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) {
+        val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -148,7 +147,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                 NbmTimesLine(s.cycle, s.file)
             }
         }
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) {
+        val readoutBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -156,8 +155,9 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+        }
+        val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
-            LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -170,6 +170,12 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                 }
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+        }
+        if (s.settings.minimalUi) MinimalChrome(
+            s.file?.let { nbmFrameLabel(it) + "  ${s.index + 1}/${s.frames.size}" } ?: "", s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
+        ) else {
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }
     }
 

@@ -23,8 +23,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import simplemodelview.GlobeCamera
 import simplemodelview.globeForward
 import simplemodelview.visibleFractions
@@ -36,7 +38,7 @@ import simplemodelview.visibleFractions
 @Composable
 internal fun ZoomableMap(
     bitmap: android.graphics.Bitmap, crosshair: Pair<Float, Float>?, description: String,
-    onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
+    detail: DetailLayer? = null, onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
 ) {
     var scale by remember(bitmap.width, bitmap.height) { mutableStateOf(1f) }
     var offset by remember(bitmap.width, bitmap.height) { mutableStateOf(Offset.Zero) }
@@ -88,6 +90,15 @@ internal fun ZoomableMap(
                 },
         ) {
             Image(image, contentDescription = description, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+            // a finer picture of the zoomed-in part, over the overview
+            detail?.let { d ->
+                val detailImage = remember(d) { d.bitmap.asImageBitmap() }
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = this.size.width; val h = this.size.height   // this.size: the picture's, not the screen's `size` above
+                    val x = (d.left * w).roundToInt(); val y = (d.top * h).roundToInt()
+                    drawImage(detailImage, dstOffset = IntOffset(x, y), dstSize = IntSize((d.right * w).roundToInt() - x, (d.bottom * h).roundToInt() - y))
+                }
+            }
             crosshair?.let { (fx, fy) ->
                 Canvas(Modifier.fillMaxSize()) {
                     val x = fx * this.size.width

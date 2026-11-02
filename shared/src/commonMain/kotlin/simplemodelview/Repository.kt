@@ -72,6 +72,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
 
     /** Like [readFrame], with the time the server says the frame's file was uploaded. */
     suspend fun readFrameTimed(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int): Frame {
+        WindProducts.level(product.id)?.let { return readWind(store, product, it, timeIndex) }
         val array = store.arrays.getValue(product.id)
         val index = if (product.hasMembers) listOf(memberIndex, timeIndex, 0, 0) else listOf(timeIndex, 0, 0)
         val cells = product.grid.cells
@@ -83,8 +84,29 @@ class RefsRepository(private val http: Http, private val core: Core) {
         }
     }
 
+    /** A wind product's frame: the height, u and v chunks of one time, fetched together and packed (see [WindProducts.pack]); all NaN if one is missing. */
+    private suspend fun readWind(store: CycleStore, product: Product, level: Int, timeIndex: Int): Frame {
+        val cells = product.grid.cells
+        val (z, u, v) = WindProducts.sources(level)
+        val fetched = coroutineScope {
+            listOf(z, u, v).map { name -> async { store.arrays.getValue(name).let { a -> a to fetchChunk(store.cycle, a, listOf(timeIndex, 0, 0)) } } }.awaitAll()
+        }
+        if (fetched.any { it.second == null }) return Frame(FloatArray(cells * WindProducts.PLANES) { Float.NaN }, null)
+        val planes = try {
+            fetched.map { (array, chunk) -> core.decodeFloats(chunk!!.body, array.dtype, array.compressed, cells) }
+        } catch (e: Exception) {
+            throw RefsException("could not decode ${product.id}: ${e.message}")
+        }
+        return Frame(WindProducts.pack(cells, planes[0], planes[1], planes[2]), fetched[1].second?.lastModified)
+    }
+
     /** Downloads a frame's chunk without decoding it, so an HTTP cache has it for the loop. */
     suspend fun prefetchFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int) {
+        WindProducts.level(product.id)?.let { level ->
+            val (z, u, v) = WindProducts.sources(level)
+            for (name in listOf(z, u, v)) fetchChunk(store.cycle, store.arrays.getValue(name), listOf(timeIndex, 0, 0))
+            return
+        }
         val array = store.arrays.getValue(product.id)
         fetchChunk(store.cycle, array, if (product.hasMembers) listOf(memberIndex, timeIndex, 0, 0) else listOf(timeIndex, 0, 0))
     }

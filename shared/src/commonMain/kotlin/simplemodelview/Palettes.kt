@@ -33,6 +33,8 @@ internal object Palettes {
     val cin = bands(listOf(25, 50, 75, 100, 150, 200, 300), listOf(0xdeebf7, 0xc6dbef, 0x9ecae1, 0x6baed6, 0x3182bd, 0x08519c, 0x08306b))
     fun windSpeed(scale: Double) = bands(listOf(10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80).map { it * scale },
         listOf(0xdeebf7, 0xc6dbef, 0x9ecae1, 0x74c476, 0xfff078, 0xfdd24a, 0xfdae61, 0xf46d43, 0xd7191c, 0xae017e, 0x6a3d9a))
+    val upperWind = bands(listOf(10, 20, 30, 40, 50, 60, 70, 80, 100, 120),
+        listOf(0xdeebf7, 0xc6dbef, 0x9ecae1, 0x74c476, 0xfff078, 0xfdd24a, 0xfdae61, 0xf46d43, 0xd7191c, 0xae017e))
     val updraftSpeed = bands(listOf(10, 15, 20, 25, 30, 35, 40, 50, 60),
         listOf(0xc6dbef, 0x9ecae1, 0x74c476, 0xfff078, 0xfdae61, 0xf46d43, 0xd7191c, 0xae017e, 0x6a3d9a))
     val stp = bands(listOf(0.5, 1, 2, 3, 4, 6, 8, 10), listOf(0xc7e9c0, 0xfff078, 0xfdae61, 0xf46d43, 0xd7191c, 0xae017e, 0x6a3d9a, 0x3f007d))

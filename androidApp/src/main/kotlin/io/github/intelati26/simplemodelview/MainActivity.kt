@@ -149,7 +149,6 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
-    val lightningState by AppContainer.lightning.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
     // settings export / import go through the system file pickers: the app needs no storage permission
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -158,7 +157,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
     }
-    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); AppContainer.lightning.refreshIfStale(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
 
     val dark = isSystemInDarkTheme()
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)     // the map picture's own background: no dead white around it
@@ -219,7 +218,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
                 }
             }
         }
-        val foot: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+        val readoutBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -227,8 +226,9 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+        }
+        val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             OutlookRow(outlookState, s.times.getOrNull(s.timeIndex), onClick = { outlookDialog = true })
-            LightningCastRow(lightningState, onToggle = { AppContainer.lightning.setEnabled(!lightningState.enabled) })
             s.style?.let { Legend(it, s.members) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -242,7 +242,14 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
-        if (wide) {
+        val foot: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = { readoutBlock(); controlsBlock() }
+        if (s.settings.minimalUi) {
+            mapArea(Modifier.fillMaxSize())
+            MinimalChrome(
+                listOfNotNull(s.cycle?.let { "Run ${it.label}" }, s.validLabel.takeIf { it.isNotEmpty() }?.let { "Valid $it" }, s.forecastHour?.let { "f${it.toString().padStart(2, '0')}" }).joinToString("  "),
+                s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
+            )
+        } else if (wide) {
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.width(380.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())) { head(); foot() }
                 mapArea(Modifier.weight(1f).fillMaxHeight())
@@ -522,6 +529,9 @@ internal fun SettingsDialog(
                 }
                 SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
                     onChange(settings.copy(dataSaver = it))
+                }
+                SwitchRow("Minimal layout", "The map fills the screen; the product, run, loop and overlay controls open from a menu button.", settings.minimalUi) {
+                    onChange(settings.copy(minimalUi = it))
                 }
                 if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors (REFS), and for the freezing level and model temperatures (MRMS).", settings.contours) {
                     onChange(settings.copy(contours = it))

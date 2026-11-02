@@ -37,4 +37,4 @@ SLGT yellow, ENH orange, MDT red, HIGH magenta) when a feature has no `stroke`.
 | Scope | master map: the layers go over **any** map layer, with legends, refreshed every 120 s | MRMS product overlays on the MRMS page only; alerts on the MRMS page only; the SPC outlook now on all three pages |
 | Anything else | four fixed overlays | any of the 134 products, a stack, opacity |
 
-Done since: the strike cross, the LightningCast overlay (all pages), the halo on rotation and hail. Still open: wxqt's gray rotation palette, a 15 min strike step, the max-pooled coarse levels for thin tracks, and the MRMS product overlays on the NBM and REFS pages.
+Done since: the strike cross, the LightningCast overlay (MRMS page only: a now-and-next-hour product, not drawn on the model pages), the halo on rotation and hail. Still open: wxqt's gray rotation palette, a 15 min strike step, the max-pooled coarse levels for thin tracks, and the MRMS product overlays on the NBM and REFS pages.

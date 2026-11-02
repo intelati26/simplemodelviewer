@@ -36,6 +36,15 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
         val count = (0 until 10).count { mask and (1 shl it) != 0 }
         return where + "$count of 10 members" + if (names.isEmpty()) "" else ": " + names.joinToString(", ")
     }
+    if (WindProducts.isWind(product.id) && WindProducts.hasPlanes(values, grid.cells)) {
+        val i = row * grid.columns + column
+        val u = values[grid.cells * WindProducts.U + i]
+        val v = values[grid.cells * WindProducts.V + i]
+        val height = values[grid.cells * WindProducts.HEIGHT + i]
+        val from = WindProducts.compassDegrees(WindProducts.fromDegrees(u, v), lon)
+        return where + "${fixed(from, 0)}\u00B0 ${WindProducts.compassName(from)} at ${fixed(raw.toDouble(), 0)} kt" +
+            if (height.isNaN()) "" else "   height ${fixed(height.toDouble(), 0)} m"
+    }
     val shown = raw * style.factor + style.offset
     if (style.kind == Kind.Categorical) {
         val i = style.stops.indexOfFirst { kotlin.math.abs(it.value - shown) < 0.5 }
