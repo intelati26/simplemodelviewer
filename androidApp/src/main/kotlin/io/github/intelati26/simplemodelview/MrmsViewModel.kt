@@ -338,7 +338,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         if (st.alertKinds.isEmpty() || st.files.isEmpty() || st.index != st.files.lastIndex) return emptyList()
         val s = base.scale.toFloat()
-        return st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
+        val drawn = st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
             val rings = shape.rings.map { ring ->
                 val out = FloatArray(ring.size)
                 var i = 0
@@ -350,8 +350,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 out
             }
-            AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind == AlertKind.Watch, shade = shape.kind == AlertKind.Watch, heavy = shape.kind == AlertKind.Warning)   // watches: shaded and hatched; warnings and discussions: outlines
+            shape to AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind == AlertKind.Watch, shade = shape.kind == AlertKind.Watch, heavy = shape.kind == AlertKind.Warning)   // watches: shaded and hatched; warnings and discussions: outlines
         }
+        // a watch comes county by county: the counties of one watch are one area, so only its outer edge gets an outline
+        val (watches, others) = drawn.partition { it.first.kind == AlertKind.Watch }
+        val merged = watches.groupBy { (shape, _) -> shape.detailUrl ?: "${shape.title}|${shape.issued}|${shape.expires}" }.values.map { group ->
+            val first = group.first().second
+            AlertDraw(group.flatMap { it.second.rings }, first.color, first.dashed, fill = true, shade = true)
+        }
+        return merged + others.map { it.second }
     }
 
     // ---- overlay: other products over the first ----

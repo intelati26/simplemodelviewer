@@ -197,6 +197,22 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 }
                 hatchInside(canvas, whole, hatch, gap, a.hatch)
             }
+            // a watch is a patchwork of counties: shade and hatch each, but outline only the outer edge of the union, not the county lines inside it
+            var outer: android.graphics.Path? = null
+            if (a.shade && a.rings.size > 1) {
+                val union = android.graphics.Path()
+                var ok = true
+                for (ring in a.rings) {
+                    if (ring.size < 6) continue
+                    val p = android.graphics.Path()
+                    p.moveTo(ring[0], ring[1])
+                    var i = 2
+                    while (i + 1 < ring.size) { p.lineTo(ring[i], ring[i + 1]); i += 2 }
+                    p.close()
+                    if (union.isEmpty) union.set(p) else if (!union.op(p, android.graphics.Path.Op.UNION)) { ok = false; break }
+                }
+                if (ok) outer = union
+            }
             for (ring in a.rings) {
                 if (ring.size < 6) continue
                 val path = android.graphics.Path()
@@ -205,9 +221,9 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
                 if (!a.open) path.close()
                 if (a.fill && !a.combined) { if (a.shade) canvas.drawPath(path, shadeFill); hatchInside(canvas, path, hatch, gap, a.hatch) }
-                canvas.drawPath(path, casing)
-                canvas.drawPath(path, line)
+                if (outer == null) { canvas.drawPath(path, casing); canvas.drawPath(path, line) }
             }
+            outer?.let { canvas.drawPath(it, casing); canvas.drawPath(it, line) }
         }
     }
 
