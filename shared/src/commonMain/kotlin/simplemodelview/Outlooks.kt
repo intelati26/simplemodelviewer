@@ -55,7 +55,8 @@ class OutlookShape(
     val rank: Int,                       // higher = more severe; the more severe areas are drawn (and win a tap) on top
     val color: Int,                      // 0xRRGGBB
     val polygons: List<List<DoubleArray>>,
-    val hatched: Boolean = false,        // the "significant severe" hatched area: drawn dashed, not filled
+    val hatched: Boolean = false,        // the "significant severe" / intensity area: drawn dashed, in black hatching instead of a color
+    val intensity: Int = 1,              // hatched areas: 1 "/" , 2 "\\" , 3 both (SPC's tornado intensity groups CIG1 to CIG3)
 )
 
 /** A loaded outlook: its areas and times (epoch seconds, any may be unknown). */
@@ -164,12 +165,13 @@ fun parseOutlookGeoJson(text: String): OutlookData {
             val label2 = str("LABEL2")
             val dn = str("DN")?.toDoubleOrNull()?.toInt()
             issued = issued ?: outlookTime(str("ISSUE")); valid = valid ?: outlookTime(str("VALID")); expires = expires ?: outlookTime(str("EXPIRE"))
-            val hatched = label.equals("SIGN", ignoreCase = true)
+            val hatched = label.equals("SIGN", ignoreCase = true) || label.startsWith("CIG", ignoreCase = true)   // significant severe / conditional intensity group
+            val intensity = if (label.startsWith("CIG", ignoreCase = true)) label.last().digitToIntOrNull()?.coerceIn(1, 3) ?: 1 else 1
             val catRank = OutlookColors.categoryRank(label)
             // probabilities are given as a fraction ("0.05") or a percent; DN is the percent in SPC's files
             val percent = dn ?: label.removeSuffix("%").toDoubleOrNull()?.let { if (it <= 1.0) it * 100 else it }?.toInt()
             val rank = when {
-                hatched -> 1000
+                hatched -> 1000 + intensity
                 catRank > 0 -> catRank
                 percent != null -> percent
                 else -> 0
@@ -180,7 +182,7 @@ fun parseOutlookGeoJson(text: String): OutlookData {
                 else -> label.ifEmpty { "Outlook area" }
             }
             val color = hexColor(str("stroke")) ?: OutlookColors.category[label.uppercase()] ?: if (percent != null) OutlookColors.probability(percent) else 0x808080
-            shapes += OutlookShape(title, rank, if (hatched) 0x000000 else color, polygons, hatched)
+            shapes += OutlookShape(title, rank, if (hatched) 0x000000 else color, polygons, hatched, intensity)
         } catch (e: Exception) { /* one damaged feature does not hide the others */ }
     }
     return OutlookData(shapes.sortedBy { it.rank }, issued, valid, expires)

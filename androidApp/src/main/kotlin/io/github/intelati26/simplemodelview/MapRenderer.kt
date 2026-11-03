@@ -29,7 +29,7 @@ class Overlay(
  * [open]: the rings are lines, not outlines (LightningCast contours): not closed, not filled, a little thinner.
  * [combined]: the rings are one polygon (the outer ring, then its holes), filled together by the even-odd rule so a hole stays empty (SPC outlooks).
  */
-class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false)
+class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
@@ -120,19 +120,36 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
     }
 
+    /** Diagonal lines inside [path] instead of a solid fill, so what is underneath stays readable. */
+    private fun hatchInside(canvas: Canvas, path: android.graphics.Path, paint: Paint, gap: Float, kind: Int = 1) {
+        val box = android.graphics.RectF().also { path.computeBounds(it, true) }
+        canvas.save()
+        canvas.clipPath(path)
+        var x = box.left - box.height()
+        if (kind and 1 != 0) while (x < box.right) { canvas.drawLine(x, box.bottom, x + box.height(), box.top, paint); x += gap }
+        if (kind and 2 != 0) {
+            x = box.left
+            while (x < box.right + box.height()) { canvas.drawLine(x, box.bottom, x - box.height(), box.top, paint); x += gap }
+        }
+        canvas.restore()
+    }
+
     /** Alert outlines over everything else: a dark casing under a colored line so they read on any background. */
     private fun drawAlerts(canvas: Canvas, alerts: List<AlertDraw>, pictureWidth: Int) {
         val width = maxOf(2f, pictureWidth / 600f)
-        val casing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width + 2f; color = 0x99000000.toInt(); strokeJoin = Paint.Join.ROUND }
+        val casing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width + 2f; color = 0x4D000000.toInt(); strokeJoin = Paint.Join.ROUND }
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width; strokeJoin = Paint.Join.ROUND }
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val baseHatch = maxOf(1f, pictureWidth / 1400f)
+        val hatch = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = baseHatch }
+        val gap = maxOf(12f, pictureWidth / 80f)
         for (a in alerts) {
             line.strokeWidth = if (a.open) width * 0.75f else width
             casing.strokeWidth = line.strokeWidth + 2f
-            line.color = 0xFF000000.toInt() or a.color
+            line.color = 0x66000000 or a.color
             line.pathEffect = if (a.dashed) android.graphics.DashPathEffect(floatArrayOf(width * 4f, width * 3f), 0f) else null
             casing.pathEffect = line.pathEffect
-            fill.color = (0x28 shl 24) or a.color
+            hatch.color = (if (a.strong) 0x99000000.toInt() else 0x66000000) or a.color
+            hatch.strokeWidth = baseHatch * (if (a.strong) 1.8f else 1f)
             if (a.combined && a.fill) {
                 val whole = android.graphics.Path().apply { fillType = android.graphics.Path.FillType.EVEN_ODD }
                 for (ring in a.rings) {
@@ -142,7 +159,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                     while (i + 1 < ring.size) { whole.lineTo(ring[i], ring[i + 1]); i += 2 }
                     whole.close()
                 }
-                canvas.drawPath(whole, fill)
+                hatchInside(canvas, whole, hatch, gap, a.hatch)
             }
             for (ring in a.rings) {
                 if (ring.size < 6) continue
@@ -151,7 +168,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 var i = 2
                 while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
                 if (!a.open) path.close()
-                if (a.fill && !a.combined) canvas.drawPath(path, fill)
+                if (a.fill && !a.combined) hatchInside(canvas, path, hatch, gap, a.hatch)
                 canvas.drawPath(path, casing)
                 canvas.drawPath(path, line)
             }
