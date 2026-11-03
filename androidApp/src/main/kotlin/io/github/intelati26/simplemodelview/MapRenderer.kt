@@ -195,7 +195,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                     while (i + 1 < ring.size) { whole.lineTo(ring[i], ring[i + 1]); i += 2 }
                     whole.close()
                 }
-                hatchInside(canvas, whole, hatch, gap, a.hatch)
+                if (a.strong) hatchInside(canvas, whole, hatch, gap, a.hatch)   // only the CIG / significant areas are hatched
             }
             // a watch is a patchwork of counties: shade and hatch each, but outline only the outer edge of the union, not the county lines inside it
             var outer: android.graphics.Path? = null
@@ -220,7 +220,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 var i = 2
                 while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
                 if (!a.open) path.close()
-                if (a.fill && !a.combined) { if (a.shade) canvas.drawPath(path, shadeFill); hatchInside(canvas, path, hatch, gap, a.hatch) }
+                if (a.fill && !a.combined) { if (a.shade) canvas.drawPath(path, shadeFill); if (a.strong) hatchInside(canvas, path, hatch, gap, a.hatch) }
                 if (outer == null) { canvas.drawPath(path, casing); canvas.drawPath(path, line) }
             }
             outer?.let { canvas.drawPath(it, casing); canvas.drawPath(it, line) }
