@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import simplemodelview.AlertKind
+import simplemodelview.MrmsCatalog
 import simplemodelview.OverlayLayer
 import simplemodelview.OverlayPresets
 import simplemodelview.OutlookType
@@ -74,7 +75,7 @@ internal fun overlaySummary(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OverlayTreeDialog(
-    layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarCombo: (Boolean, Boolean, Boolean) -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
+    layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarCombo: (Boolean, Boolean, Boolean) -> Unit, rotationChoice: String, hailChoice: String, onRotationChoice: (String) -> Unit, onHailChoice: (String) -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
     alertKinds: Set<AlertKind>, alertsAsOf: Long?, alertNote: String?, newestOnly: Boolean, onAlertKinds: (Set<AlertKind>) -> Unit,
     outlook: OutlookState, valid: Long?, onOutlook: (OutlookType?) -> Unit,
     lightning: LightningState, onLightning: (Boolean) -> Unit,
@@ -96,20 +97,21 @@ internal fun OverlayTreeDialog(
                     // radar fields
                     TreeNode("Radar fields", if (layers.isEmpty()) "off" else overlayName(layers), "radar" in open, { toggle("radar") }) {
                         val current = overlayName(layers)
-                        val ids = layers.map { it.product.id }
-                        val combo = OverlayPresets.comboOf(ids)
-                        val (rotation, hail, lightningOn) = combo ?: Triple(false, false, false)
+                        val combo = OverlayPresets.comboOf(layers.map { it.product.id })
+                        val rotation = combo?.rotation != null
+                        val hail = combo?.hail != null
+                        val lightningOn = combo?.lightning == true
                         Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("Rotation", fontWeight = FontWeight.Bold)
-                                Text("The last hour's rotation tracks (0-2 km)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                ProductChoice(combo?.rotation ?: rotationChoice, OverlayPresets.rotationChoices, onRotationChoice)
                             }
                             Switch(checked = rotation, onCheckedChange = { onRadarCombo(it, hail, lightningOn) })
                         }
                         Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("Hail", fontWeight = FontWeight.Bold)
-                                Text("The last hour's hail swath (MESH)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                ProductChoice(combo?.hail ?: hailChoice, OverlayPresets.hailChoices, onHailChoice)
                             }
                             Switch(checked = hail, onCheckedChange = { onRadarCombo(rotation, it, lightningOn) })
                         }
@@ -218,6 +220,21 @@ internal fun OverlayTreeDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+/** The product behind a switch: its name, and a menu to pick another. */
+@Composable
+private fun ProductChoice(selected: String, ids: List<String>, onPick: (String) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    fun title(id: String) = MrmsCatalog.byId(id)?.displayTitle ?: id
+    Box {
+        TextButton(onClick = { menu = true }, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)) {
+            Text(title(selected) + " ▾", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            for (id in ids) DropdownMenuItem(text = { Text(title(id), fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal) }, onClick = { menu = false; onPick(id) })
         }
     }
 }

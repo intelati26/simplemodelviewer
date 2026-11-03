@@ -53,21 +53,39 @@ object OverlayPresets {
     /** The last hour's rotation tracks (0-2 km, wxqt's swath style) under the lightning nest. */
     val rotationLightning = listOf(OverlaySpec("RotationTrack60min_00.50", index = -1, opacity = 1.0)) + lightningNest
 
-    private val rotationTrack = OverlaySpec("RotationTrack60min_00.50", index = -1, opacity = 1.0)
-    private val hailSwath = OverlaySpec("MESH_Max_60min_00.50", index = -1, opacity = 1.0)
+    private val spans = listOf(30, 60, 120, 240, 360, 1440)
 
-    /** Any mix of the last hour's hail swath, rotation tracks and the lightning nest, drawn in that order (the strikes on top). */
-    fun combo(rotation: Boolean, hail: Boolean, lightning: Boolean): List<OverlaySpec> = buildList {
-        if (hail) add(hailSwath)
-        if (rotation) add(rotationTrack)
+    /** The rotation products a switch can use: tracks over 0-2 km and 3-6 km, and the shear as it is now. */
+    val rotationChoices = spans.map { "RotationTrack${it}min_00.50" } + spans.map { "RotationTrackML${it}min_00.50" } +
+        listOf("MergedAzShear_0-2kmAGL_00.50", "MergedAzShear_3-6kmAGL_00.50")
+
+    /** The hail products a switch can use: swaths, the size now, the probability of severe hail and the severe hail index. */
+    val hailChoices = spans.map { "MESH_Max_${it}min_00.50" } + listOf("MESH_00.50", "POSH_00.50", "SHI_00.50")
+
+    const val DEFAULT_ROTATION = "RotationTrack60min_00.50"
+    const val DEFAULT_HAIL = "MESH_Max_60min_00.50"
+
+    /** Which products a stack of ids is made of: a hail product, a rotation product (either may be missing) and the lightning nest. */
+    data class Combo(val rotation: String?, val hail: String?, val lightning: Boolean)
+
+    /** Any mix of a hail product, a rotation product and the lightning nest, drawn in that order (the strikes on top). */
+    fun combo(rotation: String?, hail: String?, lightning: Boolean): List<OverlaySpec> = buildList {
+        if (hail != null) add(OverlaySpec(hail, index = -1, opacity = 1.0))
+        if (rotation != null) add(OverlaySpec(rotation, index = -1, opacity = 1.0))
         if (lightning) addAll(lightningNest)
     }
 
-    /** Which of (rotation, hail, lightning) a stack of product ids is, or null when it is something else. */
-    fun comboOf(ids: List<String>): Triple<Boolean, Boolean, Boolean>? {
-        for (r in listOf(false, true)) for (h in listOf(false, true)) for (l in listOf(false, true))
-            if (ids.isNotEmpty() && combo(r, h, l).map { it.id } == ids) return Triple(r, h, l)
-        return null
+    /** The mix a stack of product ids is, or null when it is something else. */
+    fun comboOf(ids: List<String>): Combo? {
+        if (ids.isEmpty()) return null
+        var i = 0
+        var hail: String? = null
+        var rotation: String? = null
+        if (ids[i] in hailChoices) { hail = ids[i]; i += 1 }
+        if (i < ids.size && ids[i] in rotationChoices) { rotation = ids[i]; i += 1 }
+        val rest = ids.drop(i)
+        if (rest.isNotEmpty() && rest != lightningNest.map { it.id }) return null
+        return Combo(rotation, hail, rest.isNotEmpty())
     }
 
     fun specs(name: String): List<OverlaySpec>? = when (name) { LIGHTNING_NEST -> lightningNest; ROTATION_LIGHTNING -> rotationLightning; else -> null }
@@ -78,7 +96,7 @@ fun overlayName(layers: List<OverlayLayer>): String = when {
     layers.isEmpty() -> ""
     layers.map { it.product.id } == OverlayPresets.lightningNest.map { it.id } -> "Lightning nest"
     layers.size > 1 && OverlayPresets.comboOf(layers.map { it.product.id }) != null -> OverlayPresets.comboOf(layers.map { it.product.id })!!.let { (r, h, l) ->
-        listOfNotNull(if (r) "Rotation" else null, if (h) "Hail" else null, if (l) "Lightning" else null).mapIndexed { i, p -> if (i == 0) p else p.lowercase() }.joinToString(" + ")
+        listOfNotNull(if (r != null) "Rotation" else null, if (h != null) "Hail" else null, if (l) "Lightning" else null).mapIndexed { i, p -> if (i == 0) p else p.lowercase() }.joinToString(" + ")
     }
     else -> layers.joinToString(" + ") { it.product.displayTitle }
 }

@@ -102,6 +102,8 @@ data class MrmsState(
     val units: Units = Units(),
     val live: Boolean = false,                   // the page is on screen and checks for newer scans by itself
     val loopLength: Int = 0,                     // how many of the newest scans Play and a loop video cover; 0 = all
+    val rotationChoice: String = OverlayPresets.DEFAULT_ROTATION,   // the product of the Rotation switch
+    val hailChoice: String = OverlayPresets.DEFAULT_HAIL,   // the product of the Hail switch
     val overlays: List<OverlayLayer> = emptyList(),   // other products drawn over the first, in order (the last on top)
     val overlayFiles: Map<String, List<MrmsFile>> = emptyMap(),   // per overlay product directory: the files in the span of the radar frames
     val overlayStyles: List<Style> = emptyList(),     // as drawn (units, minimum, opacity), for the legend
@@ -149,6 +151,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             product = withSavedLevel(MrmsCatalog.byId(prefs.getString("mrms_product", null)) ?: MrmsCatalog.default),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("mrms_sector", null) } ?: Sector.all[0],
             favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(),
+            rotationChoice = prefs.getString("overlay_rotation", null)?.takeIf { it in OverlayPresets.rotationChoices } ?: OverlayPresets.DEFAULT_ROTATION,
+            hailChoice = prefs.getString("overlay_hail", null)?.takeIf { it in OverlayPresets.hailChoices } ?: OverlayPresets.DEFAULT_HAIL,
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             settings = readSettings(),
             units = readUnits(),
@@ -405,10 +409,30 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         setOverlays(layers)
     }
 
-    /** Any mix of rotation, hail and lightning (none: no overlay). */
+    /** Any mix of rotation, hail and lightning (none: no overlay); a switch that is already on keeps its product. */
     fun pickOverlayCombo(rotation: Boolean, hail: Boolean, lightning: Boolean) {
-        val specs = OverlayPresets.combo(rotation, hail, lightning)
+        val st = _state.value
+        val now = OverlayPresets.comboOf(st.overlays.map { it.product.id })
+        val specs = OverlayPresets.combo(if (rotation) now?.rotation ?: st.rotationChoice else null, if (hail) now?.hail ?: st.hailChoice else null, lightning)
         if (specs.isEmpty()) pickOverlay(null) else setOverlays(layersFrom(specs))
+    }
+
+    /** The product of the Rotation switch (saved); the stack is redrawn with it when rotation is on. */
+    fun setRotationChoice(id: String) {
+        if (id !in OverlayPresets.rotationChoices) return
+        prefs.edit().putString("overlay_rotation", id).apply()
+        val now = OverlayPresets.comboOf(_state.value.overlays.map { it.product.id })
+        update { it.copy(rotationChoice = id) }
+        if (now?.rotation != null) setOverlays(layersFrom(OverlayPresets.combo(id, now.hail, now.lightning)))
+    }
+
+    /** The product of the Hail switch (saved); the stack is redrawn with it when hail is on. */
+    fun setHailChoice(id: String) {
+        if (id !in OverlayPresets.hailChoices) return
+        prefs.edit().putString("overlay_hail", id).apply()
+        val now = OverlayPresets.comboOf(_state.value.overlays.map { it.product.id })
+        update { it.copy(hailChoice = id) }
+        if (now?.hail != null) setOverlays(layersFrom(OverlayPresets.combo(now.rotation, id, now.lightning)))
     }
 
     /** A ready-made stack, such as the lightning nest (strikes of the last 30 min / 5 min / 1 min at 20 / 50 / 100 % opacity). */
