@@ -41,7 +41,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val argb = IntArray(w * h)
         val memberRgb = IntArray(10) { Palettes.memberColors[memberNames.getOrNull(it)] ?: 0x808080 }
         val paintLines = PaintballLines.isPaintballLines(product.id)
-        if (!paintLines) core.render(values, view, style, memberRgb, argb)   // paintball contours draw lines only, over the bare map
+        // the probability contours lie over the model's own paintball (each member's cells over the threshold in its color): the mask is the same
+        core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb)
         val picture = if (halo) outline(argb, w, h, edgeFor(w)) else argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
