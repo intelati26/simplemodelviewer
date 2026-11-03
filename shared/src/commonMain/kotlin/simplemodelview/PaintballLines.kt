@@ -20,7 +20,7 @@ object PaintballLines {
 
     /** The percentages that get a line, and the color of each (also the bands of the color key). */
     val levels = listOf(10.0, 30.0, 50.0, 70.0, 90.0)
-    val colors = listOf(0x3B9AE1, 0x2CA02C, 0xE6B800, 0xF07D00, 0xC0141C)
+    val colors = listOf(0x0B4F9E, 0x0F6B1F, 0x8A6A00, 0xB04A00, 0x8E0B14)   // dark enough to read over the pastel member colors
 
     /** How many times the share is blurred before it is traced: about a 40-km neighborhood on the 3-km grid. */
     const val SMOOTHING = 12

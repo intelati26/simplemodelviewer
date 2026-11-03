@@ -75,8 +75,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val share = PaintballLines.percent(mask, memberNames.size.takeIf { it > 0 } ?: 10)
         val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
         val lines = Contours.lines(share, product.grid, view, Style(), spec, smoothing = PaintballLines.SMOOTHING, levelsOverride = PaintballLines.levels)
-        val width = maxOf(1.6f, pictureWidth / 800f)
-        val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
+        val width = maxOf(2.2f, pictureWidth / 600f)
+        val halo = if (dark) 0xDD000000.toInt() else 0xEEFFFFFF.toInt()
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
         val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
         for (c in lines.sortedBy { it.level }) {
@@ -85,7 +85,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             var i = 2
             while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
             val w = if (c.bold) width * 1.8f else width
-            line.strokeWidth = w + 2.5f; line.color = halo; canvas.drawPath(path, line)
+            line.strokeWidth = w + 4f; line.color = halo; canvas.drawPath(path, line)
             line.strokeWidth = w; line.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawPath(path, line)
         }
         for (c in lines) if (c.labelAt >= 0) {

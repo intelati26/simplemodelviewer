@@ -229,7 +229,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
         }
         val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             OutlookRow(outlookState, s.times.getOrNull(s.timeIndex), onClick = { outlookDialog = true })
-            s.style?.let { Legend(it, s.members) }
+            s.style?.let { Legend(it, s.members, withMembers = s.product?.id?.let(simplemodelview.PaintballLines::isPaintballLines) == true) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
@@ -347,16 +347,16 @@ private fun MapView(s: UiState, vm: RefsViewModel) {
 }
 
 @Composable
-internal fun Legend(style: Style, members: List<String>) {
+internal fun Legend(style: Style, members: List<String>, withMembers: Boolean = false) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
-        if (style.kind == Kind.Paintball) {
+        if (style.kind == Kind.Paintball || withMembers) {
             Row(Modifier.fillMaxWidth()) {
                 for (i in 0 until 10) Box(
                     Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or (Palettes.memberColors[members.getOrNull(i)] ?: 0x808080))),
                 )
             }
-            Text("Each color: a member over the threshold", style = MaterialTheme.typography.labelSmall)
-            return
+            Text(if (withMembers) "Cells: a member over the threshold. Lines: the share of members, in %" else "Each color: a member over the threshold", style = MaterialTheme.typography.labelSmall)
+            if (style.kind == Kind.Paintball) return
         }
         if (style.stops.isEmpty()) return
         if (style.kind == Kind.Categorical) {      // a swatch and name per category
