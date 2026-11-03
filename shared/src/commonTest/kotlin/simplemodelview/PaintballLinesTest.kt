@@ -12,9 +12,10 @@ class PaintballLinesTest {
         assertEquals(2f, mask[0])          // only member 1
         assertEquals(1f, mask[1])          // only member 0
         assertTrue(mask[2].isNaN())        // no member has data
-        val field = PaintballLines.memberField(mask, 1, FloatArray(3))
-        assertEquals(listOf(1f, 0f), field.take(2))
-        assertTrue(field[2].isNaN())
+        val share = PaintballLines.percent(mask, 2)
+        assertEquals(listOf(50f, 50f), share.take(2))
+        assertEquals(100f, PaintballLines.percent(floatArrayOf(3f), 2)[0])
+        assertTrue(share[2].isNaN())
     }
 
     @Test fun specsAreFoundById() {

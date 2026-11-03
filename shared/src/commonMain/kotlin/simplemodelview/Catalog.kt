@@ -157,7 +157,7 @@ object Catalog {
         val byName = arrays.associateBy { it.name }
         return PaintballLines.specs.mapNotNull { spec ->
             val source = byName[spec.source]?.takeIf { it.isGridField && it.dims.size == 4 } ?: return@mapNotNull null
-            Product(spec.id, spec.title, Groups.STORM, Style(Kind.Paintball, units = "members"), hasMembers = false,
+            Product(spec.id, spec.title, Groups.STORM, Style(Kind.Banded, PaintballLines.levels.zip(PaintballLines.colors) { v, c -> Stop(v, c) }, top = 100.0, units = "% of members", digits = 0), hasMembers = false,
                 timeDimension = describe(source).timeDimension, grid = source.grid ?: Grid.REFS)
         }
     }

@@ -17,6 +17,7 @@ data class ContourSpec(
     val boldEvery: Double = 0.0,
     val boldBase: Double = 0.0,
     val labelDivisor: Double = 1.0,
+    val labelSuffix: String = "",
     val color: Int = 0x202020,
 ) {
     /** The levels (shown units) between [lo] and [hi], at most [limit] of them (a sanity cap for fields with a wild range). */
@@ -36,7 +37,7 @@ data class ContourSpec(
 
     fun label(level: Double): String {
         val v = level / labelDivisor
-        return if (abs(v - v.roundToInt()) < 1e-6) v.roundToInt().toString() else ((v * 10).roundToInt() / 10.0).toString()
+        return (if (abs(v - v.roundToInt()) < 1e-6) v.roundToInt().toString() else ((v * 10).roundToInt() / 10.0).toString()) + labelSuffix
     }
 }
 
@@ -66,7 +67,7 @@ object Contours {
      * The contour lines of [values] (a [grid] field, row 0 = south, stored units) inside [view], in picture pixels. [style] converts the
      * stored values to the shown ones the [spec] is written in. NaN cells break the lines.
      */
-    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = SMOOTHING_PASSES, only: Double? = null): List<ContourLine> {
+    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = SMOOTHING_PASSES, levelsOverride: List<Double>? = null): List<ContourLine> {
         val cols = grid.columns
         val rows = grid.rows
         if (values.size < cols * rows) return emptyList()
@@ -85,7 +86,7 @@ object Contours {
             if (s < lo) lo = s
             if (s > hi) hi = s
         }
-        val levels = if (only != null) (if (lo <= hi) listOf(only) else emptyList()) else spec.levels(lo, hi)   // [only]: this one level, unlabeled
+        val levels = levelsOverride ?: spec.levels(lo, hi)   // [levelsOverride]: exactly these levels, whatever the range
         // the lines follow a lightly smoothed field, so the cell-to-cell noise of a model does not turn them into scribble
         val field = smoothed(values, cols, c0, r0, c1, r1, smoothing)
         val scale = view.scale.toFloat() / view.step
@@ -107,7 +108,7 @@ object Contours {
                     px[k + 1] = (view.row0 + view.rows - 0.5f - ch[k + 1]) * scale
                     k += 2
                 }
-                val mid = if (only == null && i == best && ch.size >= 24) (ch.size / 4) * 2 else -1   // a label on the longest line only, and only if it has room
+                val mid = if (i == best && ch.size >= 24) (ch.size / 4) * 2 else -1   // a label on the longest line only, and only if it has room
                 out.add(ContourLine(level, spec.isBold(level), px, spec.label(level), mid, closed))
             }
         }

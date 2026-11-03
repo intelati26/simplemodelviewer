@@ -67,27 +67,31 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         return bitmap
     }
 
-    /** One thin line per member at the product's threshold, each in the member's color on a halo, the members' bit mask traced one bit at a time. */
+    /** Lines of the share of members at or above the threshold (10 / 30 / 50 / 70 / 90 %), blurred over a neighborhood; one color per level, the 50 % line heavier. */
     private fun drawPaintballLines(canvas: Canvas, product: Product, mask: FloatArray, memberNames: List<String>, view: View, dark: Boolean, pictureWidth: Int) {
         val cells = product.grid.cells
         if (mask.size < cells) return
+        val share = PaintballLines.percent(mask, memberNames.size.takeIf { it > 0 } ?: 10)
+        val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
+        val lines = Contours.lines(share, product.grid, view, Style(), spec, smoothing = PaintballLines.SMOOTHING, levelsOverride = PaintballLines.levels)
         val width = maxOf(1.6f, pictureWidth / 800f)
-        val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND; strokeWidth = width + 2f; color = if (dark) 0x99000000.toInt() else 0xAAFFFFFF.toInt() }
-        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND; strokeWidth = width }
-        val field = FloatArray(cells)
-        val spec = ContourSpec(1.0)
-        val traced = (0 until minOf(10, memberNames.size.coerceAtLeast(10))).map { k ->
-            Contours.lines(PaintballLines.memberField(mask, k, field), product.grid, view, Style(), spec, smoothing = 1, only = 0.5)
-        }
-        for (pass in 0..1) for ((k, lines) in traced.withIndex()) for (c in lines) {
+        val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+        for (c in lines.sortedBy { it.level }) {
             val path = android.graphics.Path()
             path.moveTo(c.points[0], c.points[1])
             var i = 2
             while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
-            if (pass == 0) canvas.drawPath(path, halo) else {
-                line.color = 0xFF000000.toInt() or (Palettes.memberColors[memberNames.getOrNull(k)] ?: 0x808080)
-                canvas.drawPath(path, line)
-            }
+            val w = if (c.bold) width * 1.8f else width
+            line.strokeWidth = w + 2.5f; line.color = halo; canvas.drawPath(path, line)
+            line.strokeWidth = w; line.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawPath(path, line)
+        }
+        for (c in lines) if (c.labelAt >= 0) {
+            val x = c.points[c.labelAt]; val y = c.points[c.labelAt + 1]
+            if (x < 0 || y < 0 || x > pictureWidth) continue
+            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(c.label, x, y + text.textSize / 3, text)
+            text.style = Paint.Style.FILL; text.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawText(c.label, x, y + text.textSize / 3, text)
         }
     }
 
