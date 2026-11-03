@@ -52,6 +52,7 @@ import simplemodelview.encodeOverlays
 import simplemodelview.nearestFile
 import simplemodelview.overlayName
 import simplemodelview.overlayIsMarker
+import simplemodelview.overlayMarkerColor
 import simplemodelview.overlayMarkerScale
 import simplemodelview.overlayIsSparse
 import simplemodelview.overlayThresholdChoices
@@ -464,7 +465,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val shortName = layerLabel(layer, layers.size)
             val product = Product(ov.directory, ov.displayTitle, ov.group, style, hasMembers = false, timeDimension = null, grid = g)
             // (a translucent layer is not thickened: drawing it several times would stack its opacity)
-            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov)), Triple(shortName, product, frame.window.values), "$shortName ${formatClock(file.validTime)}")
+            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov), markerColor = overlayMarkerColor(ov)), Triple(shortName, product, frame.window.values), "$shortName ${formatClock(file.validTime)}")
         }
         return results
     }

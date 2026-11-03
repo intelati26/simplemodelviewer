@@ -40,21 +40,27 @@ data class OverlaySpec(val id: String, val level: Int = 0, val index: Int = -1, 
 /** Ready-made stacks of layers. They are drawn in order, so the last is on top. */
 object OverlayPresets {
     const val LIGHTNING_NEST = "lightning-nest"
+    const val ROTATION_LIGHTNING = "rotation-lightning"
 
-    /** Strikes by recency: the last 30 minutes as a faint shadow (20 %), the last 5 minutes at half strength, the last minute solid. */
+    /** Strikes by recency, a cross each in the color of its window (1 / 5 / 15 / 30 min); the older windows are drawn first and a little fainter. */
     val lightningNest = listOf(
-        OverlaySpec("NLDN_CG_030min_AvgDensity_00.00", index = 0, opacity = 0.2),
-        OverlaySpec("NLDN_CG_005min_AvgDensity_00.00", index = 0, opacity = 0.5),
+        OverlaySpec("NLDN_CG_030min_AvgDensity_00.00", index = 0, opacity = 0.5),
+        OverlaySpec("NLDN_CG_015min_AvgDensity_00.00", index = 0, opacity = 0.65),
+        OverlaySpec("NLDN_CG_005min_AvgDensity_00.00", index = 0, opacity = 0.85),
         OverlaySpec("NLDN_CG_001min_AvgDensity_00.00", index = 0, opacity = 1.0),
     )
 
-    fun specs(name: String): List<OverlaySpec>? = if (name == LIGHTNING_NEST) lightningNest else null
+    /** The last hour's rotation tracks (0-2 km, wxqt's swath style) under the lightning nest. */
+    val rotationLightning = listOf(OverlaySpec("RotationTrack60min_00.50", index = -1, opacity = 1.0)) + lightningNest
+
+    fun specs(name: String): List<OverlaySpec>? = when (name) { LIGHTNING_NEST -> lightningNest; ROTATION_LIGHTNING -> rotationLightning; else -> null }
 }
 
 /** The overlay as shown to the user: "Lightning nest" for that preset, otherwise the layers' titles. */
 fun overlayName(layers: List<OverlayLayer>): String = when {
     layers.isEmpty() -> ""
     layers.map { it.product.id } == OverlayPresets.lightningNest.map { it.id } -> "Lightning nest"
+    layers.map { it.product.id } == OverlayPresets.rotationLightning.map { it.id } -> "Rotation + lightning"
     else -> layers.joinToString(" + ") { it.product.displayTitle }
 }
 
@@ -73,11 +79,19 @@ fun mrmsHasHalo(product: MrmsProduct) = product.group == MrmsCatalog.ROTATION ||
 /** Strike density is drawn as a cross per strike (a strike is one 1 km cell: far too small to see as a cell); area fields are not. */
 fun overlayIsMarker(product: MrmsProduct) = product.id.startsWith("NLDN_")
 
-/**
- * How big a strike's dot is relative to the base size, by how long a window the product covers: 1 minute 1.0, 5 minutes about 1.7, 30 minutes about 2.5.
- * Drawn in order, the layers of the lightning nest become nested rings: a small solid core, a larger half-strength ring, a larger faint halo.
- */
-fun overlayMarkerScale(product: MrmsProduct): Float {
-    val minutes = Regex("""_(\d+)min_""").find(product.id)?.groupValues?.get(1)?.toIntOrNull() ?: return 1f
-    return (1.0 + 0.45 * kotlin.math.ln(minutes.coerceAtLeast(1).toDouble())).toFloat()
+/** The color of a strike's cross by how long a window the product covers: 1 min yellow, 5 min orange, 15 min red, 30 min purple (0xRRGGBB); null for other products. */
+fun overlayMarkerColor(product: MrmsProduct): Int? {
+    if (!overlayIsMarker(product)) return null
+    return when (Regex("""_(\d+)min_""").find(product.id)?.groupValues?.get(1)?.toIntOrNull()) {
+        null -> null
+        in 0..1 -> 0xFFE000
+        in 2..5 -> 0xFF8A00
+        in 6..15 -> 0xE02020
+        else -> 0xA020C0
+    }
 }
+
+/**
+ * How big a strike's cross is relative to the base size: always 1 (the windows are told apart by color, see [overlayMarkerColor]).
+ */
+fun overlayMarkerScale(product: MrmsProduct): Float = 1f   // the crosses are all one size: the color says how old they are

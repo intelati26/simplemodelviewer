@@ -257,6 +257,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
     if (overlayTree) OverlayTreeDialog(
         layers = s.overlays, styles = s.overlayStyles,
         onRadarNone = { vm.pickOverlay(null) }, onRadarNest = { vm.pickOverlayPreset(simplemodelview.OverlayPresets.LIGHTNING_NEST) },
+        onRadarRotationLightning = { vm.pickOverlayPreset(simplemodelview.OverlayPresets.ROTATION_LIGHTNING) },
         onRadarProduct = { overlayPicker = true }, onThreshold = vm::setOverlayThreshold,
         alertKinds = s.alertKinds, alertsAsOf = s.alertsAsOf, alertNote = s.alertNote, newestOnly = s.index != s.files.lastIndex, onAlertKinds = vm::setAlertKinds,
         outlook = outlookState, valid = s.file?.validTime, onOutlook = { AppContainer.outlook.setType(it) },

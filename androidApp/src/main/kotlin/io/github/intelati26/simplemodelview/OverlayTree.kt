@@ -73,7 +73,7 @@ internal fun overlaySummary(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OverlayTreeDialog(
-    layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarNest: () -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
+    layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarNest: () -> Unit, onRadarRotationLightning: () -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
     alertKinds: Set<AlertKind>, alertsAsOf: Long?, alertNote: String?, newestOnly: Boolean, onAlertKinds: (Set<AlertKind>) -> Unit,
     outlook: OutlookState, valid: Long?, onOutlook: (OutlookType?) -> Unit,
     lightning: LightningState, onLightning: (Boolean) -> Unit,
@@ -96,8 +96,9 @@ internal fun OverlayTreeDialog(
                     TreeNode("Radar fields", if (layers.isEmpty()) "off" else overlayName(layers), "radar" in open, { toggle("radar") }) {
                         val current = overlayName(layers)
                         Choice("No overlay", null, layers.isEmpty(), onRadarNone)
-                        Choice("Lightning nest", "Strikes by recency: the last minute solid, the last 5 minutes at 50 %, the last 30 minutes as a 20 % shadow", current == "Lightning nest", onRadarNest)
-                        Choice("Choose a product…", "Rotation tracks, strikes, hail size, any other field", layers.isNotEmpty() && current != "Lightning nest", onRadarProduct)
+                        Choice("Lightning nest", "Strikes as crosses by recency: yellow the last minute, orange 5 minutes, red 15, purple 30", current == "Lightning nest", onRadarNest)
+                        Choice("Rotation + lightning", "The last hour's rotation tracks (0-2 km) with the lightning crosses over them", current == "Rotation + lightning", onRadarRotationLightning)
+                        Choice("Choose a product…", "Rotation tracks, strikes, hail size, any other field", layers.isNotEmpty() && current != "Lightning nest" && current != "Rotation + lightning", onRadarProduct)
                         val style = styles.singleOrNull()
                         if (layers.size == 1 && style != null) {
                             val choices = overlayThresholdChoices(style)

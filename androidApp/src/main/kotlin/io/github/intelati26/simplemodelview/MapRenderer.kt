@@ -24,6 +24,8 @@ class Overlay(
     val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean, val marker: Boolean = false, val markerScale: Float = 1f,
     /** Edge the shapes in black with a white halo outside (hail swaths, rotation tracks). */
     val halo: Boolean = false,
+    /** Markers: the color of every cross (0xRRGGBB) when it stands for an age (1 / 5 / 15 / 30 min); null: each cross takes its cell's color. */
+    val markerColor: Int? = null,
 )
 
 /**
@@ -248,7 +250,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             if (alpha == 0) continue
             val x = overlay.dst.left + (i % bw + 0.5f) * cw
             val y = overlay.dst.top + (i / bw + 0.5f) * ch
-            ink.color = c
+            ink.color = overlay.markerColor?.let { (alpha shl 24) or it } ?: c
             rim.alpha = maxOf(alpha * 2 / 3, 90)         // (even a 20 % shadow gets a visible rim)
             canvas.drawLine(x - arm, y, x + arm, y, rim); canvas.drawLine(x, y - arm, x, y + arm, rim)
             canvas.drawLine(x - arm, y, x + arm, y, ink); canvas.drawLine(x, y - arm, x, y + arm, ink)

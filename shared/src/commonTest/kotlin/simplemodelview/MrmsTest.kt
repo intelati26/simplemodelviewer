@@ -269,9 +269,9 @@ class MrmsTest {
 
     @Test fun theLightningNestStacksStrikesByRecency() {
         val nest = OverlayPresets.lightningNest
-        assertEquals(listOf(0.2, 0.5, 1.0), nest.map { it.opacity })                    // 30 min faint, 5 min half, 1 min solid
+        assertEquals(listOf(0.5, 0.65, 0.85, 1.0), nest.map { it.opacity })              // 30 min faintest, 1 min solid
         assertTrue(nest.map { it.opacity } == nest.map { it.opacity }.sorted())         // drawn in order: the freshest strikes end up on top
-        assertEquals(listOf(30, 5, 1), nest.map { Regex("""(\d+)min""").find(it.id)!!.groupValues[1].toInt() })
+        assertEquals(listOf(30, 15, 5, 1), nest.map { Regex("""(\d+)min""").find(it.id)!!.groupValues[1].toInt() })
         for (spec in nest) assertTrue(MrmsCatalog.byId(spec.id) != null, spec.id)       // every layer is a real catalog product
         val layers = nest.map { OverlayLayer(MrmsCatalog.byId(it.id)!!, 0, it.opacity) }
         assertEquals("Lightning nest", overlayName(layers))
@@ -302,12 +302,23 @@ class MrmsTest {
         assertEquals(0xff9500, MrmsCatalog.byId("NLDN_CG_005min_AvgDensity_00.00")!!.style.stops.first().rgb)
     }
 
-    @Test fun nestedStrikeDotsGrowWithTheWindow() {
-        fun scale(id: String) = overlayMarkerScale(MrmsCatalog.byId(id)!!)
-        assertEquals(1.0f, scale("NLDN_CG_001min_AvgDensity_00.00"), 1e-6f)
-        assertTrue(scale("NLDN_CG_001min_AvgDensity_00.00") < scale("NLDN_CG_005min_AvgDensity_00.00"))
-        assertTrue(scale("NLDN_CG_005min_AvgDensity_00.00") < scale("NLDN_CG_030min_AvgDensity_00.00"))
-        assertEquals(1.0f, overlayMarkerScale(MrmsCatalog.default), 0f)                        // other products: no growth
+    @Test fun strikeCrossesAreOneSizeAndColoredByWindow() {
+        fun color(id: String) = overlayMarkerColor(MrmsCatalog.byId(id)!!)
+        assertEquals(0xFFE000, color("NLDN_CG_001min_AvgDensity_00.00"))
+        assertEquals(0xFF8A00, color("NLDN_CG_005min_AvgDensity_00.00"))
+        assertEquals(0xE02020, color("NLDN_CG_015min_AvgDensity_00.00"))
+        assertEquals(0xA020C0, color("NLDN_CG_030min_AvgDensity_00.00"))
+        assertNull(overlayMarkerColor(MrmsCatalog.default))
+        assertEquals(1.0f, overlayMarkerScale(MrmsCatalog.byId("NLDN_CG_030min_AvgDensity_00.00")!!), 0f)
+    }
+
+    @Test fun rotationAndLightningIsOnePresetOverTheNest() {
+        val stack = OverlayPresets.rotationLightning
+        assertEquals("RotationTrack60min_00.50", stack.first().id)
+        assertEquals(OverlayPresets.lightningNest, stack.drop(1))
+        for (spec in stack) assertTrue(MrmsCatalog.byId(spec.id) != null, spec.id)
+        assertEquals("Rotation + lightning", overlayName(stack.map { OverlayLayer(MrmsCatalog.byId(it.id)!!, 0, it.opacity) }))
+        assertEquals(stack, OverlayPresets.specs(OverlayPresets.ROTATION_LIGHTNING))
     }
 
     @Test fun hailAndRotationGetTheHalo() {
