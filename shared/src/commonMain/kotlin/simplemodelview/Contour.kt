@@ -66,7 +66,7 @@ object Contours {
      * The contour lines of [values] (a [grid] field, row 0 = south, stored units) inside [view], in picture pixels. [style] converts the
      * stored values to the shown ones the [spec] is written in. NaN cells break the lines.
      */
-    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = SMOOTHING_PASSES): List<ContourLine> {
+    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = SMOOTHING_PASSES, only: Double? = null): List<ContourLine> {
         val cols = grid.columns
         val rows = grid.rows
         if (values.size < cols * rows) return emptyList()
@@ -85,7 +85,7 @@ object Contours {
             if (s < lo) lo = s
             if (s > hi) hi = s
         }
-        val levels = spec.levels(lo, hi)
+        val levels = if (only != null) (if (lo <= hi) listOf(only) else emptyList()) else spec.levels(lo, hi)   // [only]: this one level, unlabeled
         // the lines follow a lightly smoothed field, so the cell-to-cell noise of a model does not turn them into scribble
         val field = smoothed(values, cols, c0, r0, c1, r1, smoothing)
         val scale = view.scale.toFloat() / view.step
@@ -107,7 +107,7 @@ object Contours {
                     px[k + 1] = (view.row0 + view.rows - 0.5f - ch[k + 1]) * scale
                     k += 2
                 }
-                val mid = if (i == best && ch.size >= 24) (ch.size / 4) * 2 else -1   // a label on the longest line only, and only if it has room
+                val mid = if (only == null && i == best && ch.size >= 24) (ch.size / 4) * 2 else -1   // a label on the longest line only, and only if it has room
                 out.add(ContourLine(level, spec.isBold(level), px, spec.label(level), mid, closed))
             }
         }

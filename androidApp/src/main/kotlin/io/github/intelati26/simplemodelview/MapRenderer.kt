@@ -5,9 +5,11 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import simplemodelview.ContourLine
+import simplemodelview.ContourSpec
 import simplemodelview.Contours
 import simplemodelview.Core
 import simplemodelview.Kind
+import simplemodelview.PaintballLines
 import simplemodelview.Palettes
 import simplemodelview.Product
 import simplemodelview.Stop
@@ -38,7 +40,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val h = view.pixelHeight
         val argb = IntArray(w * h)
         val memberRgb = IntArray(10) { Palettes.memberColors[memberNames.getOrNull(it)] ?: 0x808080 }
-        core.render(values, view, style, memberRgb, argb)
+        val paintLines = PaintballLines.isPaintballLines(product.id)
+        if (!paintLines) core.render(values, view, style, memberRgb, argb)   // paintball contours draw lines only, over the bare map
         val picture = if (halo) outline(argb, w, h, edgeFor(w)) else argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -59,8 +62,33 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         WindProducts.level(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity)
         }
+        if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
+    }
+
+    /** One thin line per member at the product's threshold, each in the member's color on a halo, the members' bit mask traced one bit at a time. */
+    private fun drawPaintballLines(canvas: Canvas, product: Product, mask: FloatArray, memberNames: List<String>, view: View, dark: Boolean, pictureWidth: Int) {
+        val cells = product.grid.cells
+        if (mask.size < cells) return
+        val width = maxOf(1.6f, pictureWidth / 800f)
+        val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND; strokeWidth = width + 2f; color = if (dark) 0x99000000.toInt() else 0xAAFFFFFF.toInt() }
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND; strokeWidth = width }
+        val field = FloatArray(cells)
+        val spec = ContourSpec(1.0)
+        val traced = (0 until minOf(10, memberNames.size.coerceAtLeast(10))).map { k ->
+            Contours.lines(PaintballLines.memberField(mask, k, field), product.grid, view, Style(), spec, smoothing = 1, only = 0.5)
+        }
+        for (pass in 0..1) for ((k, lines) in traced.withIndex()) for (c in lines) {
+            val path = android.graphics.Path()
+            path.moveTo(c.points[0], c.points[1])
+            var i = 2
+            while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
+            if (pass == 0) canvas.drawPath(path, halo) else {
+                line.color = 0xFF000000.toInt() or (Palettes.memberColors[memberNames.getOrNull(k)] ?: 0x808080)
+                canvas.drawPath(path, line)
+            }
+        }
     }
 
     /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
