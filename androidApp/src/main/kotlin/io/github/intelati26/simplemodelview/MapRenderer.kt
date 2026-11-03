@@ -258,8 +258,36 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
     }
 
-    /** Edge width in picture pixels: 1 on a small picture, 2 on a large one. */
-    private fun edgeFor(pictureWidth: Int) = maxOf(1, pictureWidth / 1200)
+    /** How many pixels a thin shape (a rotation track one cell wide) is thickened by on a wide picture, so it still shows at the scale of the whole country. */
+    private fun growFor(pictureWidth: Int) = if (pictureWidth >= 800) 1 + maxOf(0, pictureWidth - 2000) / 2500 else 0
+
+    /** Thickens the shapes (pixels with any opacity) by [r] pixels: a clear pixel takes the most opaque neighbor within [r] along the row, then along the column. */
+    private fun grow(px: IntArray, w: Int, h: Int, r: Int) {
+        if (r <= 0) return
+        val row = IntArray(w)
+        for (j in 0 until h) {
+            System.arraycopy(px, j * w, row, 0, w)
+            for (i in 0 until w) {
+                if ((row[i] ushr 24) != 0) continue
+                var best = 0
+                for (k in maxOf(0, i - r)..minOf(w - 1, i + r)) if ((row[k] ushr 24) > (best ushr 24)) best = row[k]
+                if (best != 0) px[j * w + i] = best
+            }
+        }
+        val col = IntArray(h)
+        for (i in 0 until w) {
+            for (j in 0 until h) col[j] = px[j * w + i]
+            for (j in 0 until h) {
+                if ((col[j] ushr 24) != 0) continue
+                var best = 0
+                for (k in maxOf(0, j - r)..minOf(h - 1, j + r)) if ((col[k] ushr 24) > (best ushr 24)) best = col[k]
+                if (best != 0) px[j * w + i] = best
+            }
+        }
+    }
+
+    /** Edge width in picture pixels: 2 on a small picture, 3 on a large one. */
+    private fun edgeFor(pictureWidth: Int) = 1 + maxOf(1, pictureWidth / 1200)
 
     /** The overlay drawn at picture resolution, its shapes edged in black and haloed in white (see [outline]). */
     private fun drawHaloed(canvas: Canvas, overlay: Overlay, w: Int, h: Int) {
@@ -269,6 +297,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             Canvas(layer).drawBitmap(overlay.bitmap, null, overlay.dst, plain)
             val pixels = IntArray(w * h)
             layer.getPixels(pixels, 0, w, 0, 0, w, h)
+            grow(pixels, w, h, growFor(w))
             outline(pixels, w, h, edgeFor(w))
             layer.setPixels(pixels, 0, w, 0, 0, w, h)
             canvas.drawBitmap(layer, 0f, 0f, null)
