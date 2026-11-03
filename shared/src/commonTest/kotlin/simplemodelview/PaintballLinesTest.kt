@@ -18,6 +18,27 @@ class PaintballLinesTest {
         assertTrue(share[2].isNaN())
     }
 
+    @Test fun blurKeepsAFlatFieldAndSpreadsAPeak() {
+        val flat = FloatArray(20 * 10) { 40f }
+        assertTrue(PaintballLines.blur(flat, 20, 10, 3).all { kotlin.math.abs(it - 40f) < 1e-3f })
+        val peak = FloatArray(21 * 21).also { it[10 * 21 + 10] = 100f }
+        val soft = PaintballLines.blur(peak, 21, 21, 3)
+        assertTrue(soft[10 * 21 + 10] < 100f && soft[10 * 21 + 13] > 0f)
+        val gap = floatArrayOf(10f, Float.NaN, 10f)
+        assertTrue(PaintballLines.blur(gap, 3, 1, 1)[1].isNaN())
+    }
+
+    @Test fun neighborhoodShareCountsAMemberWithinTheRadius() {
+        val cols = 9
+        val mask = FloatArray(cols) { 0f }
+        mask[0] = 1f            // member 0 reaches the threshold in cell 0
+        mask[8] = 2f            // member 1 in cell 8
+        val share = PaintballLines.neighborhoodPercent(mask, cols, 1, 2, 2)
+        assertEquals(50f, share[2])     // within 2 cells of member 0 only
+        assertEquals(0f, share[4])      // too far from both
+        assertEquals(50f, share[6])
+    }
+
     @Test fun specsAreFoundById() {
         assertEquals("cref", PaintballLines.spec("pbl_cref")?.source)
         assertEquals(null, PaintballLines.spec("cref"))

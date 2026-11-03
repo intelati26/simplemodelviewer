@@ -47,7 +47,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
-        canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, null)
+        if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)   // the member cells go over the contours
+        canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, if (paintLines) Paint().apply { alpha = 0x90 } else null)
         for (overlay in overlays) {
             if (overlay.marker) { drawMarkers(canvas, overlay, w); continue }
             if (overlay.halo) { drawHaloed(canvas, overlay, w, h); continue }
@@ -63,7 +64,6 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         WindProducts.level(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity)
         }
-        if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
     }
@@ -72,9 +72,10 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
     private fun drawPaintballLines(canvas: Canvas, product: Product, mask: FloatArray, memberNames: List<String>, view: View, dark: Boolean, pictureWidth: Int) {
         val cells = product.grid.cells
         if (mask.size < cells) return
-        val share = PaintballLines.percent(mask, memberNames.size.takeIf { it > 0 } ?: 10)
+        val grid = product.grid
+        val share = PaintballLines.blur(PaintballLines.neighborhoodPercent(mask, grid.columns, grid.rows, memberNames.size.takeIf { it > 0 } ?: 10, PaintballLines.NEIGHBORHOOD), grid.columns, grid.rows, PaintballLines.BLUR_RADIUS)
         val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
-        val lines = Contours.lines(share, product.grid, view, Style(), spec, smoothing = PaintballLines.SMOOTHING, levelsOverride = PaintballLines.levels)
+        val lines = Contours.lines(share, product.grid, view, Style(), spec, smoothing = 1, levelsOverride = PaintballLines.levels)
         val width = maxOf(2.2f, pictureWidth / 600f)
         val halo = if (dark) 0xDD000000.toInt() else 0xEEFFFFFF.toInt()
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
