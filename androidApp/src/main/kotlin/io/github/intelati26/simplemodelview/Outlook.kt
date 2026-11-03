@@ -142,7 +142,7 @@ internal fun outlookDraws(core: Core, model: OutlookModel, view: View, valid: Lo
                 }
                 out
             }
-            AlertDraw(rings, shape.color, dashed = shape.hatched, fill = true, combined = true, hatch = if (shape.hatched) shape.intensity else 1, strong = shape.hatched)
+            AlertDraw(rings, shape.color, dashed = shape.hatched, fill = shape.hatched, combined = true, hatch = if (shape.hatched) shape.intensity else 1, strong = shape.hatched, heavy = !shape.hatched)   // outlook areas are outlines, as RadarScope draws them
         }
     }
 }

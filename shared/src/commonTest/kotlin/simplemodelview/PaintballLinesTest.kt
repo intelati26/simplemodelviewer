@@ -44,4 +44,9 @@ class PaintballLinesTest {
         assertEquals(null, PaintballLines.spec("cref"))
         assertEquals(Groups.STORM, Groups.of("pbl_uh25", false))
     }
+
+    @Test fun discussionGraphicUrls() {
+        assertEquals("https://www.spc.noaa.gov/products/md/mcd2437.png", discussionImageUrl("2437", spc = true))
+        assertEquals("https://www.wpc.ncep.noaa.gov/metwatch/images/mcd0051.gif", discussionImageUrl("51", spc = false))
+    }
 }

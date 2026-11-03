@@ -28,6 +28,7 @@ class AlertShape(
     val detailUrl: String? = null,
     val text: String? = null,
     val dashed: Boolean = false,
+    val imageUrl: String? = null,       // a discussion's graphic (the area map SPC / WPC publish with it)
 )
 
 /** The products drawn from the National Weather Service's watch / warning service, with the colors the NWS map uses. */
@@ -36,7 +37,7 @@ object AlertTypes {
         "Tornado Warning" to 0xFF0000, "Severe Thunderstorm Warning" to 0xFFA500, "Flash Flood Warning" to 0x8B0000,
         "Extreme Wind Warning" to 0xFF8C00, "Special Marine Warning" to 0xFFA500, "Snow Squall Warning" to 0xC71585,
     )
-    val watches = mapOf("Tornado Watch" to 0xFFFF00, "Severe Thunderstorm Watch" to 0xDB7093, "Flash Flood Watch" to 0x2E8B57)
+    val watches = mapOf("Tornado Watch" to 0xE02020, "Severe Thunderstorm Watch" to 0xFFD000, "Flash Flood Watch" to 0x2E8B57)   // red / yellow, as RadarScope draws them
     const val SPC_DISCUSSION = 0x00A850
     const val WPC_DISCUSSION = 0x1E90FF
 
@@ -176,6 +177,12 @@ fun parseValidRange(text: String, nowEpochSeconds: Long): Pair<Long, Long>? {
     return start to end
 }
 
+/** The graphic that goes with a discussion: SPC's `mcdNNNN.png`, WPC's `mcdNNNN.gif`. */
+fun discussionImageUrl(number: String, spc: Boolean): String {
+    val n = number.padStart(4, '0')
+    return if (spc) "https://www.spc.noaa.gov/products/md/mcd$n.png" else "https://www.wpc.ncep.noaa.gov/metwatch/images/mcd$n.gif"
+}
+
 /** One discussion page as an outline. [spc]: an SPC mesoscale discussion, otherwise a WPC precipitation discussion. Null without an outline or a validity. */
 fun parseDiscussionPage(html: String, number: String, spc: Boolean, nowEpochSeconds: Long): AlertShape? {
     val text = preText(html) ?: return null
@@ -187,6 +194,7 @@ fun parseDiscussionPage(html: String, number: String, spc: Boolean, nowEpochSeco
     return AlertShape(
         AlertKind.Discussion, (if (spc) "SPC MD " else "WPC MPD ") + number, if (spc) AlertTypes.SPC_DISCUSSION else AlertTypes.WPC_DISCUSSION, rings, start, end,
         summary = listOf(concerning, areas).filter { it.isNotEmpty() }.joinToString(": "), text = text, dashed = true,
+        imageUrl = discussionImageUrl(number, spc),
     )
 }
 
@@ -267,6 +275,13 @@ class AlertsRepository(private val http: Http) {
         val url = shape.detailUrl ?: return null
         val result = try { http.get(url) } catch (e: Exception) { return null }
         return if (result.status == 200) parseAlertDetail(result.body.decodeToString()) else null
+    }
+
+    /** The bytes of a discussion's graphic (PNG / GIF), or null when it has none or it cannot be read. */
+    suspend fun image(shape: AlertShape): ByteArray? {
+        val url = shape.imageUrl ?: return null
+        val result = try { http.get(url) } catch (e: Exception) { return null }
+        return if (result.status == 200 && result.body.isNotEmpty()) result.body else null
     }
 
     private companion object {

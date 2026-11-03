@@ -109,6 +109,7 @@ data class MrmsState(
     val alertsAsOf: Long? = null,                     // when they were read (epoch seconds)
     val alertNote: String? = null,                    // why a layer could not be read
     val alertHits: List<AlertShape> = emptyList(),    // the outlines under the tapped point
+    val alertImage: android.graphics.Bitmap? = null,   // the graphic of the discussion being read
     val alertDetail: Pair<String, String?>? = null,   // title and text of the alert being read (text null: loading)
 ) {
     val overlayName: String get() = overlayName(overlays)
@@ -317,7 +318,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens the full text of an alert (a warning's text is fetched from the NWS; a discussion's is already known). */
     fun showAlertText(shape: AlertShape) {
-        update { it.copy(alertDetail = shape.title to shape.text) }
+        update { it.copy(alertDetail = shape.title to shape.text, alertImage = null) }
+        if (shape.imageUrl != null) viewModelScope.launch {
+            val bytes = try { alertsRepo.image(shape) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } ?: return@launch
+            val bitmap = withContext(Dispatchers.Default) { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } ?: return@launch
+            update { st -> if (st.alertDetail?.first == shape.title) st.copy(alertImage = bitmap) else st }
+        }
         if (shape.text != null) return
         viewModelScope.launch {
             val text = try { alertsRepo.text(shape) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
@@ -325,7 +331,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun dismissAlertText() = update { it.copy(alertDetail = null) }
+    fun dismissAlertText() = update { it.copy(alertDetail = null, alertImage = null) }
 
     /** The outlines to draw on the picture [base]: only on the newest frame (they are of now, not of an older scan). */
     private fun alertDraws(base: View): List<AlertDraw> {
@@ -344,7 +350,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 out
             }
-            AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind != AlertKind.Discussion)
+            AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind == AlertKind.Watch, shade = shape.kind == AlertKind.Watch, heavy = shape.kind == AlertKind.Warning)   // watches: shaded and hatched; warnings and discussions: outlines
         }
     }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -271,6 +272,9 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             title = { Text(title) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
+                    s.alertImage?.let { image ->
+                        androidx.compose.foundation.Image(image.asImageBitmap(), contentDescription = "Map of the discussion area", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), contentScale = androidx.compose.ui.layout.ContentScale.FillWidth)
+                    }
                     Text(text ?: "Loading\u2026", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                     Text("Unofficial copy: the official product is on weather.gov.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall)
                 }

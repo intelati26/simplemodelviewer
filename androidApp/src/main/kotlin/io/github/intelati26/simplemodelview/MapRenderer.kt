@@ -31,7 +31,7 @@ class Overlay(
  * [open]: the rings are lines, not outlines (LightningCast contours): not closed, not filled, a little thinner.
  * [combined]: the rings are one polygon (the outer ring, then its holes), filled together by the even-odd rule so a hole stays empty (SPC outlooks).
  */
-class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
+class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false, val shade: Boolean = false, val heavy: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
@@ -176,12 +176,14 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val baseHatch = maxOf(1f, pictureWidth / 1400f)
         val hatch = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = baseHatch }
         val gap = maxOf(12f, pictureWidth / 80f)
+        val shadeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         for (a in alerts) {
-            line.strokeWidth = if (a.open) width * 0.75f else width
+            line.strokeWidth = (if (a.open) width * 0.75f else width) * (if (a.heavy) 1.6f else 1f)
             casing.strokeWidth = line.strokeWidth + 2f
-            line.color = 0x66000000 or a.color
+            line.color = (if (a.heavy) 0xCC000000.toInt() else 0x66000000) or a.color
             line.pathEffect = if (a.dashed) android.graphics.DashPathEffect(floatArrayOf(width * 4f, width * 3f), 0f) else null
             casing.pathEffect = line.pathEffect
+            shadeFill.color = 0x30000000 or a.color
             hatch.color = (if (a.strong) 0x99000000.toInt() else 0x66000000) or a.color
             hatch.strokeWidth = baseHatch * (if (a.strong) 1.8f else 1f)
             if (a.combined && a.fill) {
@@ -202,7 +204,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 var i = 2
                 while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
                 if (!a.open) path.close()
-                if (a.fill && !a.combined) hatchInside(canvas, path, hatch, gap, a.hatch)
+                if (a.fill && !a.combined) { if (a.shade) canvas.drawPath(path, shadeFill); hatchInside(canvas, path, hatch, gap, a.hatch) }
                 canvas.drawPath(path, casing)
                 canvas.drawPath(path, line)
             }
