@@ -45,7 +45,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val paintLines = PaintballLines.isPaintballLines(product.id)
         // the probability contours lie over the model's own paintball (each member's cells over the threshold in its color): the mask is the same
         core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb)
-        val picture = if (halo) outline(argb, w, h, edgeFor(w)) else argb
+        if (halo) outline(argb, w, h, edgeFor(w))
+        val picture = argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
@@ -262,49 +263,56 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
 
     /** The overlay drawn at picture resolution, its shapes edged in black and haloed in white (see [outline]). */
     private fun drawHaloed(canvas: Canvas, overlay: Overlay, w: Int, h: Int) {
-        val layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        Canvas(layer).drawBitmap(overlay.bitmap, null, overlay.dst, Paint().apply { isFilterBitmap = false })
-        val pixels = IntArray(w * h)
-        layer.getPixels(pixels, 0, w, 0, 0, w, h)
-        layer.setPixels(outline(pixels, w, h, edgeFor(w)), 0, w, 0, 0, w, h)
-        canvas.drawBitmap(layer, 0f, 0f, null)
-        layer.recycle()
+        val plain = Paint().apply { isFilterBitmap = false }
+        try {
+            val layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            Canvas(layer).drawBitmap(overlay.bitmap, null, overlay.dst, plain)
+            val pixels = IntArray(w * h)
+            layer.getPixels(pixels, 0, w, 0, 0, w, h)
+            outline(pixels, w, h, edgeFor(w))
+            layer.setPixels(pixels, 0, w, 0, 0, w, h)
+            canvas.drawBitmap(layer, 0f, 0f, null)
+            layer.recycle()
+        } catch (_: OutOfMemoryError) {
+            // a very wide picture with the heap nearly full: the overlay without its edge and halo
+            canvas.drawBitmap(overlay.bitmap, null, overlay.dst, plain)
+        }
     }
 
     /**
      * wxqt's swath style: the shapes (pixels with any opacity) edged in black, `edge` pixels deep along the border, and a white halo (92 % opaque) on the clear
      * pixels within `edge` pixels of a shape, so a hail swath or a rotation track reads whatever color is under it.
      */
-    private fun outline(src: IntArray, w: Int, h: Int, edge: Int): IntArray {
-        val out = src.copyOf()
+    private fun outline(src: IntArray, w: Int, h: Int, edge: Int) {
+        // [src] is changed in place, so which pixels are shapes is read from a mask taken first (7 MB on a 28 MB picture, not another copy)
+        val solid = BooleanArray(w * h) { (src[it] ushr 24) != 0 }
         // the clear pixels near a shape: a square dilation of the shapes, one pass along the rows and one along the columns
         val along = BooleanArray(w * h)
         for (j in 0 until h) {
             var i = 0
             while (i < w) {
-                if ((src[j * w + i] ushr 24) != 0) for (k in maxOf(0, i - edge)..minOf(w - 1, i + edge)) along[j * w + k] = true
+                if (solid[j * w + i]) for (k in maxOf(0, i - edge)..minOf(w - 1, i + edge)) along[j * w + k] = true
                 i += 1
             }
         }
         for (j in 0 until h) for (i in 0 until w) {
             val k = j * w + i
-            if ((src[k] ushr 24) == 0) {
+            if (!solid[k]) {
                 var near = false
                 var jj = maxOf(0, j - edge)
                 while (jj <= minOf(h - 1, j + edge) && !near) { near = along[jj * w + i]; jj += 1 }
-                if (near) out[k] = HALO
+                if (near) src[k] = HALO
                 continue
             }
             var border = false
             var d = 1
             while (d <= edge && !border) {
                 border = i - d < 0 || i + d >= w || j - d < 0 || j + d >= h ||
-                    (src[k - d] ushr 24) == 0 || (src[k + d] ushr 24) == 0 || (src[k - d * w] ushr 24) == 0 || (src[k + d * w] ushr 24) == 0
+                    !solid[k - d] || !solid[k + d] || !solid[k - d * w] || !solid[k + d * w]
                 d += 1
             }
-            if (border) out[k] = 0xFF000000.toInt()
+            if (border) src[k] = 0xFF000000.toInt()
         }
-        return out
     }
 
     /** The picture to share: a header (product / run / valid time), the map and a color key. */

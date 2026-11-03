@@ -415,7 +415,8 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
-    fun goToPlace(place: Place) {
+    /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
+    fun goToPlace(place: Place, follow: Boolean = false) {
         val st = _state.value
         if (st.globe) {
             update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }
@@ -424,6 +425,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         }
         val box = st.sector
         val inSector = place.lon in box.west..box.east && place.lat in box.south..box.north
+        if (follow && !inSector) return
         viewModelScope.launch {
             if (!inSector && st.sector.name != Sector.all[0].name) {
                 update { it.copy(sector = Sector.all[0]) }

@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import simplemodelview.BackupPlace
 import simplemodelview.FrameTarget
 import simplemodelview.Grid
+import simplemodelview.RefsException
 import simplemodelview.gridCoverBox
 import simplemodelview.lambertCellMeters
 import simplemodelview.GlobeCamera
@@ -140,7 +141,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     // decoded windows, newest use last; the budget keeps a loop from filling the heap (4 bytes per cell)
     private val decoded = LinkedHashMap<String, MrmsFrame>(16, 0.75f, true)
-    private val cellBudget = 20_000_000L
+    // at most a quarter of the heap the app is allowed (4 bytes a cell), and never more than 20 million cells
+    private val cellBudget = minOf(20_000_000L, Runtime.getRuntime().maxMemory() / 16)
 
     private val _state = MutableStateFlow(
         MrmsState(
@@ -435,8 +437,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun overlayFileFor(layer: OverlayLayer, base: MrmsFile): MrmsFile? =
         nearestFile(_state.value.overlayFiles[layer.product.directory].orEmpty(), base.validTime, overlayToleranceSeconds(layer.product))
 
-    private class OverlayResult(val layer: Overlay, val shown: Triple<String, Product, FloatArray>, val info: String)
-    private var shownOverlays: List<Triple<String, Product, FloatArray>> = emptyList()
+    /** A layer of the shown picture for the read-out: its values are not kept (they are as big as the picture), [values] gets them again when a tap needs them. */
+    private class ShownOverlay(val name: String, val product: Product, val values: suspend () -> FloatArray)
+    private class OverlayResult(val layer: Overlay, val shown: ShownOverlay, val info: String)
+    private var shownOverlays: List<ShownOverlay> = emptyList()
+    private var readoutJob: Job? = null
 
     /** What names a layer in the read-out and the file times: its own title, or only what tells the layers of a stack apart ("5 min"). */
     private fun layerLabel(layer: OverlayLayer, stack: Int) =
@@ -465,7 +470,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val shortName = layerLabel(layer, layers.size)
             val product = Product(ov.directory, ov.displayTitle, ov.group, style, hasMembers = false, timeDimension = null, grid = g)
             // (a translucent layer is not thickened: drawing it several times would stack its opacity)
-            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov), markerColor = overlayMarkerColor(ov)), Triple(shortName, product, frame.window.values), "$shortName ${formatClock(file.validTime)}")
+            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov), markerColor = overlayMarkerColor(ov)), ShownOverlay(shortName, product) { decode(ov, file, "$label|overlay|${base.grid.id}", gridCoverBox(core, base.grid), stepOf(ov), cache, FrameTarget.Onto(base.grid)).window.values }, "$shortName ${formatClock(file.validTime)}")
         }
         return results
     }
@@ -529,9 +534,18 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     ): MrmsFrame {
         val key = "${file.key}|$label|$step"
         if (cache) decoded[key]?.let { return it }
-        val f = withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) }
+        val f = withMemory { withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) } }
         if (cache) { decoded[key] = f; trimCache() }
         return f
+    }
+
+    /** Runs [block]; when the heap is full it lets go of every cached window and tries once more, and then reports it as an error (not a crash). */
+    private suspend fun <T> withMemory(block: suspend () -> T): T = try {
+        block()
+    } catch (e: OutOfMemoryError) {
+        decoded.clear()
+        System.gc()
+        try { block() } catch (e: OutOfMemoryError) { throw RefsException("Not enough memory for this view. Zoom in, or turn off some overlays.") }
     }
 
     private fun sectorBox(sector: Sector, margin: Double = 0.05) =
@@ -559,7 +573,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
         outlook.want(file.validTime)
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) }
+        val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) } }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -600,14 +614,24 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
         var text = readout(core, product, values, emptyList(), column, row)
         outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
-        for ((name, op, ovValues) in shownOverlays) {
-            val c = core.latLonToGrid(op.grid, lat, lon)
-            val v = shownValue(op.style, ovValues, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
-            text += "   \u00B7 $name: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
-        }
         val st = _state.value
         val hits = if (st.alertKinds.isNotEmpty() && st.index == st.files.lastIndex) shapesAt(st.alertShapes.filter { it.kind in st.alertKinds }, lat, lon) else emptyList()
         update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon, alertHits = hits) }
+        // the layers' values are fetched for this tap (from the cache, or decoded again from the downloaded file): the read-out follows a moment later
+        val layers = shownOverlays
+        if (layers.isEmpty()) return
+        readoutJob?.cancel()
+        readoutJob = viewModelScope.launch {
+            var more = text
+            for (layer in layers) {
+                val values = try { layer.values() } catch (e: CancellationException) { throw e } catch (_: Exception) { continue } catch (_: OutOfMemoryError) { continue }
+                val op = layer.product
+                val c = core.latLonToGrid(op.grid, lat, lon)
+                val v = shownValue(op.style, values, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
+                more += "   \u00B7 ${layer.name}: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
+                if (_state.value.tapLatLon == lat to lon) update { it.copy(readout = more) }
+            }
+        }
     }
 
     fun onGlobeTap(px: Float, py: Float) {
@@ -668,9 +692,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val box = View("Detail", 0, 0, g2.columns, g2.rows, pixelScale(g2), 1, g2)
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
         val synthetic = synthetic(product, g2)
-        val bitmap = withContext(Dispatchers.Default) {
+        val bitmap = withMemory { withContext(Dispatchers.Default) {
             renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product))
-        }
+        } }
         val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
         return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
     }
@@ -763,7 +787,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
-    fun goToPlace(place: Place) {
+    /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
+    fun goToPlace(place: Place, follow: Boolean = false) {
         val st = _state.value
         if (st.globe) {
             update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }
@@ -772,6 +797,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val box = st.sector
         val inSector = place.lon in box.west..box.east && place.lat in box.south..box.north
+        if (follow && !inSector) return
         viewModelScope.launch {
             if (!inSector && st.sector.name != "CONUS") {
                 update { it.copy(sector = Sector.all[0]) }

@@ -274,10 +274,11 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
             dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
         )
     }
+    val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
     if (places) PlacesDialog(
         s.places, onDismiss = { places = false },
         onGo = { places = false; vm.goToPlace(it) },
-        onDelete = vm::deletePlace,
+        onDelete = vm::deletePlace, live = live,
     )
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
     if (sharing) ShareDialog(
@@ -490,12 +491,23 @@ private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
 }
 
 @Composable
-internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit) {
+internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit, live: LiveControl? = null) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
         title = { Text("Places") },
         text = {
+          Column {
+            live?.let {
+                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("My location (live)", fontWeight = FontWeight.Bold)
+                        Text("Keeps the crosshair on where you are.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    androidx.compose.material3.Switch(checked = it.on, onCheckedChange = it.set)
+                }
+                HorizontalDivider()
+            }
             if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place; Show jumps back to it.")
             else LazyColumn {
                 items(places, key = { it.name }) { p ->
@@ -509,6 +521,7 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
                     HorizontalDivider()
                 }
             }
+          }
         },
     )
 }

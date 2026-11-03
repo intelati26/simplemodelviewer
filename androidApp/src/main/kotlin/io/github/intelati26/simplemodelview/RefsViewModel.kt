@@ -452,9 +452,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
-    fun goToPlace(place: Place) {
+    /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
+    fun goToPlace(place: Place, follow: Boolean = false) {
         val (c, r) = core.latLonToGrid(_state.value.product?.grid ?: Grid.REFS, place.lat, place.lon)
         var inView = c >= view.col0 && c <= view.col0 + view.cols - 1 && r >= view.row0 && r <= view.row0 + view.rows - 1
+        if (follow && !inView) return
         if (!inView && _state.value.sector.name != "CONUS") {
             update { it.copy(sector = Sector.all[0]) }
             viewModelScope.launch { rerender(); tapCell(c, r) }
