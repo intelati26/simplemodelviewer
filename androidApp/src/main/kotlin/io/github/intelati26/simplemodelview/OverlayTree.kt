@@ -41,6 +41,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import simplemodelview.AlertKind
 import simplemodelview.OverlayLayer
+import simplemodelview.OverlayPresets
 import simplemodelview.OutlookType
 import simplemodelview.Stop
 import simplemodelview.Style
@@ -73,7 +74,7 @@ internal fun overlaySummary(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OverlayTreeDialog(
-    layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarNest: () -> Unit, onRadarRotationLightning: () -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
+    layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarCombo: (Boolean, Boolean, Boolean) -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
     alertKinds: Set<AlertKind>, alertsAsOf: Long?, alertNote: String?, newestOnly: Boolean, onAlertKinds: (Set<AlertKind>) -> Unit,
     outlook: OutlookState, valid: Long?, onOutlook: (OutlookType?) -> Unit,
     lightning: LightningState, onLightning: (Boolean) -> Unit,
@@ -95,10 +96,32 @@ internal fun OverlayTreeDialog(
                     // radar fields
                     TreeNode("Radar fields", if (layers.isEmpty()) "off" else overlayName(layers), "radar" in open, { toggle("radar") }) {
                         val current = overlayName(layers)
-                        Choice("No overlay", null, layers.isEmpty(), onRadarNone)
-                        Choice("Lightning nest", "Strikes as crosses by recency: yellow the last minute, orange 5 minutes, red 15, purple 30", current == "Lightning nest", onRadarNest)
-                        Choice("Rotation + lightning", "The last hour's rotation tracks (0-2 km) with the lightning crosses over them", current == "Rotation + lightning", onRadarRotationLightning)
-                        Choice("Choose a product…", "Rotation tracks, strikes, hail size, any other field", layers.isNotEmpty() && current != "Lightning nest" && current != "Rotation + lightning", onRadarProduct)
+                        val ids = layers.map { it.product.id }
+                        val combo = OverlayPresets.comboOf(ids)
+                        val (rotation, hail, lightningOn) = combo ?: Triple(false, false, false)
+                        Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Rotation", fontWeight = FontWeight.Bold)
+                                Text("The last hour's rotation tracks (0-2 km)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = rotation, onCheckedChange = { onRadarCombo(it, hail, lightningOn) })
+                        }
+                        Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Hail", fontWeight = FontWeight.Bold)
+                                Text("The last hour's hail swath (MESH)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = hail, onCheckedChange = { onRadarCombo(rotation, it, lightningOn) })
+                        }
+                        Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Lightning", fontWeight = FontWeight.Bold)
+                                Text("Strikes as crosses by recency: yellow the last minute, orange 5 minutes, red 15, purple 30", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = lightningOn, onCheckedChange = { onRadarCombo(rotation, hail, it) })
+                        }
+                        if (layers.isNotEmpty() && combo == null) Choice("No overlay", null, false, onRadarNone)
+                        Choice("Choose a product…", "Any other field: hail size, strike density, rain and more (replaces the switches above)", layers.isNotEmpty() && combo == null, onRadarProduct)
                         val style = styles.singleOrNull()
                         if (layers.size == 1 && style != null) {
                             val choices = overlayThresholdChoices(style)

@@ -53,6 +53,23 @@ object OverlayPresets {
     /** The last hour's rotation tracks (0-2 km, wxqt's swath style) under the lightning nest. */
     val rotationLightning = listOf(OverlaySpec("RotationTrack60min_00.50", index = -1, opacity = 1.0)) + lightningNest
 
+    private val rotationTrack = OverlaySpec("RotationTrack60min_00.50", index = -1, opacity = 1.0)
+    private val hailSwath = OverlaySpec("MESH_Max_60min_00.50", index = -1, opacity = 1.0)
+
+    /** Any mix of the last hour's hail swath, rotation tracks and the lightning nest, drawn in that order (the strikes on top). */
+    fun combo(rotation: Boolean, hail: Boolean, lightning: Boolean): List<OverlaySpec> = buildList {
+        if (hail) add(hailSwath)
+        if (rotation) add(rotationTrack)
+        if (lightning) addAll(lightningNest)
+    }
+
+    /** Which of (rotation, hail, lightning) a stack of product ids is, or null when it is something else. */
+    fun comboOf(ids: List<String>): Triple<Boolean, Boolean, Boolean>? {
+        for (r in listOf(false, true)) for (h in listOf(false, true)) for (l in listOf(false, true))
+            if (ids.isNotEmpty() && combo(r, h, l).map { it.id } == ids) return Triple(r, h, l)
+        return null
+    }
+
     fun specs(name: String): List<OverlaySpec>? = when (name) { LIGHTNING_NEST -> lightningNest; ROTATION_LIGHTNING -> rotationLightning; else -> null }
 }
 
@@ -60,7 +77,9 @@ object OverlayPresets {
 fun overlayName(layers: List<OverlayLayer>): String = when {
     layers.isEmpty() -> ""
     layers.map { it.product.id } == OverlayPresets.lightningNest.map { it.id } -> "Lightning nest"
-    layers.map { it.product.id } == OverlayPresets.rotationLightning.map { it.id } -> "Rotation + lightning"
+    layers.size > 1 && OverlayPresets.comboOf(layers.map { it.product.id }) != null -> OverlayPresets.comboOf(layers.map { it.product.id })!!.let { (r, h, l) ->
+        listOfNotNull(if (r) "Rotation" else null, if (h) "Hail" else null, if (l) "Lightning" else null).mapIndexed { i, p -> if (i == 0) p else p.lowercase() }.joinToString(" + ")
+    }
     else -> layers.joinToString(" + ") { it.product.displayTitle }
 }
 

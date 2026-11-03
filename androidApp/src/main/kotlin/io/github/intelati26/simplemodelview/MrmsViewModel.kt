@@ -405,6 +405,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         setOverlays(layers)
     }
 
+    /** Any mix of rotation, hail and lightning (none: no overlay). */
+    fun pickOverlayCombo(rotation: Boolean, hail: Boolean, lightning: Boolean) {
+        val specs = OverlayPresets.combo(rotation, hail, lightning)
+        if (specs.isEmpty()) pickOverlay(null) else setOverlays(layersFrom(specs))
+    }
+
     /** A ready-made stack, such as the lightning nest (strikes of the last 30 min / 5 min / 1 min at 20 / 50 / 100 % opacity). */
     fun pickOverlayPreset(name: String) {
         OverlayPresets.specs(name)?.let { setOverlays(layersFrom(it)) }

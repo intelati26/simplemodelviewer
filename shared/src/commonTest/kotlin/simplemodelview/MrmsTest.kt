@@ -317,6 +317,13 @@ class MrmsTest {
         assertEquals("RotationTrack60min_00.50", stack.first().id)
         assertEquals(OverlayPresets.lightningNest, stack.drop(1))
         for (spec in stack) assertTrue(MrmsCatalog.byId(spec.id) != null, spec.id)
+        assertEquals(listOf("MESH_Max_60min_00.50", "RotationTrack60min_00.50"), OverlayPresets.combo(true, true, false).map { it.id })
+        assertEquals(6, OverlayPresets.combo(true, true, true).size)
+        assertEquals(OverlayPresets.rotationLightning, OverlayPresets.combo(true, false, true))
+        assertEquals(Triple(false, true, true), OverlayPresets.comboOf(OverlayPresets.combo(false, true, true).map { it.id }))
+        assertNull(OverlayPresets.comboOf(listOf("MESH_00.50")))
+        assertEquals("Rotation + hail + lightning", overlayName(OverlayPresets.combo(true, true, true).map { OverlayLayer(MrmsCatalog.byId(it.id)!!, 0, it.opacity) }))
+        assertEquals("Hail + lightning", overlayName(OverlayPresets.combo(false, true, true).map { OverlayLayer(MrmsCatalog.byId(it.id)!!, 0, it.opacity) }))
         assertEquals("Rotation + lightning", overlayName(stack.map { OverlayLayer(MrmsCatalog.byId(it.id)!!, 0, it.opacity) }))
         assertEquals(stack, OverlayPresets.specs(OverlayPresets.ROTATION_LIGHTNING))
     }
