@@ -40,21 +40,64 @@ data class OverlaySpec(val id: String, val level: Int = 0, val index: Int = -1, 
 /** Ready-made stacks of layers. They are drawn in order, so the last is on top. */
 object OverlayPresets {
     const val LIGHTNING_NEST = "lightning-nest"
+    const val ROTATION_LIGHTNING = "rotation-lightning"
 
-    /** Strikes by recency: the last 30 minutes as a faint shadow (20 %), the last 5 minutes at half strength, the last minute solid. */
+    /** Strikes by recency, a cross each in the color of its window (1 / 5 / 15 / 30 min); the older windows are drawn first and a little fainter. */
     val lightningNest = listOf(
-        OverlaySpec("NLDN_CG_030min_AvgDensity_00.00", index = 0, opacity = 0.2),
-        OverlaySpec("NLDN_CG_005min_AvgDensity_00.00", index = 0, opacity = 0.5),
+        OverlaySpec("NLDN_CG_030min_AvgDensity_00.00", index = 0, opacity = 0.5),
+        OverlaySpec("NLDN_CG_015min_AvgDensity_00.00", index = 0, opacity = 0.65),
+        OverlaySpec("NLDN_CG_005min_AvgDensity_00.00", index = 0, opacity = 0.85),
         OverlaySpec("NLDN_CG_001min_AvgDensity_00.00", index = 0, opacity = 1.0),
     )
 
-    fun specs(name: String): List<OverlaySpec>? = if (name == LIGHTNING_NEST) lightningNest else null
+    /** The last hour's rotation tracks (0-2 km, wxqt's swath style) under the lightning nest. */
+    val rotationLightning = listOf(OverlaySpec("RotationTrack60min_00.50", index = -1, opacity = 1.0)) + lightningNest
+
+    private val spans = listOf(30, 60, 120, 240, 360, 1440)
+
+    /** The rotation products a switch can use: tracks over 0-2 km and 3-6 km, and the shear as it is now. */
+    val rotationChoices = spans.map { "RotationTrack${it}min_00.50" } + spans.map { "RotationTrackML${it}min_00.50" } +
+        listOf("MergedAzShear_0-2kmAGL_00.50", "MergedAzShear_3-6kmAGL_00.50")
+
+    /** The hail products a switch can use: swaths, the size now, the probability of severe hail and the severe hail index. */
+    val hailChoices = spans.map { "MESH_Max_${it}min_00.50" } + listOf("MESH_00.50", "POSH_00.50", "SHI_00.50")
+
+    const val DEFAULT_ROTATION = "RotationTrack60min_00.50"
+    const val DEFAULT_HAIL = "MESH_Max_60min_00.50"
+
+    /** Which products a stack of ids is made of: a hail product, a rotation product (either may be missing) and the lightning nest. */
+    data class Combo(val rotation: String?, val hail: String?, val lightning: Boolean)
+
+    /** Any mix of a hail product, a rotation product and the lightning nest, drawn in that order (the strikes on top). */
+    fun combo(rotation: String?, hail: String?, lightning: Boolean): List<OverlaySpec> = buildList {
+        if (hail != null) add(OverlaySpec(hail, index = -1, opacity = 1.0))
+        if (rotation != null) add(OverlaySpec(rotation, index = -1, opacity = 1.0))
+        if (lightning) addAll(lightningNest)
+    }
+
+    /** The mix a stack of product ids is, or null when it is something else. */
+    fun comboOf(ids: List<String>): Combo? {
+        if (ids.isEmpty()) return null
+        var i = 0
+        var hail: String? = null
+        var rotation: String? = null
+        if (ids[i] in hailChoices) { hail = ids[i]; i += 1 }
+        if (i < ids.size && ids[i] in rotationChoices) { rotation = ids[i]; i += 1 }
+        val rest = ids.drop(i)
+        if (rest.isNotEmpty() && rest != lightningNest.map { it.id }) return null
+        return Combo(rotation, hail, rest.isNotEmpty())
+    }
+
+    fun specs(name: String): List<OverlaySpec>? = when (name) { LIGHTNING_NEST -> lightningNest; ROTATION_LIGHTNING -> rotationLightning; else -> null }
 }
 
 /** The overlay as shown to the user: "Lightning nest" for that preset, otherwise the layers' titles. */
 fun overlayName(layers: List<OverlayLayer>): String = when {
     layers.isEmpty() -> ""
     layers.map { it.product.id } == OverlayPresets.lightningNest.map { it.id } -> "Lightning nest"
+    layers.size > 1 && OverlayPresets.comboOf(layers.map { it.product.id }) != null -> OverlayPresets.comboOf(layers.map { it.product.id })!!.let { (r, h, l) ->
+        listOfNotNull(if (r != null) "Rotation" else null, if (h != null) "Hail" else null, if (l) "Lightning" else null).mapIndexed { i, p -> if (i == 0) p else p.lowercase() }.joinToString(" + ")
+    }
     else -> layers.joinToString(" + ") { it.product.displayTitle }
 }
 
@@ -73,11 +116,19 @@ fun mrmsHasHalo(product: MrmsProduct) = product.group == MrmsCatalog.ROTATION ||
 /** Strike density is drawn as a cross per strike (a strike is one 1 km cell: far too small to see as a cell); area fields are not. */
 fun overlayIsMarker(product: MrmsProduct) = product.id.startsWith("NLDN_")
 
-/**
- * How big a strike's dot is relative to the base size, by how long a window the product covers: 1 minute 1.0, 5 minutes about 1.7, 30 minutes about 2.5.
- * Drawn in order, the layers of the lightning nest become nested rings: a small solid core, a larger half-strength ring, a larger faint halo.
- */
-fun overlayMarkerScale(product: MrmsProduct): Float {
-    val minutes = Regex("""_(\d+)min_""").find(product.id)?.groupValues?.get(1)?.toIntOrNull() ?: return 1f
-    return (1.0 + 0.45 * kotlin.math.ln(minutes.coerceAtLeast(1).toDouble())).toFloat()
+/** The color of a strike's cross by how long a window the product covers: 1 min yellow, 5 min orange, 15 min red, 30 min purple (0xRRGGBB); null for other products. */
+fun overlayMarkerColor(product: MrmsProduct): Int? {
+    if (!overlayIsMarker(product)) return null
+    return when (Regex("""_(\d+)min_""").find(product.id)?.groupValues?.get(1)?.toIntOrNull()) {
+        null -> null
+        in 0..1 -> 0xFFE000
+        in 2..5 -> 0xFF8A00
+        in 6..15 -> 0xE02020
+        else -> 0xA020C0
+    }
 }
+
+/**
+ * How big a strike's cross is relative to the base size: always 1 (the windows are told apart by color, see [overlayMarkerColor]).
+ */
+fun overlayMarkerScale(product: MrmsProduct): Float = 1f   // the crosses are all one size: the color says how old they are

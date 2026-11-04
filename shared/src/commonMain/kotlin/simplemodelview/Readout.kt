@@ -30,6 +30,12 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
     val raw = values[row * grid.columns + column]
     if (raw.isNaN()) return where + "no data"
     val style = product.style
+    if (PaintballLines.isPaintballLines(product.id)) {
+        val n = members.size.takeIf { it > 0 } ?: 10
+        val count = Integer.bitCount(raw.toInt())
+        val threshold = PaintballLines.spec(product.id)?.threshold?.toInt()
+        return where + "$count of $n members" + (threshold?.let { " at or above $it" } ?: "") + "   ${fixed(count * 100.0 / n, 0)}%"
+    }
     if (style.kind == Kind.Paintball) {
         val mask = raw.toInt()
         val names = (0 until 10).filter { mask and (1 shl it) != 0 }.mapNotNull { members.getOrNull(it)?.let(Palettes::memberDisplayName) }

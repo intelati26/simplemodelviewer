@@ -49,7 +49,7 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
         return nullptr;
     }
     jfloatArray result = env->NewFloatArray(count);
-    env->SetFloatArrayRegion(result, 0, count, out.data());
+    if (result != nullptr) env->SetFloatArrayRegion(result, 0, count, out.data());   // null: the OutOfMemoryError is pending and reaches the caller
     return result;
 }
 
@@ -125,7 +125,7 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     std::vector<float> out(static_cast<size_t>(dstCount));
     spc_reproject(in.data(), srcGrid, dstGrid, out.data());
     jfloatArray result = env->NewFloatArray(dstCount);
-    env->SetFloatArrayRegion(result, 0, dstCount, out.data());
+    if (result != nullptr) env->SetFloatArrayRegion(result, 0, dstCount, out.data());   // null: the OutOfMemoryError is pending and reaches the caller
     return result;
 }
 

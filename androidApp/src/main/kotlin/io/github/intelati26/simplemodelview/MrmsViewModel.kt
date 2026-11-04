@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import simplemodelview.BackupPlace
 import simplemodelview.FrameTarget
 import simplemodelview.Grid
+import simplemodelview.RefsException
 import simplemodelview.gridCoverBox
 import simplemodelview.lambertCellMeters
 import simplemodelview.GlobeCamera
@@ -52,6 +53,7 @@ import simplemodelview.encodeOverlays
 import simplemodelview.nearestFile
 import simplemodelview.overlayName
 import simplemodelview.overlayIsMarker
+import simplemodelview.overlayMarkerColor
 import simplemodelview.overlayMarkerScale
 import simplemodelview.overlayIsSparse
 import simplemodelview.overlayThresholdChoices
@@ -100,6 +102,8 @@ data class MrmsState(
     val units: Units = Units(),
     val live: Boolean = false,                   // the page is on screen and checks for newer scans by itself
     val loopLength: Int = 0,                     // how many of the newest scans Play and a loop video cover; 0 = all
+    val rotationChoice: String = OverlayPresets.DEFAULT_ROTATION,   // the product of the Rotation switch
+    val hailChoice: String = OverlayPresets.DEFAULT_HAIL,   // the product of the Hail switch
     val overlays: List<OverlayLayer> = emptyList(),   // other products drawn over the first, in order (the last on top)
     val overlayFiles: Map<String, List<MrmsFile>> = emptyMap(),   // per overlay product directory: the files in the span of the radar frames
     val overlayStyles: List<Style> = emptyList(),     // as drawn (units, minimum, opacity), for the legend
@@ -109,6 +113,7 @@ data class MrmsState(
     val alertsAsOf: Long? = null,                     // when they were read (epoch seconds)
     val alertNote: String? = null,                    // why a layer could not be read
     val alertHits: List<AlertShape> = emptyList(),    // the outlines under the tapped point
+    val alertImage: android.graphics.Bitmap? = null,   // the graphic of the discussion being read
     val alertDetail: Pair<String, String?>? = null,   // title and text of the alert being read (text null: loading)
 ) {
     val overlayName: String get() = overlayName(overlays)
@@ -138,13 +143,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     // decoded windows, newest use last; the budget keeps a loop from filling the heap (4 bytes per cell)
     private val decoded = LinkedHashMap<String, MrmsFrame>(16, 0.75f, true)
-    private val cellBudget = 20_000_000L
+    // at most a quarter of the heap the app is allowed (4 bytes a cell), and never more than 20 million cells
+    private val cellBudget = minOf(20_000_000L, Runtime.getRuntime().maxMemory() / 16)
 
     private val _state = MutableStateFlow(
         MrmsState(
             product = withSavedLevel(MrmsCatalog.byId(prefs.getString("mrms_product", null)) ?: MrmsCatalog.default),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("mrms_sector", null) } ?: Sector.all[0],
             favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(),
+            rotationChoice = prefs.getString("overlay_rotation", null)?.takeIf { it in OverlayPresets.rotationChoices } ?: OverlayPresets.DEFAULT_ROTATION,
+            hailChoice = prefs.getString("overlay_hail", null)?.takeIf { it in OverlayPresets.hailChoices } ?: OverlayPresets.DEFAULT_HAIL,
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             settings = readSettings(),
             units = readUnits(),
@@ -324,7 +332,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens the full text of an alert (a warning's text is fetched from the NWS; a discussion's is already known). */
     fun showAlertText(shape: AlertShape) {
-        update { it.copy(alertDetail = shape.title to shape.text) }
+        update { it.copy(alertDetail = shape.title to shape.text, alertImage = null) }
+        if (shape.imageUrl != null) viewModelScope.launch {
+            val bytes = try { alertsRepo.image(shape) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } ?: return@launch
+            val bitmap = withContext(Dispatchers.Default) { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } ?: return@launch
+            update { st -> if (st.alertDetail?.first == shape.title) st.copy(alertImage = bitmap) else st }
+        }
         if (shape.text != null) return
         viewModelScope.launch {
             val text = try { alertsRepo.text(shape) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
@@ -332,14 +345,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun dismissAlertText() = update { it.copy(alertDetail = null) }
+    fun dismissAlertText() = update { it.copy(alertDetail = null, alertImage = null) }
 
     /** The outlines to draw on the picture [base]: only on the newest frame (they are of now, not of an older scan). */
     private fun alertDraws(base: View): List<AlertDraw> {
         val st = _state.value
         if (st.alertKinds.isEmpty() || st.files.isEmpty() || st.index != st.files.lastIndex) return emptyList()
         val s = base.scale.toFloat()
-        return st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
+        val drawn = st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
             val rings = shape.rings.map { ring ->
                 val out = FloatArray(ring.size)
                 var i = 0
@@ -351,8 +364,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 out
             }
-            AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind != AlertKind.Discussion)
+            shape to AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind == AlertKind.Watch, shade = shape.kind == AlertKind.Watch, heavy = shape.kind == AlertKind.Warning)   // watches: shaded and hatched; warnings and discussions: outlines
         }
+        // a watch comes county by county: the counties of one watch are one area, so only its outer edge gets an outline
+        val (watches, others) = drawn.partition { it.first.kind == AlertKind.Watch }
+        val merged = watches.groupBy { (shape, _) -> shape.detailUrl ?: "${shape.title}|${shape.issued}|${shape.expires}" }.values.map { group ->
+            val first = group.first().second
+            AlertDraw(group.flatMap { it.second.rings }, first.color, first.dashed, fill = true, shade = true)
+        }
+        return merged + others.map { it.second }
     }
 
     // ---- overlay: other products over the first ----
@@ -396,6 +416,32 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         setOverlays(layers)
     }
 
+    /** Any mix of rotation, hail and lightning (none: no overlay); a switch that is already on keeps its product. */
+    fun pickOverlayCombo(rotation: Boolean, hail: Boolean, lightning: Boolean) {
+        val st = _state.value
+        val now = OverlayPresets.comboOf(st.overlays.map { it.product.id })
+        val specs = OverlayPresets.combo(if (rotation) now?.rotation ?: st.rotationChoice else null, if (hail) now?.hail ?: st.hailChoice else null, lightning)
+        if (specs.isEmpty()) pickOverlay(null) else setOverlays(layersFrom(specs))
+    }
+
+    /** The product of the Rotation switch (saved); the stack is redrawn with it when rotation is on. */
+    fun setRotationChoice(id: String) {
+        if (id !in OverlayPresets.rotationChoices) return
+        prefs.edit().putString("overlay_rotation", id).apply()
+        val now = OverlayPresets.comboOf(_state.value.overlays.map { it.product.id })
+        update { it.copy(rotationChoice = id) }
+        if (now?.rotation != null) setOverlays(layersFrom(OverlayPresets.combo(id, now.hail, now.lightning)))
+    }
+
+    /** The product of the Hail switch (saved); the stack is redrawn with it when hail is on. */
+    fun setHailChoice(id: String) {
+        if (id !in OverlayPresets.hailChoices) return
+        prefs.edit().putString("overlay_hail", id).apply()
+        val now = OverlayPresets.comboOf(_state.value.overlays.map { it.product.id })
+        update { it.copy(hailChoice = id) }
+        if (now?.hail != null) setOverlays(layersFrom(OverlayPresets.combo(now.rotation, id, now.lightning)))
+    }
+
     /** A ready-made stack, such as the lightning nest (strikes of the last 30 min / 5 min / 1 min at 20 / 50 / 100 % opacity). */
     fun pickOverlayPreset(name: String) {
         OverlayPresets.specs(name)?.let { setOverlays(layersFrom(it)) }
@@ -428,8 +474,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun overlayFileFor(layer: OverlayLayer, base: MrmsFile): MrmsFile? =
         nearestFile(_state.value.overlayFiles[layer.product.directory].orEmpty(), base.validTime, overlayToleranceSeconds(layer.product))
 
-    private class OverlayResult(val layer: Overlay, val shown: Triple<String, Product, FloatArray>, val info: String)
-    private var shownOverlays: List<Triple<String, Product, FloatArray>> = emptyList()
+    /** A layer of the shown picture for the read-out: its values are not kept (they are as big as the picture), [values] gets them again when a tap needs them. */
+    private class ShownOverlay(val name: String, val product: Product, val values: suspend () -> FloatArray)
+    private class OverlayResult(val layer: Overlay, val shown: ShownOverlay, val info: String)
+    private var shownOverlays: List<ShownOverlay> = emptyList()
+    private var readoutJob: Job? = null
 
     /** What names a layer in the read-out and the file times: its own title, or only what tells the layers of a stack apart ("5 min"). */
     private fun layerLabel(layer: OverlayLayer, stack: Int) =
@@ -458,7 +507,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val shortName = layerLabel(layer, layers.size)
             val product = Product(ov.directory, ov.displayTitle, ov.group, style, hasMembers = false, timeDimension = null, grid = g)
             // (a translucent layer is not thickened: drawing it several times would stack its opacity)
-            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov)), Triple(shortName, product, frame.window.values), "$shortName ${formatClock(file.validTime)}")
+            results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov), markerColor = overlayMarkerColor(ov)), ShownOverlay(shortName, product) { decode(ov, file, "$label|overlay|${base.grid.id}", gridCoverBox(core, base.grid), stepOf(ov), cache, FrameTarget.Onto(base.grid)).window.values }, "$shortName ${formatClock(file.validTime)}")
         }
         return results
     }
@@ -522,9 +571,18 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     ): MrmsFrame {
         val key = "${file.key}|$label|$step"
         if (cache) decoded[key]?.let { return it }
-        val f = withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) }
+        val f = withMemory { withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) } }
         if (cache) { decoded[key] = f; trimCache() }
         return f
+    }
+
+    /** Runs [block]; when the heap is full it lets go of every cached window and tries once more, and then reports it as an error (not a crash). */
+    private suspend fun <T> withMemory(block: suspend () -> T): T = try {
+        block()
+    } catch (e: OutOfMemoryError) {
+        decoded.clear()
+        System.gc()
+        try { block() } catch (e: OutOfMemoryError) { throw RefsException("Not enough memory for this view. Zoom in, or turn off some overlays.") }
     }
 
     private fun sectorBox(sector: Sector, margin: Double = 0.05) =
@@ -552,7 +610,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
         outlook.want(file.validTime)
-        val bitmap = withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) }
+        val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) } }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -593,14 +651,24 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
         var text = readout(core, product, values, emptyList(), column, row)
         outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
-        for ((name, op, ovValues) in shownOverlays) {
-            val c = core.latLonToGrid(op.grid, lat, lon)
-            val v = shownValue(op.style, ovValues, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
-            text += "   \u00B7 $name: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
-        }
         val st = _state.value
         val hits = if (st.alertKinds.isNotEmpty() && st.index == st.files.lastIndex) shapesAt(st.alertShapes.filter { it.kind in st.alertKinds }, lat, lon) else emptyList()
         update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon, alertHits = hits) }
+        // the layers' values are fetched for this tap (from the cache, or decoded again from the downloaded file): the read-out follows a moment later
+        val layers = shownOverlays
+        if (layers.isEmpty()) return
+        readoutJob?.cancel()
+        readoutJob = viewModelScope.launch {
+            var more = text
+            for (layer in layers) {
+                val values = try { layer.values() } catch (e: CancellationException) { throw e } catch (_: Exception) { continue } catch (_: OutOfMemoryError) { continue }
+                val op = layer.product
+                val c = core.latLonToGrid(op.grid, lat, lon)
+                val v = shownValue(op.style, values, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
+                more += "   \u00B7 ${layer.name}: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
+                if (_state.value.tapLatLon == lat to lon) update { it.copy(readout = more) }
+            }
+        }
     }
 
     fun onGlobeTap(px: Float, py: Float) {
@@ -661,9 +729,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val box = View("Detail", 0, 0, g2.columns, g2.rows, pixelScale(g2), 1, g2)
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
         val synthetic = synthetic(product, g2)
-        val bitmap = withContext(Dispatchers.Default) {
+        val bitmap = withMemory { withContext(Dispatchers.Default) {
             renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product))
-        }
+        } }
         val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
         return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
     }
@@ -756,7 +824,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
-    fun goToPlace(place: Place) {
+    /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
+    fun goToPlace(place: Place, follow: Boolean = false) {
         val st = _state.value
         if (st.globe) {
             update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }
@@ -765,6 +834,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val box = st.sector
         val inSector = place.lon in box.west..box.east && place.lat in box.south..box.north
+        if (follow && !inSector) return
         viewModelScope.launch {
             if (!inSector && st.sector.name != "CONUS") {
                 update { it.copy(sector = Sector.all[0]) }

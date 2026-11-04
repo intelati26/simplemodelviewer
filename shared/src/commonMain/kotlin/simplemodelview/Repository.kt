@@ -73,6 +73,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
     /** Like [readFrame], with the time the server says the frame's file was uploaded. */
     suspend fun readFrameTimed(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int): Frame {
         WindProducts.level(product.id)?.let { return readWind(store, product, it, timeIndex) }
+        PaintballLines.spec(product.id)?.let { return readPaintballLines(store, product, it, timeIndex) }
         val array = store.arrays.getValue(product.id)
         val index = if (product.hasMembers) listOf(memberIndex, timeIndex, 0, 0) else listOf(timeIndex, 0, 0)
         val cells = product.grid.cells
@@ -100,11 +101,31 @@ class RefsRepository(private val http: Http, private val core: Core) {
         return Frame(WindProducts.pack(cells, planes[0], planes[1], planes[2]), fetched[1].second?.lastModified)
     }
 
+    /** A paintball-contour product's frame: every member's chunk of one time, folded into the member bit mask (see [PaintballLines.mask]); all NaN if none is there. */
+    private suspend fun readPaintballLines(store: CycleStore, product: Product, spec: PaintballLines.Spec, timeIndex: Int): Frame {
+        val cells = product.grid.cells
+        val array = store.arrays.getValue(spec.source)
+        val count = minOf(10, array.shape.first())
+        val chunks = coroutineScope { (0 until count).map { m -> async { fetchChunk(store.cycle, array, listOf(m, timeIndex, 0, 0)) } }.awaitAll() }
+        val fields = ArrayList<FloatArray>()
+        try {
+            for (chunk in chunks) fields += if (chunk == null) FloatArray(cells) { Float.NaN } else core.decodeFloats(chunk.body, array.dtype, array.compressed, cells)
+        } catch (e: Exception) {
+            throw RefsException("could not decode ${product.id}: ${e.message}")
+        }
+        return Frame(PaintballLines.mask(fields, spec.threshold), chunks.firstNotNullOfOrNull { it?.lastModified })
+    }
+
     /** Downloads a frame's chunk without decoding it, so an HTTP cache has it for the loop. */
     suspend fun prefetchFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int) {
         WindProducts.level(product.id)?.let { level ->
             val (z, u, v) = WindProducts.sources(level)
             for (name in listOf(z, u, v)) fetchChunk(store.cycle, store.arrays.getValue(name), listOf(timeIndex, 0, 0))
+            return
+        }
+        PaintballLines.spec(product.id)?.let { spec ->
+            val source = store.arrays.getValue(spec.source)
+            for (m in 0 until 10) fetchChunk(store.cycle, source, listOf(m, timeIndex, 0, 0))
             return
         }
         val array = store.arrays.getValue(product.id)

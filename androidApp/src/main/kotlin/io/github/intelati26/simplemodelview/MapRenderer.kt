@@ -5,9 +5,11 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import simplemodelview.ContourLine
+import simplemodelview.ContourSpec
 import simplemodelview.Contours
 import simplemodelview.Core
 import simplemodelview.Kind
+import simplemodelview.PaintballLines
 import simplemodelview.Palettes
 import simplemodelview.Product
 import simplemodelview.Stop
@@ -22,6 +24,8 @@ class Overlay(
     val bitmap: Bitmap, val dst: android.graphics.RectF, val bold: Boolean, val marker: Boolean = false, val markerScale: Float = 1f,
     /** Edge the shapes in black with a white halo outside (hail swaths, rotation tracks). */
     val halo: Boolean = false,
+    /** Markers: the color of every cross (0xRRGGBB) when it stands for an age (1 / 5 / 15 / 30 min); null: each cross takes its cell's color. */
+    val markerColor: Int? = null,
 )
 
 /**
@@ -29,7 +33,7 @@ class Overlay(
  * [open]: the rings are lines, not outlines (LightningCast contours): not closed, not filled, a little thinner.
  * [combined]: the rings are one polygon (the outer ring, then its holes), filled together by the even-odd rule so a hole stays empty (SPC outlooks).
  */
-class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false)
+class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false, val shade: Boolean = false, val heavy: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
@@ -38,12 +42,16 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val h = view.pixelHeight
         val argb = IntArray(w * h)
         val memberRgb = IntArray(10) { Palettes.memberColors[memberNames.getOrNull(it)] ?: 0x808080 }
-        core.render(values, view, style, memberRgb, argb)
-        val picture = if (halo) outline(argb, w, h, edgeFor(w)) else argb
+        val paintLines = PaintballLines.isPaintballLines(product.id)
+        // the probability contours lie over the model's own paintball (each member's cells over the threshold in its color): the mask is the same
+        core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb)
+        if (halo) outline(argb, w, h, edgeFor(w))
+        val picture = argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
-        canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, null)
+        if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)   // the member cells go over the contours
+        canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, if (paintLines) Paint().apply { alpha = 0x90 } else null)
         for (overlay in overlays) {
             if (overlay.marker) { drawMarkers(canvas, overlay, w); continue }
             if (overlay.halo) { drawHaloed(canvas, overlay, w, h); continue }
@@ -61,6 +69,35 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
+    }
+
+    /** Lines of the share of members at or above the threshold (10 / 30 / 50 / 70 / 90 %), blurred over a neighborhood; one color per level, the 50 % line heavier. */
+    private fun drawPaintballLines(canvas: Canvas, product: Product, mask: FloatArray, memberNames: List<String>, view: View, dark: Boolean, pictureWidth: Int) {
+        val cells = product.grid.cells
+        if (mask.size < cells) return
+        val grid = product.grid
+        val share = PaintballLines.blur(PaintballLines.neighborhoodPercent(mask, grid.columns, grid.rows, memberNames.size.takeIf { it > 0 } ?: 10, PaintballLines.NEIGHBORHOOD), grid.columns, grid.rows, PaintballLines.BLUR_RADIUS)
+        val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
+        val lines = Contours.lines(share, product.grid, view, Style(), spec, smoothing = 1, levelsOverride = PaintballLines.levels)
+        val width = maxOf(2.2f, pictureWidth / 600f)
+        val halo = if (dark) 0xDD000000.toInt() else 0xEEFFFFFF.toInt()
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+        for (c in lines.sortedBy { it.level }) {
+            val path = android.graphics.Path()
+            path.moveTo(c.points[0], c.points[1])
+            var i = 2
+            while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
+            val w = if (c.bold) width * 1.8f else width
+            line.strokeWidth = w + 4f; line.color = halo; canvas.drawPath(path, line)
+            line.strokeWidth = w; line.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawPath(path, line)
+        }
+        for (c in lines) if (c.labelAt >= 0) {
+            val x = c.points[c.labelAt]; val y = c.points[c.labelAt + 1]
+            if (x < 0 || y < 0 || x > pictureWidth) continue
+            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(c.label, x, y + text.textSize / 3, text)
+            text.style = Paint.Style.FILL; text.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawText(c.label, x, y + text.textSize / 3, text)
+        }
     }
 
     /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
@@ -120,19 +157,38 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
     }
 
+    /** Diagonal lines inside [path] instead of a solid fill, so what is underneath stays readable. */
+    private fun hatchInside(canvas: Canvas, path: android.graphics.Path, paint: Paint, gap: Float, kind: Int = 1) {
+        val box = android.graphics.RectF().also { path.computeBounds(it, true) }
+        canvas.save()
+        canvas.clipPath(path)
+        var x = box.left - box.height()
+        if (kind and 1 != 0) while (x < box.right) { canvas.drawLine(x, box.bottom, x + box.height(), box.top, paint); x += gap }
+        if (kind and 2 != 0) {
+            x = box.left
+            while (x < box.right + box.height()) { canvas.drawLine(x, box.bottom, x - box.height(), box.top, paint); x += gap }
+        }
+        canvas.restore()
+    }
+
     /** Alert outlines over everything else: a dark casing under a colored line so they read on any background. */
     private fun drawAlerts(canvas: Canvas, alerts: List<AlertDraw>, pictureWidth: Int) {
         val width = maxOf(2f, pictureWidth / 600f)
-        val casing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width + 2f; color = 0x99000000.toInt(); strokeJoin = Paint.Join.ROUND }
+        val casing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width + 2f; color = 0x4D000000.toInt(); strokeJoin = Paint.Join.ROUND }
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width; strokeJoin = Paint.Join.ROUND }
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val baseHatch = maxOf(1f, pictureWidth / 1400f)
+        val hatch = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = baseHatch }
+        val gap = maxOf(12f, pictureWidth / 80f)
+        val shadeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         for (a in alerts) {
-            line.strokeWidth = if (a.open) width * 0.75f else width
+            line.strokeWidth = (if (a.open) width * 0.75f else width) * (if (a.heavy) 1.6f else 1f)
             casing.strokeWidth = line.strokeWidth + 2f
-            line.color = 0xFF000000.toInt() or a.color
+            line.color = (if (a.heavy) 0xCC000000.toInt() else 0x66000000) or a.color
             line.pathEffect = if (a.dashed) android.graphics.DashPathEffect(floatArrayOf(width * 4f, width * 3f), 0f) else null
             casing.pathEffect = line.pathEffect
-            fill.color = (0x28 shl 24) or a.color
+            shadeFill.color = 0x30000000 or a.color
+            hatch.color = (if (a.strong) 0x99000000.toInt() else 0x66000000) or a.color
+            hatch.strokeWidth = baseHatch * (if (a.strong) 1.8f else 1f)
             if (a.combined && a.fill) {
                 val whole = android.graphics.Path().apply { fillType = android.graphics.Path.FillType.EVEN_ODD }
                 for (ring in a.rings) {
@@ -142,7 +198,23 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                     while (i + 1 < ring.size) { whole.lineTo(ring[i], ring[i + 1]); i += 2 }
                     whole.close()
                 }
-                canvas.drawPath(whole, fill)
+                if (a.strong) hatchInside(canvas, whole, hatch, gap, a.hatch)   // only the CIG / significant areas are hatched
+            }
+            // a watch is a patchwork of counties: shade and hatch each, but outline only the outer edge of the union, not the county lines inside it
+            var outer: android.graphics.Path? = null
+            if (a.shade && a.rings.size > 1) {
+                val union = android.graphics.Path()
+                var ok = true
+                for (ring in a.rings) {
+                    if (ring.size < 6) continue
+                    val p = android.graphics.Path()
+                    p.moveTo(ring[0], ring[1])
+                    var i = 2
+                    while (i + 1 < ring.size) { p.lineTo(ring[i], ring[i + 1]); i += 2 }
+                    p.close()
+                    if (union.isEmpty) union.set(p) else if (!union.op(p, android.graphics.Path.Op.UNION)) { ok = false; break }
+                }
+                if (ok) outer = union
             }
             for (ring in a.rings) {
                 if (ring.size < 6) continue
@@ -151,10 +223,10 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 var i = 2
                 while (i + 1 < ring.size) { path.lineTo(ring[i], ring[i + 1]); i += 2 }
                 if (!a.open) path.close()
-                if (a.fill && !a.combined) canvas.drawPath(path, fill)
-                canvas.drawPath(path, casing)
-                canvas.drawPath(path, line)
+                if (a.fill && !a.combined) { if (a.shade) canvas.drawPath(path, shadeFill); if (a.strong) hatchInside(canvas, path, hatch, gap, a.hatch) }
+                if (outer == null) { canvas.drawPath(path, casing); canvas.drawPath(path, line) }
             }
+            outer?.let { canvas.drawPath(it, casing); canvas.drawPath(it, line) }
         }
     }
 
@@ -179,61 +251,97 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             if (alpha == 0) continue
             val x = overlay.dst.left + (i % bw + 0.5f) * cw
             val y = overlay.dst.top + (i / bw + 0.5f) * ch
-            ink.color = c
+            ink.color = overlay.markerColor?.let { (alpha shl 24) or it } ?: c
             rim.alpha = maxOf(alpha * 2 / 3, 90)         // (even a 20 % shadow gets a visible rim)
             canvas.drawLine(x - arm, y, x + arm, y, rim); canvas.drawLine(x, y - arm, x, y + arm, rim)
             canvas.drawLine(x - arm, y, x + arm, y, ink); canvas.drawLine(x, y - arm, x, y + arm, ink)
         }
     }
 
-    /** Edge width in picture pixels: 1 on a small picture, 2 on a large one. */
-    private fun edgeFor(pictureWidth: Int) = maxOf(1, pictureWidth / 1200)
+    /** How many pixels a thin shape (a rotation track one cell wide) is thickened by on a wide picture, so it still shows at the scale of the whole country. */
+    private fun growFor(pictureWidth: Int) = if (pictureWidth >= 800) 1 + maxOf(0, pictureWidth - 2000) / 2500 else 0
+
+    /** Thickens the shapes (pixels with any opacity) by [r] pixels: a clear pixel takes the most opaque neighbor within [r] along the row, then along the column. */
+    private fun grow(px: IntArray, w: Int, h: Int, r: Int) {
+        if (r <= 0) return
+        val row = IntArray(w)
+        for (j in 0 until h) {
+            System.arraycopy(px, j * w, row, 0, w)
+            for (i in 0 until w) {
+                if ((row[i] ushr 24) != 0) continue
+                var best = 0
+                for (k in maxOf(0, i - r)..minOf(w - 1, i + r)) if ((row[k] ushr 24) > (best ushr 24)) best = row[k]
+                if (best != 0) px[j * w + i] = best
+            }
+        }
+        val col = IntArray(h)
+        for (i in 0 until w) {
+            for (j in 0 until h) col[j] = px[j * w + i]
+            for (j in 0 until h) {
+                if ((col[j] ushr 24) != 0) continue
+                var best = 0
+                for (k in maxOf(0, j - r)..minOf(h - 1, j + r)) if ((col[k] ushr 24) > (best ushr 24)) best = col[k]
+                if (best != 0) px[j * w + i] = best
+            }
+        }
+    }
+
+    /** Edge width in picture pixels: 2 on a small picture, 3 on a large one. */
+    private fun edgeFor(pictureWidth: Int) = 1 + maxOf(1, pictureWidth / 1200)
 
     /** The overlay drawn at picture resolution, its shapes edged in black and haloed in white (see [outline]). */
     private fun drawHaloed(canvas: Canvas, overlay: Overlay, w: Int, h: Int) {
-        val layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        Canvas(layer).drawBitmap(overlay.bitmap, null, overlay.dst, Paint().apply { isFilterBitmap = false })
-        val pixels = IntArray(w * h)
-        layer.getPixels(pixels, 0, w, 0, 0, w, h)
-        layer.setPixels(outline(pixels, w, h, edgeFor(w)), 0, w, 0, 0, w, h)
-        canvas.drawBitmap(layer, 0f, 0f, null)
-        layer.recycle()
+        val plain = Paint().apply { isFilterBitmap = false }
+        try {
+            val layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            Canvas(layer).drawBitmap(overlay.bitmap, null, overlay.dst, plain)
+            val pixels = IntArray(w * h)
+            layer.getPixels(pixels, 0, w, 0, 0, w, h)
+            grow(pixels, w, h, growFor(w))
+            outline(pixels, w, h, edgeFor(w))
+            layer.setPixels(pixels, 0, w, 0, 0, w, h)
+            canvas.drawBitmap(layer, 0f, 0f, null)
+            layer.recycle()
+        } catch (_: OutOfMemoryError) {
+            // a very wide picture with the heap nearly full: the overlay without its edge and halo
+            canvas.drawBitmap(overlay.bitmap, null, overlay.dst, plain)
+        }
     }
 
     /**
      * wxqt's swath style: the shapes (pixels with any opacity) edged in black, `edge` pixels deep along the border, and a white halo (92 % opaque) on the clear
      * pixels within `edge` pixels of a shape, so a hail swath or a rotation track reads whatever color is under it.
      */
-    private fun outline(src: IntArray, w: Int, h: Int, edge: Int): IntArray {
-        val out = src.copyOf()
+    private fun outline(src: IntArray, w: Int, h: Int, edge: Int) {
+        // [src] is changed in place, so which pixels are shapes is read from a mask taken first (7 MB on a 28 MB picture, not another copy)
+        val solid = BooleanArray(w * h) { (src[it] ushr 24) != 0 }
         // the clear pixels near a shape: a square dilation of the shapes, one pass along the rows and one along the columns
         val along = BooleanArray(w * h)
         for (j in 0 until h) {
             var i = 0
             while (i < w) {
-                if ((src[j * w + i] ushr 24) != 0) for (k in maxOf(0, i - edge)..minOf(w - 1, i + edge)) along[j * w + k] = true
+                if (solid[j * w + i]) for (k in maxOf(0, i - edge)..minOf(w - 1, i + edge)) along[j * w + k] = true
                 i += 1
             }
         }
         for (j in 0 until h) for (i in 0 until w) {
             val k = j * w + i
-            if ((src[k] ushr 24) == 0) {
+            if (!solid[k]) {
                 var near = false
                 var jj = maxOf(0, j - edge)
                 while (jj <= minOf(h - 1, j + edge) && !near) { near = along[jj * w + i]; jj += 1 }
-                if (near) out[k] = HALO
+                if (near) src[k] = HALO
                 continue
             }
             var border = false
             var d = 1
             while (d <= edge && !border) {
                 border = i - d < 0 || i + d >= w || j - d < 0 || j + d >= h ||
-                    (src[k - d] ushr 24) == 0 || (src[k + d] ushr 24) == 0 || (src[k - d * w] ushr 24) == 0 || (src[k + d * w] ushr 24) == 0
+                    !solid[k - d] || !solid[k + d] || !solid[k - d * w] || !solid[k + d * w]
                 d += 1
             }
-            if (border) out[k] = 0xFF000000.toInt()
+            if (border) src[k] = 0xFF000000.toInt()
         }
-        return out
     }
 
     /** The picture to share: a header (product / run / valid time), the map and a color key. */

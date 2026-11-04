@@ -71,7 +71,7 @@ class MapLines(context: Context, private val core: Core) {
         val plan = listOf(
             Triple("mx", if (dark) 0xFF8A8A8A.toInt() else 0xFF5A5A5A.toInt(), 1.0f * widthUnit),
             Triple("ca", if (dark) 0xFF8A8A8A.toInt() else 0xFF5A5A5A.toInt(), 1.0f * widthUnit),
-        ) + (if (counties) listOf(Triple("county", if (dark) 0x66AAAAAA else 0x66606060, 0.6f * widthUnit)) else emptyList()) +
+        ) + (if (counties) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.5f * widthUnit)) else emptyList()) +
             listOf(Triple("statev2", if (dark) 0xFFD0D0D0.toInt() else 0xFF323232.toInt(), 1.3f * widthUnit))
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = true }
         val w = view.pixelWidth.toFloat()
@@ -109,7 +109,7 @@ class MapLines(context: Context, private val core: Core) {
         val zoomedIn = r > width * 1.4f
         val gray = if (dark) 0xFF9AA4B0.toInt() else 0xFF4A5560.toInt()
         val plan = listOf(Triple("mx", gray, 0.8f), Triple("ca", gray, 0.8f)) +
-            (if (zoomedIn && detailed) listOf(Triple("county", if (dark) 0x55AAAAAA else 0x55606060, 0.5f)) else emptyList()) +
+            (if (zoomedIn && detailed) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
             listOf(Triple("statev2", if (dark) 0xFFE0E4E8.toInt() else 0xFF2A3036.toInt(), 1.1f))
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = detailed }
         for ((name, color, width1) in plan) {

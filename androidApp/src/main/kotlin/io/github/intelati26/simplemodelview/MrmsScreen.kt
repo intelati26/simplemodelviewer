@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -213,7 +214,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
         )
     }
-    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace)
+    val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live)
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
         onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, units = s.units, onUnits = vm::setUnits, disclaimer = MRMS_DISCLAIMER, showContours = true,
@@ -258,7 +260,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
     }
     if (overlayTree) OverlayTreeDialog(
         layers = s.overlays, styles = s.overlayStyles,
-        onRadarNone = { vm.pickOverlay(null) }, onRadarNest = { vm.pickOverlayPreset(simplemodelview.OverlayPresets.LIGHTNING_NEST) },
+        onRadarNone = { vm.pickOverlay(null) }, onRadarCombo = vm::pickOverlayCombo,
+        rotationChoice = s.rotationChoice, hailChoice = s.hailChoice, onRotationChoice = vm::setRotationChoice, onHailChoice = vm::setHailChoice,
         onRadarProduct = { overlayPicker = true }, onThreshold = vm::setOverlayThreshold,
         alertKinds = s.alertKinds, alertsAsOf = s.alertsAsOf, alertNote = s.alertNote, newestOnly = s.index != s.files.lastIndex, onAlertKinds = vm::setAlertKinds,
         outlook = outlookState, valid = s.file?.validTime, onOutlook = { AppContainer.outlook.setType(it) },
@@ -274,6 +277,9 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
             title = { Text(title) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
+                    s.alertImage?.let { image ->
+                        androidx.compose.foundation.Image(image.asImageBitmap(), contentDescription = "Map of the discussion area", modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), contentScale = androidx.compose.ui.layout.ContentScale.FillWidth)
+                    }
                     Text(text ?: "Loading\u2026", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                     Text("Unofficial copy: the official product is on weather.gov.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall)
                 }

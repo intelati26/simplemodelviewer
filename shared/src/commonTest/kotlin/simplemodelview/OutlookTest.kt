@@ -61,6 +61,17 @@ class OutlookTest {
         assertEquals(null, data.valid)
     }
 
+    @Test fun intensityGroupsAreHatchedAreasWithTheirOwnPattern() {
+        val torn = """{"type":"FeatureCollection","features":[
+            ${feature(""""DN":2,"LABEL":"CIG3","LABEL2":"Tornado Conditional Intensity Group 3 Risk"""", """{"type":"Polygon","coordinates":[${square(-97.0, 33.0, -93.0, 37.0)}]}""")},
+            ${feature(""""DN":2,"LABEL":"CIG1","LABEL2":"Tornado Conditional Intensity Group 1 Risk"""", """{"type":"Polygon","coordinates":[${square(-98.0, 32.0, -92.0, 38.0)}]}""")}
+        ]}"""
+        val shapes = parseOutlookGeoJson(torn).shapes
+        assertEquals(listOf(1, 3), shapes.map { it.intensity })           // the more intense group lies on top
+        assertTrue(shapes.all { it.hatched })
+        assertNull(outlookAt(shapes, 35.0, -95.0))                        // not a level to read out
+    }
+
     @Test fun damagedFilesGiveNoAreas() {
         assertEquals(0, parseOutlookGeoJson("not json").shapes.size)
         assertEquals(0, parseOutlookGeoJson("""{"features":[{"properties":{"LABEL":"SLGT"},"geometry":{"type":"Polygon","coordinates":[[[1,2]]]}}]}""").shapes.size)

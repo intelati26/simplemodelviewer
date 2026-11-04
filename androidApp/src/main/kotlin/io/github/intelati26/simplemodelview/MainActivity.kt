@@ -232,7 +232,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
         }
         val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             OutlookRow(outlookState, s.times.getOrNull(s.timeIndex), onClick = { outlookDialog = true })
-            s.style?.let { Legend(it, s.members) }
+            s.style?.let { Legend(it, s.members, withMembers = s.product?.id?.let(simplemodelview.PaintballLines::isPaintballLines) == true) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
@@ -278,10 +278,11 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
             dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
         )
     }
+    val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
     if (places) PlacesDialog(
         s.places, onDismiss = { places = false },
         onGo = { places = false; vm.goToPlace(it) },
-        onDelete = vm::deletePlace,
+        onDelete = vm::deletePlace, live = live,
     )
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
     if (sharing) ShareDialog(
@@ -351,16 +352,16 @@ private fun MapView(s: UiState, vm: RefsViewModel) {
 }
 
 @Composable
-internal fun Legend(style: Style, members: List<String>) {
+internal fun Legend(style: Style, members: List<String>, withMembers: Boolean = false) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
-        if (style.kind == Kind.Paintball) {
+        if (style.kind == Kind.Paintball || withMembers) {
             Row(Modifier.fillMaxWidth()) {
                 for (i in 0 until 10) Box(
                     Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or (Palettes.memberColors[members.getOrNull(i)] ?: 0x808080))),
                 )
             }
-            Text("Each color: a member over the threshold", style = MaterialTheme.typography.labelSmall)
-            return
+            Text(if (withMembers) "Cells: a member over the threshold. Lines: the share of members, in %" else "Each color: a member over the threshold", style = MaterialTheme.typography.labelSmall)
+            if (style.kind == Kind.Paintball) return
         }
         if (style.stops.isEmpty()) return
         if (style.kind == Kind.Categorical) {      // a swatch and name per category
@@ -494,12 +495,23 @@ private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
 }
 
 @Composable
-internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit) {
+internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit, live: LiveControl? = null) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
         title = { Text("Places") },
         text = {
+          Column {
+            live?.let {
+                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("My location (live)", fontWeight = FontWeight.Bold)
+                        Text("Keeps the crosshair on where you are.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    androidx.compose.material3.Switch(checked = it.on, onCheckedChange = it.set)
+                }
+                HorizontalDivider()
+            }
             if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place; Show jumps back to it.")
             else LazyColumn {
                 items(places, key = { it.name }) { p ->
@@ -513,6 +525,7 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
                     HorizontalDivider()
                 }
             }
+          }
         },
     )
 }

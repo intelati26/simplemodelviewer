@@ -52,6 +52,7 @@ object Groups {
         hasMembers -> MEMBERS
         id.startsWith("s10m_01h") || id.startsWith("rh2m") || id.startsWith("fosberg") || id.startsWith("gust") -> FIRE
         WindProducts.isWind(id) -> SYNOPTIC
+        PaintballLines.isPaintballLines(id) -> STORM
         listOf("z500", "z700", "z850", "t500", "t700", "t850", "t2m", "td2m", "pmsl", "cld_", "pwat").any { id.startsWith(it) } -> SYNOPTIC
         listOf("sbcape", "mucape", "sbcinh", "srh", "shrmag", "stp").any { id.startsWith(it) } -> SEVERE
         id.startsWith("snow") || id.startsWith("frzr") -> WINTER
@@ -148,8 +149,18 @@ object Catalog {
     /** Every displayable field of a store (3-D / 4-D on the CONUS grid), in menu order: groups, then SPC's order within a group. */
     fun build(arrays: Collection<ArrayInfo>): List<Product> =
         (arrays.filter { it.isGridField && it.name != "ptype_consensus" }   // (precipitation-type codes have no documented key)
-            .map(::describe) + windProducts(arrays))
+            .map(::describe) + windProducts(arrays) + paintballLines(arrays))
             .sortedWith(compareBy<Product>({ Groups.ordered.indexOf(it.group) }, { curatedOrder[it.id] ?: Int.MAX_VALUE }, { it.id }))
+
+    /** The paintball-contour products whose member array is in the store (see [PaintballLines]). */
+    private fun paintballLines(arrays: Collection<ArrayInfo>): List<Product> {
+        val byName = arrays.associateBy { it.name }
+        return PaintballLines.specs.mapNotNull { spec ->
+            val source = byName[spec.source]?.takeIf { it.isGridField && it.dims.size == 4 } ?: return@mapNotNull null
+            Product(spec.id, spec.title, Groups.STORM, Style(Kind.Banded, PaintballLines.levels.zip(PaintballLines.colors) { v, c -> Stop(v, c) }, top = 100.0, units = "% of members", digits = 0), hasMembers = false,
+                timeDimension = describe(source).timeDimension, grid = source.grid ?: Grid.REFS)
+        }
+    }
 
     /** The wind products of the levels whose height, u and v arrays are all in the store (see [WindProducts]). */
     private fun windProducts(arrays: Collection<ArrayInfo>): List<Product> {
