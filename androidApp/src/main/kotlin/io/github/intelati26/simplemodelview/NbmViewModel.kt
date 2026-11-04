@@ -197,6 +197,13 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         load()
     }
 
+    /** The product [delta] places along in the catalog (the arrows beside the product chip). */
+    fun stepProduct(delta: Int) {
+        val all = NbmCatalog.all
+        val at = all.indexOfFirst { it.id == _state.value.product.id }
+        all.getOrNull(at + delta)?.let { pickProduct(it) }
+    }
+
     fun pickProduct(picked: NbmProduct) {
         prefs.edit().putString("nbm_product", picked.id).apply()
         update { it.copy(product = picked, crosshair = null, readout = null, tapLatLon = null) }

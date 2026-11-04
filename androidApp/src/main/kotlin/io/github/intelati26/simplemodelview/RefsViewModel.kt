@@ -232,6 +232,36 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         loadFrame()
     }
 
+    /** The product [delta] places along in the picker's order (the arrows beside the product chip). */
+    fun stepProduct(delta: Int) {
+        val st = _state.value
+        val at = st.products.indexOfFirst { it.id == st.product?.id }
+        st.products.getOrNull(at + delta)?.let { pickProduct(it) }
+    }
+
+    /**
+     * The frame that is valid now: from the newest run (opened when another run is shown), the time step nearest the current time (the last one
+     * if the run has not reached it, the first if it is not due yet).
+     */
+    fun goToNow() {
+        stopPlaying()
+        viewModelScope.launch {
+            update { it.copy(busy = true, error = null) }
+            try {
+                val newest = _state.value.cycles.firstOrNull()
+                if (newest == null) { update { it.copy(busy = false) }; return@launch }
+                if (_state.value.cycle != newest) openCycle(newest)
+                val now = System.currentTimeMillis() / 1000
+                val times = _state.value.times
+                val index = times.indices.minByOrNull { kotlin.math.abs(times[it] - now) } ?: 0
+                update { it.copy(timeIndex = index, busy = false) }
+                loadFrame()
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                update { it.copy(busy = false, error = e.message) }
+            }
+        }
+    }
+
     fun pickMember(index: Int) {
         _state.value.members.getOrNull(index)?.let { prefs.edit().putString("member_name", it).apply() }
         update { it.copy(member = index) }

@@ -262,6 +262,13 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The product [delta] places along in the catalog (the arrows beside the product chip). */
+    fun stepProduct(delta: Int) {
+        val all = MrmsCatalog.all
+        val at = all.indexOfFirst { it.id == _state.value.product.id }
+        all.getOrNull(at + delta)?.let { pickProduct(it) }
+    }
+
     fun pickProduct(picked: MrmsProduct) {
         val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
