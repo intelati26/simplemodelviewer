@@ -36,6 +36,7 @@ import simplemodelview.placeLabel
 import simplemodelview.RefsException
 import simplemodelview.RefsRepository
 import simplemodelview.Sector
+import simplemodelview.WindProducts
 import simplemodelview.Style
 import simplemodelview.View
 import simplemodelview.formatUtc
@@ -102,6 +103,8 @@ data class UiState(
     val contactPrompt: Boolean = false,          // the "please enter your email" dialog is showing
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
     val loopLength: Int = 0,                     // how many frames Play and a loop video cover (the first N); 0 = all
+    val windLevel: Int = 500,                    // the Heights & Winds product: the level (mb) and the key of what is in color under it
+    val windColor: String = "speed",
 ) {
     val validLabel: String
         get() = times.getOrNull(timeIndex)?.let { formatUtc(it) } ?: ""
@@ -132,11 +135,13 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = kotlinx.coroutines.flow.MutableStateFlow(
         UiState(
-            favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(),
+            favorites = migrateWindFavorites(prefs.getStringSet("favorites", emptySet()).orEmpty()),
             settings = Settings(prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false)).withDisplayPrefs(prefs),
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
             loopLength = prefs.getInt("loop_frames", 0),
+            windLevel = prefs.getInt("wind_level", 500).takeIf { it in WindProducts.levels } ?: 500,
+            windColor = prefs.getString("wind_color", "speed")?.takeIf { k -> WindProducts.colors.any { it.key == k } } ?: "speed",
         )
     )
     val state: kotlinx.coroutines.flow.StateFlow<UiState> = _state
@@ -207,7 +212,40 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         selectProductInternal(product, keepHour = false)
     }
 
-    fun pickProduct(product: Product) {
+    /** The virtual product of the level and color chosen with the chips, when the cycle has it. */
+    private fun windProduct(level: Int, colorKey: String): Product? {
+        val color = WindProducts.colors.firstOrNull { it.key == colorKey } ?: return null
+        val id = WindProducts.id(level, color)
+        return _state.value.products.firstOrNull { it.id == id }
+    }
+
+    fun pickWindLevel(level: Int) {
+        val st = _state.value
+        val product = windProduct(level, st.windColor) ?: windProduct(level, "speed") ?: return
+        prefs.edit().putInt("wind_level", level).apply()
+        update { it.copy(windLevel = level, windColor = WindProducts.parse(product.id)?.second?.key ?: it.windColor) }
+        pickProduct(product)
+    }
+
+    fun pickWindColor(colorKey: String) {
+        val st = _state.value
+        val product = windProduct(st.windLevel, colorKey) ?: return
+        prefs.edit().putString("wind_color", colorKey).apply()
+        update { it.copy(windColor = colorKey) }
+        pickProduct(product)
+    }
+
+    /** Favorites made before the wind products were folded into one picker entry now point at that entry. */
+    private fun migrateWindFavorites(favorites: Set<String>): Set<String> {
+        if (favorites.none { WindProducts.isWind(it) }) return favorites
+        val migrated = favorites.filter { !WindProducts.isWind(it) }.toSet() + WindProducts.CHOOSER_ID
+        prefs.edit().putStringSet("favorites", migrated).apply()
+        return migrated
+    }
+
+    fun pickProduct(picked: Product) {
+        // the picker's single Heights & Winds entry opens the level and color last used
+        val product = if (picked.id == WindProducts.CHOOSER_ID) windProduct(_state.value.windLevel, _state.value.windColor) ?: windProduct(_state.value.windLevel, "speed") ?: return else picked
         stopPlaying()
         viewModelScope.launch {
             update { it.copy(busy = true, error = null) }
@@ -224,6 +262,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun selectProductInternal(product: Product, keepHour: Boolean) {
         val s = store ?: return
         prefs.edit().putString("product", product.id).apply()
+        WindProducts.parse(product.id)?.let { (level, color) -> update { it.copy(windLevel = level, windColor = color.key) } }
         val times = repo.validTimes(s, product)
         val before = _state.value
         val hour = if (keepHour) before.forecastHour else null

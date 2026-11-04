@@ -89,9 +89,9 @@ class RefsRepository(private val http: Http, private val core: Core) {
     private suspend fun readWind(store: CycleStore, product: Product, level: Int, timeIndex: Int): Frame {
         val cells = product.grid.cells
         val (z, u, v) = WindProducts.sources(level)
-        val colored = WindProducts.temperatureLevel(product.id) != null      // 2-m temperature in color: its array is fetched with the other three
+        val colorArray = WindProducts.parse(product.id)?.let { (l, c) -> WindProducts.colorSource(l, c) }      // a color field is fetched with the other three
         val fetched = coroutineScope {
-            (listOf(z, u, v) + if (colored) listOf(WindProducts.TEMPERATURE_SOURCE) else emptyList()).map { name -> async { store.arrays.getValue(name).let { a -> a to fetchChunk(store.cycle, a, listOf(timeIndex, 0, 0)) } } }.awaitAll()
+            (listOf(z, u, v) + listOfNotNull(colorArray)).map { name -> async { store.arrays.getValue(name).let { a -> a to fetchChunk(store.cycle, a, listOf(timeIndex, 0, 0)) } } }.awaitAll()
         }
         if (fetched.any { it.second == null }) return Frame(FloatArray(cells * WindProducts.PLANES) { Float.NaN }, null)
         val planes = try {
@@ -121,8 +121,8 @@ class RefsRepository(private val http: Http, private val core: Core) {
     suspend fun prefetchFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int) {
         WindProducts.planeLevel(product.id)?.let { level ->
             val (z, u, v) = WindProducts.sources(level)
-            val colored = WindProducts.temperatureLevel(product.id) != null
-            for (name in listOf(z, u, v) + if (colored) listOf(WindProducts.TEMPERATURE_SOURCE) else emptyList()) fetchChunk(store.cycle, store.arrays.getValue(name), listOf(timeIndex, 0, 0))
+            val colorArray = WindProducts.parse(product.id)?.let { (l, c) -> WindProducts.colorSource(l, c) }
+            for (name in listOf(z, u, v) + listOfNotNull(colorArray)) fetchChunk(store.cycle, store.arrays.getValue(name), listOf(timeIndex, 0, 0))
             return
         }
         PaintballLines.spec(product.id)?.let { spec ->

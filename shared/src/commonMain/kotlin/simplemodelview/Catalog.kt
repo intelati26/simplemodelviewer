@@ -51,7 +51,7 @@ object Groups {
         id.startsWith("grefs-") || id.startsWith("refsct-") -> GUIDANCE
         hasMembers -> MEMBERS
         id.startsWith("s10m_01h") || id.startsWith("rh2m") || id.startsWith("fosberg") || id.startsWith("gust") -> FIRE
-        WindProducts.isWind(id) -> SYNOPTIC
+        WindProducts.isWind(id) || id == WindProducts.CHOOSER_ID -> SYNOPTIC
         PaintballLines.isPaintballLines(id) -> STORM
         listOf("z500", "z700", "z850", "t500", "t700", "t850", "t2m", "td2m", "pmsl", "cld_", "pwat").any { id.startsWith(it) } -> SYNOPTIC
         listOf("sbcape", "mucape", "sbcinh", "srh", "shrmag", "stp").any { id.startsWith(it) } -> SEVERE
@@ -162,24 +162,39 @@ object Catalog {
         }
     }
 
-    /** The wind products of the levels whose height, u and v arrays are all in the store (see [WindProducts]). */
+    /**
+     * The virtual wind products: for each level whose height, u and v arrays are in the store, one per color whose array is there too (see
+     * [WindProducts]), and the single chooser entry the picker shows in place of all of them.
+     */
     private fun windProducts(arrays: Collection<ArrayInfo>): List<Product> {
         val byName = arrays.associateBy { it.name }
-        return WindProducts.levels.mapNotNull { level ->
+        val out = ArrayList<Product>()
+        for (level in WindProducts.levels) {
             val (z, u, v) = WindProducts.sources(level)
-            val height = byName[z]?.takeIf { it.isGridField } ?: return@mapNotNull null
-            if (byName[u]?.isGridField != true || byName[v]?.isGridField != true) return@mapNotNull null
-            val id = WindProducts.id(level)
-            Product(id, curated.getValue(id), Groups.SYNOPTIC, Style(Kind.Banded, Palettes.upperWind, hideBelow = 10.0, units = "kt", digits = 0),
-                hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
-        } + WindProducts.temperatureLevels.mapNotNull { level ->
-            // the same height contours and barbs over the 2-m temperature colors
-            val (z, u, v) = WindProducts.sources(level)
-            val t = byName[WindProducts.TEMPERATURE_SOURCE]?.takeIf { it.isGridField } ?: return@mapNotNull null
-            val height = byName[z]?.takeIf { it.isGridField } ?: return@mapNotNull null
-            if (byName[u]?.isGridField != true || byName[v]?.isGridField != true) return@mapNotNull null
-            val id = WindProducts.temperatureId(level)
-            Product(id, curated.getValue(id), Groups.SYNOPTIC, describe(t).style, hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
+            val height = byName[z]?.takeIf { it.isGridField } ?: continue
+            if (byName[u]?.isGridField != true || byName[v]?.isGridField != true) continue
+            for (color in WindProducts.colors) {
+                val id = WindProducts.id(level, color)
+                val source = WindProducts.colorSource(level, color)
+                val style: Style
+                val title: String
+                if (source == null) {
+                    style = Style(Kind.Banded, Palettes.upperWind, hideBelow = 10.0, units = "kt", digits = 0)
+                    title = curated.getValue(id)
+                } else {
+                    val array = byName[source]?.takeIf { it.isGridField } ?: continue
+                    style = describe(array).style
+                    title = "$level mb Height and Wind Barbs over ${color.title}"
+                }
+                out += Product(id, title, Groups.SYNOPTIC, style, hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
+            }
         }
+        out.firstOrNull()?.let { first ->
+            out += first.copy(id = WindProducts.CHOOSER_ID, title = curated.getValue(WindProducts.CHOOSER_ID))
+        }
+        return out
     }
+
+    /** What the picker lists: the virtual wind products of every level and color are folded into their one chooser entry. */
+    fun forPicker(products: List<Product>): List<Product> = products.filter { !WindProducts.isWind(it.id) }
 }

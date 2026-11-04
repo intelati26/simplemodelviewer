@@ -46,18 +46,23 @@ class WindTest {
         assertTrue("wind850_mean" !in ids)
     }
 
-    @Test fun temperatureProductNeedsTheTemperatureArrayAndColorsThePackedFramesFirstPlane() {
+    @Test fun colorsAreVirtualProductsAndTheChooserFoldsThemAway() {
         fun array(name: String) = ArrayInfo(name, StoreKind.REFS, listOf(60, 1059, 1799), listOf(1, 1059, 1799), "<f4", true, Double.NaN, listOf("valid_time", "y", "x"), "knot")
         val wind = listOf("z500_mean", "u500_mean", "v500_mean").map(::array)
-        assertTrue("wind500_t2m_mean" !in Catalog.build(wind).map { it.id })                                   // no 2-m temperature in the store
-        val ids = Catalog.build(wind + array("t2m_mean")).map { it.id }
-        assertTrue("wind500_t2m_mean" in ids && "wind500_mean" in ids)
-        assertEquals(500, WindProducts.planeLevel("wind500_t2m_mean"))
-        assertEquals(500, WindProducts.planeLevel("wind500_mean"))
-        assertEquals(850, WindProducts.planeLevel("wind850_t2m_mean"))
+        val bare = Catalog.build(wind).map { it.id }
+        assertTrue("wind500_mean" in bare && "wind500_t2m_mean" !in bare)                                      // no 2-m temperature in the store
+        val ids = Catalog.build(wind + listOf("t2m_mean", "t500_mean", "td2m_mean", "rh2m_mean").map(::array)).map { it.id }
+        for (id in listOf("wind500_mean", "wind500_t2m_mean", "wind500_tlev_mean", "wind500_td2m_mean", "wind500_rh2m_mean", "heightwind")) assertTrue(id in ids, id)
+        assertTrue("wind700_t2m_mean" !in ids)                                                                 // no 700 mb arrays
+        assertEquals(500, WindProducts.planeLevel("wind500_tlev_mean"))
+        assertEquals("t500_mean", WindProducts.parse("wind500_tlev_mean")!!.let { (l, c) -> WindProducts.colorSource(l, c) })
         assertEquals(null, WindProducts.planeLevel("t2m_mean"))
-        assertEquals(Groups.SYNOPTIC, Groups.of("wind500_t2m_mean", false))
-        // the first plane is the temperature, not the speed; height, u and v are as before
+        assertEquals(null, WindProducts.planeLevel("heightwind"))
+        assertEquals(Groups.SYNOPTIC, Groups.of("wind500_rh2m_mean", false))
+        val shown = Catalog.forPicker(Catalog.build(wind + array("t2m_mean"))).map { it.id }
+        assertTrue("heightwind" in shown)
+        assertTrue(shown.none { it.startsWith("wind") })
+        // the first plane is the colored field, not the speed; height, u and v are as before
         val out = WindProducts.pack(2, floatArrayOf(5700f, 5710f), floatArrayOf(30f, 0f), floatArrayOf(40f, 0f), floatArrayOf(280f, 285f))
         assertEquals(280f, out[0]); assertEquals(285f, out[1])
         assertEquals(5710f, out[2 + 1])

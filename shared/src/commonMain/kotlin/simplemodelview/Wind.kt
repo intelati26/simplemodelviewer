@@ -20,16 +20,36 @@ object WindProducts {
 
     fun id(level: Int) = "wind${level}_mean"
     fun level(id: String): Int? = levels.firstOrNull { id == id(it) }
-    /** The levels that also have a product with the 2-m temperature in color under the height and the barbs. */
-    val temperatureLevels = levels
-    fun temperatureId(level: Int) = "wind${level}_t2m_mean"
-    fun temperatureLevel(id: String): Int? = temperatureLevels.firstOrNull { id == temperatureId(it) }
+    /** What can be in color under a level's height contours and barbs: the wind speed itself or another field ([source] = the store array, `%d` the level). */
+    class Color(val key: String, val title: String, val source: String?)
+    val colors = listOf(
+        Color("speed", "Wind speed", null),
+        Color("t2m", "2-m temperature", "t2m_mean"),
+        Color("tlev", "Temperature at the level", "t%d_mean"),
+        Color("td2m", "2-m dewpoint", "td2m_mean"),
+        Color("rh2m", "2-m relative humidity", "rh2m_mean"),
+    )
 
-    /** The level of a product made of the four planes (speed or temperature in color, height, u, v), whichever its color. */
-    fun planeLevel(id: String): Int? = level(id) ?: temperatureLevel(id)
+    /** The id of the virtual product of [level] drawn over [color]: `wind500_mean` for the speed, `wind500_t2m_mean` and so on for the others. */
+    fun id(level: Int, color: Color) = if (color.source == null) id(level) else "wind${level}_${color.key}_mean"
+
+    /** The level and color of a virtual product id, or null. */
+    fun parse(id: String): Pair<Int, Color>? {
+        for (l in levels) for (c in colors) if (id == id(l, c)) return l to c
+        return null
+    }
+
+    /** The store array behind the color of [level]'s product (null for the wind speed, which is computed). */
+    fun colorSource(level: Int, color: Color): String? = color.source?.let { if ("%d" in it) it.format(level) else it }
+
+    /** The picker's single entry for all of these: the level and the color are chosen with chips beside the product. */
+    const val CHOOSER_ID = "heightwind"
+
+    /** The level of a product made of the four planes (the color field or speed, height, u, v), whichever its color. */
+    fun planeLevel(id: String): Int? = parse(id)?.first
     fun isWind(id: String) = planeLevel(id) != null
-    /** The store array whose values a temperature product shows in color. */
-    const val TEMPERATURE_SOURCE = "t2m_mean"
+    /** True when the first plane is not the wind speed. */
+    fun hasColorField(id: String) = parse(id)?.second?.source != null
 
     /** The store arrays behind a level: height, u, v. */
     fun sources(level: Int) = Triple("z${level}_mean", "u${level}_mean", "v${level}_mean")

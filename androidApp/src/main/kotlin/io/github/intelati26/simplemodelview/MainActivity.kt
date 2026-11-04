@@ -182,6 +182,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
                 MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
+            if (s.product?.let { simplemodelview.WindProducts.isWind(it.id) } == true) WindChooser(s.products, s.windLevel, s.windColor, vm::pickWindLevel, vm::pickWindColor)
 
             s.newerCycle?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -266,7 +267,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
     }
 
     if (s.contactPrompt) ContactDialog(onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt)
-    if (picker) ProductPicker(s.products, s.product, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
+    if (picker) ProductPicker(simplemodelview.Catalog.forPicker(s.products), s.product?.takeIf { !simplemodelview.WindProducts.isWind(it.id) } ?: s.products.firstOrNull { it.id == simplemodelview.WindProducts.CHOOSER_ID }, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
     if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
@@ -406,6 +407,30 @@ private fun RowScope.CycleMenu(current: Cycle?, cycles: List<Cycle>, onPick: (Cy
         AssistChip(onClick = { open = true }, label = { Text(current?.let { "${it.hour.toString().padStart(2, '0')}Z" } ?: "Run") })
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             for (cycle in cycles) DropdownMenuItem(text = { Text(cycle.label) }, onClick = { open = false; onPick(cycle) })
+        }
+    }
+}
+
+/** The Heights & Winds product's two choices: the level (500 / 700 / 850 mb) and what is in color under its height contours and barbs. */
+@Composable
+private fun WindChooser(products: List<Product>, level: Int, colorKey: String, onLevel: (Int) -> Unit, onColor: (String) -> Unit) {
+    val ids = products.map { it.id }.toSet()
+    val levels = simplemodelview.WindProducts.levels.filter { l -> simplemodelview.WindProducts.id(l) in ids }
+    val colors = simplemodelview.WindProducts.colors.filter { c -> simplemodelview.WindProducts.id(level, c) in ids }
+    Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        var levelOpen by remember { mutableStateOf(false) }
+        Box {
+            AssistChip(onClick = { levelOpen = true }, label = { Text("$level mb \u25BE") })
+            DropdownMenu(expanded = levelOpen, onDismissRequest = { levelOpen = false }) {
+                for (l in levels) DropdownMenuItem(text = { Text("$l mb") }, onClick = { levelOpen = false; onLevel(l) })
+            }
+        }
+        var colorOpen by remember { mutableStateOf(false) }
+        Box {
+            AssistChip(onClick = { colorOpen = true }, label = { Text("Color: " + (colors.firstOrNull { it.key == colorKey }?.title ?: "Wind speed") + " \u25BE") })
+            DropdownMenu(expanded = colorOpen, onDismissRequest = { colorOpen = false }) {
+                for (c in colors) DropdownMenuItem(text = { Text(if (c.key == "tlev") "Temperature at $level mb" else c.title) }, onClick = { colorOpen = false; onColor(c.key) })
+            }
         }
     }
 }
