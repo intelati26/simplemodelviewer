@@ -7,6 +7,8 @@ Minimalist Android / iOS viewer for SPC's REFS ensemble products. Scope and deci
 **iOS** is best effort and untested on a real device (no Apple Developer membership); CI builds unsigned simulator builds only.
 **License:** GPLv3 (see `COPYING`); third-party code and data credits are in `NOTICE`.
 
+**Android Auto:** an initial car app (weather category: a radar picture and a pane to step products and sectors), see [docs/android-auto.md](docs/android-auto.md).
+
 ## Layout
 | Path | State |
 |---|---|
