@@ -41,6 +41,7 @@ internal class RadarCarScreen(carContext: CarContext) : Screen(carContext) {
     private var width = 0
     private var height = 0
     private var visible: Rect? = null
+    private var poll: kotlinx.coroutines.Job? = null
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
 
     private val surfaceCallback = object : SurfaceCallback {
@@ -60,8 +61,10 @@ internal class RadarCarScreen(carContext: CarContext) : Screen(carContext) {
             override fun onStart(owner: LifecycleOwner) {
                 radar.dark = this@RadarCarScreen.carContext.isDarkMode
                 radar.refresh()
-                scope.launch { while (isActive) { delay(2 * 60 * 1000L); radar.refresh() } }
+                poll?.cancel()
+                poll = scope.launch { while (isActive) { delay(2 * 60 * 1000L); radar.refresh() } }
             }
+            override fun onStop(owner: LifecycleOwner) { poll?.cancel(); poll = null }
             override fun onDestroy(owner: LifecycleOwner) { radar.cancel(); scope.cancel() }
         })
     }
@@ -70,7 +73,7 @@ internal class RadarCarScreen(carContext: CarContext) : Screen(carContext) {
         val now = System.currentTimeMillis() / 1000
         val valid = radar.validTime
         val pane = Pane.Builder()
-            .addRow(Row.Builder().setTitle(radar.product.displayTitle).addText(radar.message ?: valid?.let { "Valid ${formatClock(it, now)}  ·  ${formatAge(now - it)} ago" } ?: "").build())
+            .addRow(Row.Builder().setTitle(radar.product.displayTitle).addText(radar.message ?: valid?.let { "Valid ${formatClock(it, now)}  ·  ${formatAge(now - it)} ago" } ?: "No scan yet").build())
             .addRow(Row.Builder().setTitle(radar.sector.name).addText("MRMS, NOAA/NSSL. Not for warnings or safety decisions.").build())
             .addAction(Action.Builder().setTitle("‹ Product").setOnClickListener { radar.stepProduct(-1) }.build())
             .addAction(Action.Builder().setTitle("Product ›").setOnClickListener { radar.stepProduct(1) }.build())
