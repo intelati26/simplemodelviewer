@@ -46,6 +46,24 @@ class WindTest {
         assertTrue("wind850_mean" !in ids)
     }
 
+    @Test fun temperatureProductNeedsTheTemperatureArrayAndColorsThePackedFramesFirstPlane() {
+        fun array(name: String) = ArrayInfo(name, StoreKind.REFS, listOf(60, 1059, 1799), listOf(1, 1059, 1799), "<f4", true, Double.NaN, listOf("valid_time", "y", "x"), "knot")
+        val wind = listOf("z500_mean", "u500_mean", "v500_mean").map(::array)
+        assertTrue("wind500_t2m_mean" !in Catalog.build(wind).map { it.id })                                   // no 2-m temperature in the store
+        val ids = Catalog.build(wind + array("t2m_mean")).map { it.id }
+        assertTrue("wind500_t2m_mean" in ids && "wind500_mean" in ids)
+        assertEquals(500, WindProducts.planeLevel("wind500_t2m_mean"))
+        assertEquals(500, WindProducts.planeLevel("wind500_mean"))
+        assertEquals(850, WindProducts.planeLevel("wind850_t2m_mean"))
+        assertEquals(null, WindProducts.planeLevel("t2m_mean"))
+        assertEquals(Groups.SYNOPTIC, Groups.of("wind500_t2m_mean", false))
+        // the first plane is the temperature, not the speed; height, u and v are as before
+        val out = WindProducts.pack(2, floatArrayOf(5700f, 5710f), floatArrayOf(30f, 0f), floatArrayOf(40f, 0f), floatArrayOf(280f, 285f))
+        assertEquals(280f, out[0]); assertEquals(285f, out[1])
+        assertEquals(5710f, out[2 + 1])
+        assertEquals(30f, out[2 * WindProducts.U])
+    }
+
     private fun barbFor(speed: Float) = WindBarbs.glyph(100f, 100f, -speed, 0f, speed, 40f)   // a wind from the east
 
     @Test fun barbSymbols() {

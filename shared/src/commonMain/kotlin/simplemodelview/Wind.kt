@@ -20,7 +20,16 @@ object WindProducts {
 
     fun id(level: Int) = "wind${level}_mean"
     fun level(id: String): Int? = levels.firstOrNull { id == id(it) }
-    fun isWind(id: String) = level(id) != null
+    /** The levels that also have a product with the 2-m temperature in color under the height and the barbs. */
+    val temperatureLevels = levels
+    fun temperatureId(level: Int) = "wind${level}_t2m_mean"
+    fun temperatureLevel(id: String): Int? = temperatureLevels.firstOrNull { id == temperatureId(it) }
+
+    /** The level of a product made of the four planes (speed or temperature in color, height, u, v), whichever its color. */
+    fun planeLevel(id: String): Int? = level(id) ?: temperatureLevel(id)
+    fun isWind(id: String) = planeLevel(id) != null
+    /** The store array whose values a temperature product shows in color. */
+    const val TEMPERATURE_SOURCE = "t2m_mean"
 
     /** The store arrays behind a level: height, u, v. */
     fun sources(level: Int) = Triple("z${level}_mean", "u${level}_mean", "v${level}_mean")
@@ -28,10 +37,10 @@ object WindProducts {
     /** Speed (knots) of u / v components; NaN where either is missing. */
     fun speed(u: Float, v: Float): Float = if (u.isNaN() || v.isNaN()) Float.NaN else hypot(u, v)
 
-    /** The frame of a wind product: speed, height, u and v, each [cells] long. */
-    fun pack(cells: Int, height: FloatArray, u: FloatArray, v: FloatArray): FloatArray {
+    /** The frame of a wind product: speed (or the [color] field of a temperature product), height, u and v, each [cells] long. */
+    fun pack(cells: Int, height: FloatArray, u: FloatArray, v: FloatArray, color: FloatArray? = null): FloatArray {
         val out = FloatArray(cells * PLANES)
-        for (i in 0 until cells) out[i] = speed(u[i], v[i])
+        if (color != null) color.copyInto(out, 0, 0, cells) else for (i in 0 until cells) out[i] = speed(u[i], v[i])
         height.copyInto(out, cells, 0, cells)
         u.copyInto(out, cells * U, 0, cells)
         v.copyInto(out, cells * V, 0, cells)

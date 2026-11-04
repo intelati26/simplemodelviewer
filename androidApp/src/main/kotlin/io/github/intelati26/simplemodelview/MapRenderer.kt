@@ -64,7 +64,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         lines.draw(canvas, view, dark, counties)
         if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContours(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
-        WindProducts.level(product.id)?.let { level ->
+        WindProducts.planeLevel(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity)
         }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)

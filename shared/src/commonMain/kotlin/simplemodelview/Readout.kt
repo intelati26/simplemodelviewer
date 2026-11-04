@@ -48,7 +48,9 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
         val v = values[grid.cells * WindProducts.V + i]
         val height = values[grid.cells * WindProducts.HEIGHT + i]
         val from = WindProducts.compassDegrees(WindProducts.fromDegrees(u, v), lon)
-        return where + "${fixed(from, 0)}\u00B0 ${WindProducts.compassName(from)} at ${fixed(raw.toDouble(), 0)} kt" +
+        val speed = if (WindProducts.temperatureLevel(product.id) != null) WindProducts.speed(u, v) else raw     // (a temperature product has the temperature in its first plane)
+        val temperature = if (WindProducts.temperatureLevel(product.id) != null) "${fixed(raw * style.factor + style.offset, style.digits)} ${style.units}   " else ""
+        return where + temperature + "${fixed(from, 0)}\u00B0 ${WindProducts.compassName(from)} at ${fixed(speed.toDouble(), 0)} kt" +
             if (height.isNaN()) "" else "   height ${fixed(height.toDouble(), 0)} m"
     }
     val shown = raw * style.factor + style.offset

@@ -172,6 +172,14 @@ object Catalog {
             val id = WindProducts.id(level)
             Product(id, curated.getValue(id), Groups.SYNOPTIC, Style(Kind.Banded, Palettes.upperWind, hideBelow = 10.0, units = "kt", digits = 0),
                 hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
+        } + WindProducts.temperatureLevels.mapNotNull { level ->
+            // the same height contours and barbs over the 2-m temperature colors
+            val (z, u, v) = WindProducts.sources(level)
+            val t = byName[WindProducts.TEMPERATURE_SOURCE]?.takeIf { it.isGridField } ?: return@mapNotNull null
+            val height = byName[z]?.takeIf { it.isGridField } ?: return@mapNotNull null
+            if (byName[u]?.isGridField != true || byName[v]?.isGridField != true) return@mapNotNull null
+            val id = WindProducts.temperatureId(level)
+            Product(id, curated.getValue(id), Groups.SYNOPTIC, describe(t).style, hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
         }
     }
 }
