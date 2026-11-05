@@ -169,6 +169,8 @@ class NbmTest {
     @Test fun aNewVersionFolderWinsAndTheOldOneStillFillsTheGap() = runTest {
         val now = epochOf(2026, 11, 4, 5, 10, 0)
         val http = FakeHttp { url ->
+            // the bucket's top level lists the folders it has (a made-up newer one, v5.2, is not in the list the app was built with)
+            if (!url.contains("prefix=")) return@FakeHttp HttpResult(200, "<ListBucketResult><CommonPrefixes><Prefix>blendv4.3/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>blendv5.0/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>blendv5.1/</Prefix></CommonPrefixes></ListBucketResult>".encodeToByteArray())
             val version = if ("blendv5.1" in url) "blendv5.1" else "blendv5.0"
             // v5.1 has the 3rd-4th runs of the 4th (hours 3 and 4); v5.0 stopped at 11Z on the 3rd and has hour 4 too (both: v5.1 wins)
             val hours = when {
@@ -184,6 +186,12 @@ class NbmTest {
         val cycles = NbmRepository(http, StubCore).listCycles(now, hours = 30)
         assertEquals(listOf(4 to "blendv5.1", 3 to "blendv5.1", 11 to "blendv5.0", 10 to "blendv5.0"), cycles.map { it.hour to it.version })
         assertTrue(cycles.first().prefix.startsWith("blendv5.1/conus/2026/11/04/"))
+    }
+
+    @Test fun versionFoldersAreFoundByListingTheBucketNewestFirst() {
+        val xml = "<ListBucketResult>" + listOf("blendv3.2/", "blendv5.0/", "blendv10.0/", "blendv5.1/", "other/", "blendvX.Y/", "blendv4.3/").joinToString("") { "<CommonPrefixes><Prefix>$it</Prefix></CommonPrefixes>" } + "</ListBucketResult>"
+        assertEquals(listOf("blendv10.0", "blendv5.1", "blendv5.0", "blendv4.3", "blendv3.2"), parseNbmVersions(xml))
+        assertEquals(emptyList(), parseNbmVersions("<ListBucketResult></ListBucketResult>"))
     }
 
     @Test fun listsFramesOfAField() = runTest {

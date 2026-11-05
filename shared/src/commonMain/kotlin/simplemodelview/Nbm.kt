@@ -9,8 +9,11 @@ object NbmBucket {
     const val URL = "https://noaa-nbm-pds.s3.amazonaws.com"
     const val REGION = "conus"
 
-    /** The version folders to look in, newest first: a new version of the blend gets its own folder (v5.1 was due on 2026-11-03), and the folder of the old one stops. */
+    /** The version folders to look in when the bucket cannot be asked (newest first). Normally they are found by listing the bucket (see [parseNbmVersions]). */
     val VERSIONS = listOf("blendv5.1", "blendv5.0")
+
+    /** How many of the newest version folders are searched for runs (a new version's folder starts, and the old one's stops, on the day of the change). */
+    const val VERSIONS_SEARCHED = 2
 
     /** A run at least this many hours long counts as "extended" (a short-range run stops after about 36 h). */
     const val EXTENDED_HOURS = 168
@@ -84,6 +87,30 @@ fun parseNbmListing(xml: String): List<NbmFile> {
     return files.sortedBy { it.valid }
 }
 
+/**
+ * The version folders (`blendv5.0`, `blendv5.1`, ...) of a listing of the bucket's top level made with a `/` delimiter, newest first. A new version of the
+ * blend gets its own folder, so the page finds it without a new app version; anything else in the listing is ignored.
+ */
+fun parseNbmVersions(xml: String): List<String> {
+    val found = ArrayList<Triple<Int, Int, String>>()
+    var at = 0
+    while (true) {
+        val start = xml.indexOf("<Prefix>", at)
+        if (start < 0) break
+        val end = xml.indexOf("</Prefix>", start)
+        if (end < 0) break
+        at = end
+        val name = xml.substring(start + 8, end).trimEnd('/')
+        if (!name.startsWith("blendv")) continue
+        val parts = name.removePrefix("blendv").split('.')
+        if (parts.size != 2) continue
+        val major = parts[0].toIntOrNull() ?: continue
+        val minor = parts[1].toIntOrNull() ?: continue
+        found += Triple(major, minor, name)
+    }
+    return found.sortedWith(compareByDescending<Triple<Int, Int, String>> { it.first }.thenByDescending { it.second }).map { it.third }
+}
+
 /** The run folders ("0000", "1700", ...) of a day's listing made with a `/` delimiter, as hours. */
 fun parseNbmRunHours(xml: String): List<Int> {
     val hours = ArrayList<Int>()
@@ -151,13 +178,28 @@ fun nbmFrameLabel(file: NbmFile): String = "${formatUtc(file.valid)}  (+${file.l
 /** Lists, downloads and decodes the blend's files over [http]. */
 class NbmRepository(private val http: Http, private val core: Core) {
     /** The runs from the last [hours] hours up to [nowEpochSeconds], newest first (each day's folder lists the runs it holds). */
+    private var versionsAt = 0L
+    private var versions: List<String> = emptyList()
+
+    /** The newest version folders of the bucket, asked for at most every six hours; the built-in list when the bucket does not answer. */
+    private suspend fun versionFolders(nowEpochSeconds: Long): List<String> {
+        if (versions.isNotEmpty() && nowEpochSeconds - versionsAt < 6 * 3600) return versions
+        val found = try {
+            val result = http.get("${NbmBucket.URL}/?list-type=2&delimiter=/")
+            if (result.status == 200) parseNbmVersions(result.body.decodeToString()).take(NbmBucket.VERSIONS_SEARCHED) else emptyList()
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { emptyList() }
+        if (found.isNotEmpty()) { versions = found; versionsAt = nowEpochSeconds }
+        return found.ifEmpty { versions.ifEmpty { NbmBucket.VERSIONS } }
+    }
+
     suspend fun listCycles(nowEpochSeconds: Long, hours: Int = 48): List<NbmCycle> {
+        val folders = versionFolders(nowEpochSeconds)
         val found = ArrayList<NbmCycle>()
         val earliest = nowEpochSeconds - hours * 3600L
         var day = nowEpochSeconds - nowEpochSeconds % 86400L
         while (day + 86400L > earliest) {
             val c = civilFromEpoch(day)
-            for (version in NbmBucket.VERSIONS) {
+            for (version in folders) {
                 val prefix = "$version/${NbmBucket.REGION}/${c[0]}/${c[1].toString().padStart(2, '0')}/${c[2].toString().padStart(2, '0')}/"
                 val result = http.get("${NbmBucket.URL}/?list-type=2&delimiter=/&prefix=$prefix")
                 if (result.status == 200) {
