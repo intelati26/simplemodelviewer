@@ -32,7 +32,10 @@ data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int, 
     val label: String get() = "$year-${two(month)}-${two(day)} ${two(hour)}Z"
 
     /** The folder of this run (with a trailing slash). */
-    val prefix: String get() = "$version/${NbmBucket.REGION}/$year/${two(month)}/${two(day)}/${two(hour)}00/"
+    val prefix: String get() = if (grib) "blend.$year${two(month)}${two(day)}/${two(hour)}/core/" else "$version/${NbmBucket.REGION}/$year/${two(month)}/${two(day)}/${two(hour)}00/"
+
+    /** True for a run found in the GRIB bucket (see [NbmGribBucket]). */
+    val grib: Boolean get() = version == NbmGribBucket.VERSION
 
     companion object {
         fun ofEpoch(epoch: Long, version: String = "blendv5.0"): NbmCycle = civilFromEpoch(epoch).let { NbmCycle(it[0], it[1], it[2], it[3], version) }
@@ -40,9 +43,9 @@ data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int, 
 }
 
 /** One field at one forecast time: its key, the run and valid times, and when it was uploaded (the bucket's LastModified), epoch seconds. */
-data class NbmFile(val key: String, val run: Long, val valid: Long, val uploaded: Long?, val size: Long) {
-    /** The colons of the time stamps are percent-encoded, as the bucket's own links do. */
-    val url: String get() = NbmBucket.URL + "/" + key.replace(":", "%3A")
+data class NbmFile(val key: String, val run: Long, val valid: Long, val uploaded: Long?, val size: Long, val grib: Boolean = false, val field: String = "") {
+    /** The colons of the time stamps are percent-encoded, as the bucket's own links do. A GRIB file is in the other bucket ([field] says which of its messages is meant). */
+    val url: String get() = (if (grib) NbmGribBucket.URL else NbmBucket.URL) + "/" + key.replace(":", "%3A")
 
     /** Hours after the run's start. */
     val leadHours: Int get() = ((valid - run) / 3600).toInt()
@@ -211,11 +214,45 @@ class NbmRepository(private val http: Http, private val core: Core) {
             }
             day -= 86400L
         }
+        val tiffs = found.sortedByDescending { it.epoch }
+        // when the rendered files are behind, the GRIB runs newer than they are go on top (a field the GRIB files lack falls back to the older rendered run)
+        val newest = tiffs.firstOrNull()?.epoch
+        if (newest == null || nowEpochSeconds - newest > 2 * 3600L) {
+            val grib = try { listGribCycles(nowEpochSeconds, hours) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { emptyList() }
+            val ahead = grib.filter { newest == null || it.epoch - newest >= NbmGribBucket.PREFER_AFTER_HOURS * 3600L }
+            if (ahead.isNotEmpty()) return ahead + tiffs
+        }
+        return tiffs
+    }
+
+    /** The runs of the GRIB bucket within [hours] of now, newest first. */
+    private suspend fun listGribCycles(nowEpochSeconds: Long, hours: Int): List<NbmCycle> {
+        val found = ArrayList<NbmCycle>()
+        val earliest = nowEpochSeconds - hours * 3600L
+        var day = nowEpochSeconds - nowEpochSeconds % 86400L
+        while (day + 86400L > earliest) {
+            val c = civilFromEpoch(day)
+            val prefix = "blend.${c[0]}${c[1].toString().padStart(2, '0')}${c[2].toString().padStart(2, '0')}/"
+            val result = http.get("${NbmGribBucket.URL}/?list-type=2&delimiter=/&prefix=$prefix")
+            if (result.status == 200) {
+                for (h in parseGribRunHours(result.body.decodeToString())) {
+                    val cycle = NbmCycle(c[0], c[1], c[2], h, NbmGribBucket.VERSION)
+                    if (cycle.epoch <= nowEpochSeconds + 300 && cycle.epoch >= earliest) found += cycle
+                }
+            } else if (result.status != 404) throw RefsException("could not list the blend's GRIB runs (HTTP ${result.status})")
+            day -= 86400L
+        }
         return found.sortedByDescending { it.epoch }
     }
 
     /** Every frame of [fieldId] in [cycle], ordered by valid time (empty when the run does not have that field yet). */
     suspend fun listFrames(fieldId: String, cycle: NbmCycle): List<NbmFile> {
+        if (cycle.grib) {
+            if (!NbmGribFields.supports(fieldId)) return emptyList()
+            val result = http.get("${NbmGribBucket.URL}/?list-type=2&max-keys=1000&prefix=${cycle.prefix}")
+            if (result.status != 200) throw RefsException("could not list the blend's GRIB files (HTTP ${result.status})")
+            return parseGribListing(result.body.decodeToString(), cycle, fieldId)
+        }
         val result = http.get("${NbmBucket.URL}/?list-type=2&max-keys=1000&prefix=${cycle.prefix}$fieldId/")
         if (result.status != 200) throw RefsException("could not list the blend's files (HTTP ${result.status})")
         return parseNbmListing(result.body.decodeToString())
@@ -226,6 +263,7 @@ class NbmRepository(private val http: Http, private val core: Core) {
      * [NbmBucket.EXTENDED_HOURS] on (the listing is in key order, and a key's valid time sorts after its run), and a second only for a short run.
      */
     suspend fun lastLead(fieldId: String, cycle: NbmCycle): Int? {
+        if (cycle.grib) return listFrames(fieldId, cycle).lastOrNull()?.leadHours
         fun stamp(epoch: Long): String {
             val c = civilFromEpoch(epoch)
             fun p(n: Int) = n.toString().padStart(2, '0')
@@ -244,6 +282,7 @@ class NbmRepository(private val http: Http, private val core: Core) {
 
     /** Downloads a file (an HTTP cache keeps it) and decodes it whole: the field on the blend's own Lambert grid. */
     suspend fun loadFrame(file: NbmFile): GridField {
+        if (file.grib) return loadGribFrame(file)
         val bytes = download(file)
         return try {
             core.decodeGeotiff(bytes)
@@ -253,7 +292,25 @@ class NbmRepository(private val http: Http, private val core: Core) {
     }
 
     /** Downloads a file without decoding it, so the HTTP cache has it for a loop. */
-    suspend fun prefetch(file: NbmFile) { download(file) }
+    suspend fun prefetch(file: NbmFile) { if (!file.grib) download(file) }
+
+    /** A GRIB frame: the file's index says where the field's message is, only that byte range is downloaded, decoded and put into the GeoTIFFs' units. */
+    private suspend fun loadGribFrame(file: NbmFile): GridField {
+        val field = NbmGribFields.byId[file.field] ?: throw RefsException("that field is not in NOAA's GRIB files")
+        val index = http.get(file.url + ".idx")
+        if (index.status != 200) throw RefsException("the GRIB index could not be read (HTTP ${index.status})")
+        val (first, last) = findGribMessage(parseGribIndex(index.body.decodeToString()), field, file.leadHours) ?: throw RefsException("that hour has no ${field.variable} message")
+        val part = http.getRange(file.url, first, last ?: (file.size - 1))
+        if (part.status != 200 && part.status != 206 || part.body.isEmpty()) throw RefsException("the GRIB message could not be downloaded (HTTP ${part.status})")
+        val decoded = try {
+            core.decodeGrib(part.body)
+        } catch (e: Exception) {
+            throw RefsException("could not decode the GRIB message: ${e.message}")
+        }
+        val values = decoded.values
+        for (i in values.indices) values[i] = field.convert(values[i])
+        return GridField(decoded.grid, values)
+    }
 
     private suspend fun download(file: NbmFile): ByteArray {
         var result = http.get(file.url)

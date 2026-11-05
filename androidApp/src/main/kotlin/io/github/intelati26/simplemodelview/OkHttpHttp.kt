@@ -47,6 +47,16 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val conta
         }
     }
 
+    override suspend fun getRange(url: String, first: Long, lastInclusive: Long): HttpResult = withContext(Dispatchers.IO) {
+        try {
+            client.newCall(Request.Builder().url(url).header("Range", "bytes=$first-$lastInclusive").build()).execute().use { response ->
+                HttpResult(response.code, response.body?.bytes() ?: ByteArray(0), response.headers.getDate("Last-Modified")?.time?.div(1000))
+            }
+        } catch (e: IOException) {
+            HttpResult(0, ByteArray(0))
+        }
+    }
+
     companion object {
         // the contact address is set by the user in Settings and appended to this per request (see simplemodelview.userAgent)
         const val USER_AGENT = "simplemodelview/0.1 (unofficial viewer; +https://github.com/intelati26/simplemodelviewer;)"

@@ -170,9 +170,10 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
                         if (chosen !== best) note = "The ${best.first.shortLabel} run is still arriving; showing ${chosen.first.shortLabel}."
                     }
                     val picked = chosen ?: throw IllegalStateException("No recent National Blend of Models data.")
+                    if (picked.first.grib) note = "NOAA's rendered files are behind, so this run comes from its GRIB files. Only temperature, dewpoint, wind, cloud cover, humidity, visibility, ceiling, precipitable water and CAPE are there; the other products show the last rendered run."
                     // NOAA's rendered (GeoTIFF) files can stop while the model keeps running: say how old the newest run is
                     val ageHours = (now - picked.first.epoch) / 3600
-                    if (hand == null && ageHours >= 6) note = "The newest run NOAA has published in this format is ${picked.first.label}, ${if (ageHours >= 48) "${ageHours / 24} days" else "$ageHours hours"} old. The rendered files may be behind; the model itself may be newer."
+                    if (hand == null && !picked.first.grib && ageHours >= 6) note = "The newest run NOAA has published in this format is ${picked.first.label}, ${if (ageHours >= 48) "${ageHours / 24} days" else "$ageHours hours"} old. The rendered files may be behind; the model itself may be newer."
                     lastLoad = System.currentTimeMillis()
                     val frames = picked.second
                     val index = keepValid?.let { nearest(frames, it) } ?: frames.indexOfFirst { it.valid >= now - 1800 }.let { if (it < 0) frames.size - 1 else it }

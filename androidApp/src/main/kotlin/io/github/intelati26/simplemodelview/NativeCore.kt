@@ -33,6 +33,14 @@ class NativeCore : Core {
         return GridField(Grid(info[0], info[1], info[2]), values)
     }
 
+    private external fun decodeGribNative(message: ByteArray, info: IntArray): FloatArray
+
+    override fun decodeGrib(message: ByteArray): GridField {
+        val info = IntArray(3)
+        val values = decodeGribNative(message, info)
+        return GridField(Grid(info[0], info[1], info[2]), values)
+    }
+
     private external fun planLambertBoxNative(west: Double, south: Double, east: Double, north: Double, cell: Double): IntArray
     private external fun planLambertCropNative(base: Int, colMin: Double, rowMin: Double, colMax: Double, rowMax: Double, cell: Double): IntArray
     private external fun reprojectNative(values: FloatArray, srcGrid: Int, dstGrid: Int, dstCount: Int): FloatArray

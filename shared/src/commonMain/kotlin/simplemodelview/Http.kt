@@ -6,6 +6,9 @@ class HttpResult(val status: Int, val body: ByteArray, val lastModified: Long? =
 /** The platform's HTTP client (OkHttp on Android). Implementations should cache and send a descriptive User-Agent. */
 interface Http {
     suspend fun get(url: String): HttpResult
+
+    /** Bytes [first]..[lastInclusive] of a file (a GRIB message of a large file); status 0 (no response) when the platform's client cannot. */
+    suspend fun getRange(url: String, first: Long, lastInclusive: Long): HttpResult = HttpResult(0, ByteArray(0))
 }
 
 suspend fun Http.exists(url: String): Boolean = get(url).status == 200

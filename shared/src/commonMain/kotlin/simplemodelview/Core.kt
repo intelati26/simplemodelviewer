@@ -48,6 +48,12 @@ interface Core {
     fun decodeGeotiff(file: ByteArray): GridField = throw UnsupportedOperationException()
 
     /**
+     * Decodes one GRIB2 message (an NBM field: Lambert conformal grid, simple or complex packing with spatial differencing) whole. The grid it lands on is
+     * registered by the core. Throws on a damaged / unsupported message.
+     */
+    fun decodeGrib(message: ByteArray): GridField = throw UnsupportedOperationException()
+
+    /**
      * A Lambert conformal grid (REFS's projection) covering a latitude / longitude box with square cells of [cellMeters]; the same definition gives the
      * same grid. MRMS windows are reprojected onto it ([reproject]) so the map is not stretched and every line / outline uses one projection.
      */
