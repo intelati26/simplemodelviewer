@@ -146,6 +146,7 @@ class NbmTest {
     @Test fun listsCyclesNewestFirstWithinTheWindow() = runTest {
         val now = epochOf(2026, 10, 30, 17, 43, 0)
         val http = FakeHttp { url ->
+            if ("blendv5.1" in url) return@FakeHttp HttpResult(404, ByteArray(0))        // no newer version folder yet
             val day = url.substringAfter("conus/").substringBefore("/&").substringBefore("&")
             val hours = when {
                 "2026/10/30/" in url -> listOf(0, 1, 16, 17, 18)       // 18Z is in the future of "now": left out
@@ -163,6 +164,26 @@ class NbmTest {
             cycles,
         )
         assertTrue(http.urls.all { "delimiter=/" in it && it.startsWith("https://noaa-nbm-pds.s3.amazonaws.com/?list-type=2") })
+    }
+
+    @Test fun aNewVersionFolderWinsAndTheOldOneStillFillsTheGap() = runTest {
+        val now = epochOf(2026, 11, 4, 5, 10, 0)
+        val http = FakeHttp { url ->
+            val version = if ("blendv5.1" in url) "blendv5.1" else "blendv5.0"
+            // v5.1 has the 3rd-4th runs of the 4th (hours 3 and 4); v5.0 stopped at 11Z on the 3rd and has hour 4 too (both: v5.1 wins)
+            val hours = when {
+                version == "blendv5.1" && "2026/11/04/" in url -> listOf(3, 4)
+                version == "blendv5.0" && "2026/11/04/" in url -> listOf(4)
+                version == "blendv5.0" && "2026/11/03/" in url -> listOf(10, 11)
+                else -> emptyList()
+            }
+            val day = url.substringAfter("conus/").substringBefore("&")
+            val prefixes = hours.joinToString("") { "<CommonPrefixes><Prefix>$version/conus/$day${it.toString().padStart(2, '0')}00/</Prefix></CommonPrefixes>" }
+            HttpResult(200, "<ListBucketResult>$prefixes</ListBucketResult>".encodeToByteArray())
+        }
+        val cycles = NbmRepository(http, StubCore).listCycles(now, hours = 30)
+        assertEquals(listOf(4 to "blendv5.1", 3 to "blendv5.1", 11 to "blendv5.0", 10 to "blendv5.0"), cycles.map { it.hour to it.version })
+        assertTrue(cycles.first().prefix.startsWith("blendv5.1/conus/2026/11/04/"))
     }
 
     @Test fun listsFramesOfAField() = runTest {

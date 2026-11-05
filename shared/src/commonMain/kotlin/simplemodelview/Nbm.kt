@@ -9,12 +9,15 @@ object NbmBucket {
     const val URL = "https://noaa-nbm-pds.s3.amazonaws.com"
     const val REGION = "conus"
 
+    /** The version folders to look in, newest first: a new version of the blend gets its own folder (v5.1 was due on 2026-11-03), and the folder of the old one stops. */
+    val VERSIONS = listOf("blendv5.1", "blendv5.0")
+
     /** A run at least this many hours long counts as "extended" (a short-range run stops after about 36 h). */
     const val EXTENDED_HOURS = 168
 }
 
 /** One run of the blend (init time, UTC). */
-data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int) {
+data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int, val version: String = "blendv5.0") {
     val epoch: Long get() = epochOf(year, month, day, hour, 0, 0)
 
     private fun two(n: Int) = n.toString().padStart(2, '0')
@@ -26,10 +29,10 @@ data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int) 
     val label: String get() = "$year-${two(month)}-${two(day)} ${two(hour)}Z"
 
     /** The folder of this run (with a trailing slash). */
-    val prefix: String get() = "blendv5.0/${NbmBucket.REGION}/$year/${two(month)}/${two(day)}/${two(hour)}00/"
+    val prefix: String get() = "$version/${NbmBucket.REGION}/$year/${two(month)}/${two(day)}/${two(hour)}00/"
 
     companion object {
-        fun ofEpoch(epoch: Long): NbmCycle = civilFromEpoch(epoch).let { NbmCycle(it[0], it[1], it[2], it[3]) }
+        fun ofEpoch(epoch: Long, version: String = "blendv5.0"): NbmCycle = civilFromEpoch(epoch).let { NbmCycle(it[0], it[1], it[2], it[3], version) }
     }
 }
 
@@ -154,14 +157,16 @@ class NbmRepository(private val http: Http, private val core: Core) {
         var day = nowEpochSeconds - nowEpochSeconds % 86400L
         while (day + 86400L > earliest) {
             val c = civilFromEpoch(day)
-            val prefix = "blendv5.0/${NbmBucket.REGION}/${c[0]}/${c[1].toString().padStart(2, '0')}/${c[2].toString().padStart(2, '0')}/"
-            val result = http.get("${NbmBucket.URL}/?list-type=2&delimiter=/&prefix=$prefix")
-            if (result.status == 200) {
-                for (h in parseNbmRunHours(result.body.decodeToString())) {
-                    val cycle = NbmCycle(c[0], c[1], c[2], h)
-                    if (cycle.epoch <= nowEpochSeconds + 300 && cycle.epoch >= earliest) found += cycle
-                }
-            } else if (result.status != 404) throw RefsException("could not list the blend's runs (HTTP ${result.status})")
+            for (version in NbmBucket.VERSIONS) {
+                val prefix = "$version/${NbmBucket.REGION}/${c[0]}/${c[1].toString().padStart(2, '0')}/${c[2].toString().padStart(2, '0')}/"
+                val result = http.get("${NbmBucket.URL}/?list-type=2&delimiter=/&prefix=$prefix")
+                if (result.status == 200) {
+                    for (h in parseNbmRunHours(result.body.decodeToString())) {
+                        val cycle = NbmCycle(c[0], c[1], c[2], h, version)
+                        if (cycle.epoch <= nowEpochSeconds + 300 && cycle.epoch >= earliest && found.none { it.epoch == cycle.epoch }) found += cycle    // (the newer version wins a run both have)
+                    }
+                } else if (result.status != 404) throw RefsException("could not list the blend's runs (HTTP ${result.status})")
+            }
             day -= 86400L
         }
         return found.sortedByDescending { it.epoch }
@@ -184,7 +189,7 @@ class NbmRepository(private val http: Http, private val core: Core) {
             fun p(n: Int) = n.toString().padStart(2, '0')
             return "${c[0]}-${p(c[1])}-${p(c[2])}T${p(c[3])}:00"
         }
-        val prefix = "${cycle.prefix}$fieldId/blendv5.0_${NbmBucket.REGION}_${fieldId}_${stamp(cycle.epoch)}_"
+        val prefix = "${cycle.prefix}$fieldId/${cycle.version}_${NbmBucket.REGION}_${fieldId}_${stamp(cycle.epoch)}_"
         for (after in listOf(NbmBucket.EXTENDED_HOURS, 0)) {
             val start = prefix + stamp(cycle.epoch + after * 3600L - 3600L) + ".tif"
             val result = http.get("${NbmBucket.URL}/?list-type=2&max-keys=1000&prefix=${cycle.prefix}$fieldId/&start-after=${start.replace(":", "%3A")}")
