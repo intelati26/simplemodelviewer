@@ -130,6 +130,21 @@ typedef struct {
  * result->columns * result->rows floats (release with spc_free). Otherwise returns -1 with a message in `error`. */
 int spc_geotiff_decode(const uint8_t * data, size_t size, float ** out, spc_geotiff_result * result, char * error, size_t error_cap);
 
+/* ---- NBM: GRIB2 messages (Lambert conformal grid 3.30, simple or complex packing, with or without spatial differencing) ---- */
+
+typedef struct {
+    int grid;                          /* the registered Lambert grid (the same definition gives the same id) */
+    int columns, rows;
+    int64_t reference_time;            /* the run's time, epoch seconds */
+    int forecast_hours;                /* the message's forecast time when it is in hours, else 0 */
+    int category, number;              /* parameter category / number of the message (section 4) */
+} spc_grib_result;
+
+/* Decodes the first GRIB2 message of the bytes (a byte range of an NBM file, found with its .idx) into floats (row 0 = south, columns west to east, NaN
+ * where the message has no value). On success returns 0 and `*out` is a malloc'd array of result->columns * result->rows floats (release with spc_free).
+ * Otherwise returns -1 with a message in `error`. */
+int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap);
+
 void spc_free(void * pointer);
 
 #ifdef __cplusplus

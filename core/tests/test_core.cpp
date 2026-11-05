@@ -432,6 +432,66 @@ static void testGeotiffFile(const char * name) {
     spc_free(again);
 }
 
+// NBM GRIB2 messages (scripts/make_nbm_grib_fixtures.py): sampled cells read with pygrib (eccodes) must match
+static void testGribFile(const char * name, bool hasValues) {
+    const std::string base = std::string(NBM_FIXTURE_DIR) + "/" + name;
+    const std::vector<uint8_t> grib = readFile(base);
+    CHECK(!grib.empty());
+    float * values = nullptr;
+    spc_grib_result result{};
+    char error[200] = {0};
+    CHECK(spc_grib_decode(grib.data(), grib.size(), &values, &result, error, sizeof error) == 0);
+    if (values == nullptr) { std::printf("  %s: %s\n", name, error); return; }
+    CHECK(result.columns == 2345 && result.rows == 1597);
+    CHECK(spc_grid_columns(result.grid) == 2345 && spc_grid_rows(result.grid) == 1597);
+    CHECK(result.forecast_hours == 11 || result.forecast_hours == 12);   // (a one-hour total starts at 11)
+    std::ifstream samples(base + ".samples.txt");
+    std::string line;
+    int checked = 0, wrong = 0;
+    long nanCount = -1;
+    while (std::getline(samples, line)) {
+        if (line.rfind("# nan_count ", 0) == 0) { nanCount = std::stol(line.substr(12)); continue; }
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream in(line);
+        int c, r;
+        std::string v;
+        in >> c >> r >> v;
+        const float got = values[static_cast<size_t>(r) * result.columns + c];
+        const bool ok = v == "nan" ? std::isnan(got) : std::fabs(got - std::stof(v)) <= 1e-5 * std::fabs(std::stof(v)) + 1e-6;
+        if (!ok) wrong += 1;
+        checked += 1;
+    }
+    CHECK(checked >= 400 && wrong == 0);
+    long nans = 0;
+    for (size_t i = 0; i < static_cast<size_t>(result.columns) * result.rows; i += 1) nans += std::isnan(values[i]) ? 1 : 0;
+    CHECK(nans == nanCount);
+    // the same grid as the GeoTIFFs: 19.229 N, 126.2766 W at the south-west cell, 2.539703 km cells
+    double lat, lon;
+    spc_grid_to_latlon(result.grid, 0, 0, &lat, &lon);
+    CHECK(std::fabs(lat - 19.229) < 1e-3 && std::fabs(lon + 126.2766) < 1e-3);
+    spc_grid_to_latlon(result.grid, 2344, 1596, &lat, &lon);
+    CHECK(std::fabs(lat - 54.3728) < 1e-3 && std::fabs(lon + 59.0422) < 1e-3);
+    CHECK(result.reference_time == 1793833200);      // 2026-11-04 23:00 UTC
+    (void)hasValues;
+    spc_free(values);
+}
+
+static void testGrib() {
+    for (const char * name : {"nbm_temp.grib2", "nbm_apcp.grib2", "nbm_vis.grib2"}) testGribFile(name, true);
+    // damaged or cut-off input fails cleanly
+    const std::vector<uint8_t> grib = readFile(std::string(NBM_FIXTURE_DIR) + "/nbm_vis.grib2");
+    float * values = nullptr;
+    spc_grib_result result{};
+    char error[200] = {0};
+    CHECK(spc_grib_decode(grib.data(), 10, &values, &result, error, sizeof error) != 0);
+    CHECK(spc_grib_decode(grib.data(), grib.size() / 2, &values, &result, error, sizeof error) != 0);
+    const uint8_t junk[64] = {'G', 'R', 'I', 'B', 0, 0, 0, 2};
+    CHECK(spc_grib_decode(junk, sizeof junk, &values, &result, error, sizeof error) != 0);
+    std::vector<uint8_t> flipped = grib;
+    for (size_t i = 3000; i < flipped.size(); i += 97) flipped[i] ^= 0x5A;
+    if (spc_grib_decode(flipped.data(), flipped.size(), &values, &result, error, sizeof error) == 0) spc_free(values);   // wrong numbers or an error, never a crash
+}
+
 static void testGeotiff() {
     for (const char * name : {"nbm_temp.tif", "nbm_qpf06.tif", "nbm_ceil.tif", "nbm_tstm01.tif"}) testGeotiffFile(name);
     // damaged or cut-off input fails cleanly
@@ -527,6 +587,7 @@ int main() {
     testGlobe();
     testMrms();
     testGeotiff();
+    testGrib();
     testCategorical();
     testOpacityAndTop();
     testReproject();
