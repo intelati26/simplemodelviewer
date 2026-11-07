@@ -289,7 +289,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startPlaying() {
         val st = _state.value
-        val window = nbmLoopWindow(st.frames, st.loopSpanHours)
+        val window = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
         if (window.count() < 2) return
         frameJob?.cancel()
         update { it.copy(playing = true) }

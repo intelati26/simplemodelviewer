@@ -25,6 +25,7 @@ import simplemodelview.globeInverse
 import simplemodelview.BackupPlace
 import simplemodelview.Place
 import simplemodelview.loopWindow
+import simplemodelview.loopWindowAnchored
 import simplemodelview.nextPlayable
 import simplemodelview.VideoSize
 import simplemodelview.SettingsBackup
@@ -580,7 +581,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val v = resolveView(area)
         val pictureW = if (area == ShareArea.Globe && globeW > 0) 1500 else v.pixelWidth
         val pictureH = if (area == ShareArea.Globe && globeW > 0) 1500 * globeH / globeW else v.pixelHeight
-        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindow(_state.value.times.size, _state.value.loopLength).count())   // + header and legend
+        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindowAnchored(_state.value.times.size, _state.value.loopLength, _state.value.timeIndex, AppContainer.loopFromShown.value).count())   // + header and legend
     }
 
     var videoSize: VideoSize
@@ -621,7 +622,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
-            val window = loopWindow(st.times.size, st.loopLength)
+            val window = loopWindowAnchored(st.times.size, st.loopLength, st.timeIndex, AppContainer.loopFromShown.value)
             outlook.wantAll(window.map { st.times[it] })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(st.times.size)
@@ -704,7 +705,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return@withContext null
         val cycle = st.cycle ?: return@withContext null
-        val window = loopWindow(st.times.size, st.loopLength)
+        val window = loopWindowAnchored(st.times.size, st.loopLength, st.timeIndex, AppContainer.loopFromShown.value)
         val n = window.count()
         if (n < 2) return@withContext null
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }

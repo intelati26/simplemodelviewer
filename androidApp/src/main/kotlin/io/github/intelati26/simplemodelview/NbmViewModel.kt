@@ -531,7 +531,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
             val frames = st.frames
-            val window = nbmLoopWindow(frames, st.loopSpanHours)
+            val window = nbmLoopWindow(frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
             outlook.wantAll(window.map { frames[it].valid })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(frames.size)
@@ -656,7 +656,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** Renders the frames of the loop into an MP4 and returns it. Each frame is held for the forecast hours it stands for. [onProgress] gets (done, total). */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val st = _state.value
-        val window = nbmLoopWindow(st.frames, st.loopSpanHours)
+        val window = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
         val n = window.count()
         if (n < 2) return@withContext null
         val out = File(sharedDir(), fileName(st.product, st.frames[window.first], "mp4"))
@@ -684,7 +684,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
         val grid = shown?.first?.grid ?: return 0.0
         val st = _state.value
-        val frames = nbmLoopWindow(st.frames, st.loopSpanHours).count()
+        val frames = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0).count()
         if (area == ShareArea.Globe) { val w = 1500; return VideoSize.estimateMegabytes(size, w, 1500 * maxOf(globeH, 1) / maxOf(globeW, 1) + w / 6, frames) }
         val box = areaView(area, grid)
         return VideoSize.estimateMegabytes(size, box.pixelWidth, box.pixelHeight + box.pixelWidth / 6, frames)   // + header and legend

@@ -174,14 +174,23 @@ fun nbmLoopSpans(totalHours: Int): List<NbmLoopSpan> =
         .filter { it.first < totalHours }.map { NbmLoopSpan(it.second, it.first) } + NbmLoopSpan("all", 0)
 
 /** The frames a loop of [spanHours] covers (0 = all): from the first one to the last within the span (at least two frames when there are two). */
-fun nbmLoopWindow(frames: List<NbmFile>, spanHours: Int): IntRange {
+fun nbmLoopWindow(frames: List<NbmFile>, spanHours: Int, start: Int = 0): IntRange {
     if (frames.isEmpty()) return IntRange.EMPTY
-    if (spanHours <= 0) return frames.indices
-    val limit = frames[0].valid + spanHours * 3600L
-    var last = frames.indexOfLast { it.valid <= limit }
-    if (last < 1 && frames.size > 1) last = 1
-    return 0..last
+    val from = start.coerceIn(0, frames.size - 1)
+    val window = when {
+        spanHours == 0 -> from until frames.size
+        spanHours < 0 -> from..minOf(frames.size - 1, from + (-spanHours) - 1)       // that many frames ("steps"), whatever their spacing
+        else -> {
+            val limit = frames[from].valid + spanHours * 3600L
+            from..frames.indexOfLast { it.valid <= limit }
+        }
+    }
+    // a loop of one frame is nothing to play: at the end of the run, the last two frames
+    return if (window.count() < 2 && frames.size >= 2) minOf(from, frames.size - 2)..(minOf(from, frames.size - 2) + 1) else window
 }
+
+/** The frame counts a loop can be given in steps instead of hours; a span of -N stands for N steps (see [nbmLoopWindow]). */
+val NBM_LOOP_STEPS = listOf(12, 24)
 
 /** "Tue 03 Nov 06Z, +85 h" for a frame: its valid time and its lead after the run. */
 fun nbmFrameLabel(file: NbmFile): String = "${formatUtc(file.valid)}  (+${file.leadHours} h)"

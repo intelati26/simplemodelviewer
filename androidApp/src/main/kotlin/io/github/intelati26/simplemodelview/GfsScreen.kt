@@ -162,11 +162,16 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     var spanMenu by remember { mutableStateOf(false) }
                     Box {
+                        val fromShown by AppContainer.loopFromShown.collectAsStateWithLifecycle()
+                        val spans = nbmLoopSpans(((s.frames.last().valid - s.frames.first().valid) / 3600).toInt())
                         TextButton(onClick = { spanMenu = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                            Text((nbmLoopSpans(((s.frames.last().valid - s.frames.first().valid) / 3600).toInt()).firstOrNull { it.hours == s.loopSpanHours }?.label ?: "all") + " ▾")
+                            Text((if (s.loopSpanHours < 0) "${-s.loopSpanHours} steps" else spans.firstOrNull { it.hours == s.loopSpanHours }?.label ?: "all") + " \u25BE")
                         }
                         DropdownMenu(expanded = spanMenu, onDismissRequest = { spanMenu = false }) {
-                            for (span in nbmLoopSpans(((s.frames.last().valid - s.frames.first().valid) / 3600).toInt())) DropdownMenuItem(text = { Text(span.label) }, onClick = { spanMenu = false; vm.setLoopSpan(span.hours) })
+                            for (n in simplemodelview.NBM_LOOP_STEPS) DropdownMenuItem(text = { Text(if (fromShown) "$n steps from the frame shown" else "First $n steps") }, onClick = { spanMenu = false; vm.setLoopSpan(-n) })
+                            for (span in spans) DropdownMenuItem(text = { Text(if (fromShown) span.label + " from the frame shown" else span.label) }, onClick = { spanMenu = false; vm.setLoopSpan(span.hours) })
+                            androidx.compose.material3.HorizontalDivider()
+                            LoopStartItem { spanMenu = false }
                         }
                     }
                     Slider(

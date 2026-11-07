@@ -34,6 +34,10 @@ object AppContainer {
     fun init(application: Application) { app = application }
 
     val prefs by lazy { app.getSharedPreferences("simplemodelview", Context.MODE_PRIVATE) }
+
+    /** Loops start at the frame shown (and run the chosen number of steps after it) instead of at the page's usual start. One choice for every page. */
+    val loopFromShown by lazy { kotlinx.coroutines.flow.MutableStateFlow(prefs.getBoolean("loop_from_shown", false)) }
+    fun setLoopFromShown(on: Boolean) { prefs.edit().putBoolean("loop_from_shown", on).apply(); loopFromShown.value = on }
     val core by lazy { NativeCore() }
     val lines by lazy { MapLines(app, core) }
     private val http by lazy { OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()) { prefs.getString("contact_email", "").orEmpty() } }   // a new cache size applies on the next launch

@@ -3,6 +3,7 @@ package io.github.intelati26.simplemodelview
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -12,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import simplemodelview.loopLengthOptions
 
 /** "Loop: 12" / "Loop: all": how many frames Play (and a loop video) covers; 0 = all [total] frames. */
@@ -24,6 +26,15 @@ internal fun LoopLengthMenu(length: Int, total: Int, onPick: (Int) -> Unit) {
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             for (n in loopLengthOptions(total)) DropdownMenuItem(text = { Text(if (n == 0) "All $total frames" else "$n frames") }, onClick = { open = false; onPick(n) })
+            HorizontalDivider()
+            LoopStartItem { open = false }
         }
     }
+}
+
+/** A checkbox row of every loop menu: the loop starts at the frame on screen (and covers the chosen number of steps after it) instead of the page's usual start. */
+@Composable
+internal fun LoopStartItem(onDone: () -> Unit) {
+    val on by AppContainer.loopFromShown.collectAsStateWithLifecycle()
+    DropdownMenuItem(text = { Text((if (on) "\u2713 " else "") + "Start at the frame shown") }, onClick = { AppContainer.setLoopFromShown(!on); onDone() })
 }

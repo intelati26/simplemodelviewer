@@ -313,12 +313,19 @@ private fun NbmLoopMenu(spanHours: Int, frames: List<NbmFile>, onPick: (Int) -> 
     var open by remember { mutableStateOf(false) }
     val total = if (frames.size < 2) 0 else ((frames.last().valid - frames.first().valid) / 3600).toInt()
     val spans = nbmLoopSpans(total)
+    val fromShown by AppContainer.loopFromShown.collectAsStateWithLifecycle()
     Box {
         TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-            Text("Loop: " + (spans.firstOrNull { it.hours == spanHours && spanHours > 0 }?.label ?: "all"))
+            Text("Loop: " + (if (spanHours < 0) "${-spanHours} steps" else spans.firstOrNull { it.hours == spanHours && spanHours > 0 }?.label ?: "all"))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            for (span in spans) DropdownMenuItem(text = { Text(if (span.hours == 0) "All of the run" else "First ${span.label}") }, onClick = { open = false; onPick(span.hours) })
+            for (n in simplemodelview.NBM_LOOP_STEPS) DropdownMenuItem(text = { Text(if (fromShown) "$n steps from the frame shown" else "First $n steps") }, onClick = { open = false; onPick(-n) })
+            for (span in spans) DropdownMenuItem(
+                text = { Text(if (span.hours == 0) (if (fromShown) "All from the frame shown" else "All of the run") else if (fromShown) "${span.label} from the frame shown" else "First ${span.label}") },
+                onClick = { open = false; onPick(span.hours) },
+            )
+            HorizontalDivider()
+            LoopStartItem { open = false }
         }
     }
 }

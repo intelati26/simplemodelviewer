@@ -34,3 +34,19 @@ fun loopWindowEndingAt(total: Int, length: Int, end: Int): IntRange {
     val start = (last - length + 1).coerceAtLeast(0)
     return start until (start + length)
 }
+
+/**
+ * The [length] frames of a loop that starts at frame [shown] (the one on screen): shown .. shown+length-1, fewer when the series ends sooner (but at least
+ * two frames when there are two). 0 (or a length of the rest of the series) = from the frame shown to the end.
+ */
+fun loopWindowFromShown(total: Int, length: Int, shown: Int): IntRange {
+    if (total <= 0) return IntRange.EMPTY
+    var start = shown.coerceIn(0, total - 1)
+    val end = if (length <= 0) total else minOf(total, start + length)
+    if (end - start < 2 && total >= 2) start = total - 2
+    return start until maxOf(end, start + minOf(2, total - start))
+}
+
+/** The window of a frame-counted loop: from the frame shown when [fromShown], else the page's usual one ([loopWindow]). */
+fun loopWindowAnchored(total: Int, length: Int, shown: Int, fromShown: Boolean, fromEnd: Boolean = false): IntRange =
+    if (fromShown) loopWindowFromShown(total, length, shown) else loopWindow(total, length, fromEnd)

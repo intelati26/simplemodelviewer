@@ -244,3 +244,29 @@ class NbmTest {
         assertTrue("damaged" in e.message!!)
     }
 }
+
+class LoopFromShownTest {
+    private fun frames(vararg leads: Int) = leads.map { NbmFile("k$it", 0L, it * 3600L, null, 0L) }
+
+    @Test fun framesAreCountedFromTheFrameShown() {
+        assertEquals(5..16, loopWindowFromShown(30, 12, 5))
+        assertEquals(26..29, loopWindowFromShown(30, 12, 26))             // the series ends first
+        assertEquals(28..29, loopWindowFromShown(30, 12, 29))             // on the last frame: the last two, so there is something to play
+        assertEquals(5..29, loopWindowFromShown(30, 0, 5))                // all: to the end
+        assertEquals(0..11, loopWindowAnchored(30, 12, 5, false))         // not from the frame shown: the usual first frames
+        assertEquals(5..16, loopWindowAnchored(30, 12, 5, true))
+        assertEquals(IntRange.EMPTY, loopWindowFromShown(0, 12, 0))
+    }
+
+    @Test fun modelLoopsCountHoursOrStepsFromAFrame() {
+        val f = frames(0, 1, 2, 3, 6, 9, 12, 18, 24)
+        assertEquals(0..3, nbmLoopWindow(f, 3))                           // as before: the first 3 h
+        assertEquals(2..5, nbmLoopWindow(f, 7, start = 2))                // 2 h + 7 h = 9 h
+        assertEquals(2..8, nbmLoopWindow(f, -12, start = 2))               // 12 steps: to the end of a short series
+        assertEquals(1..4, nbmLoopWindow(f, -4, start = 1))               // exactly 4 frames
+        assertEquals(6..8, nbmLoopWindow(f, 0, start = 6))                // all, from there
+        assertEquals(0..8, nbmLoopWindow(f, 0))                           // unchanged
+        assertEquals(7..8, nbmLoopWindow(f, 1, start = 8))                // never fewer than two frames when there are two
+        assertEquals(0..1, nbmLoopWindow(f, 0, start = 0).let { nbmLoopWindow(f, -1) })
+    }
+}
