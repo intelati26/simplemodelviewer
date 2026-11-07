@@ -9,8 +9,8 @@
 
 namespace Grib {
     namespace {
-        bool unpack(const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, int nx, int ny, int scan, std::vector<float>& out, std::string& error);
-        bool decodeLatLon(const uint8_t * s3, size_t l3, const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, std::vector<float>& out, Info& info, std::string& error);
+        bool unpack(const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, int nx, int ny, int scan, std::vector<float>& out, std::string& error, bool partial, int64_t & decoded);
+        bool decodeLatLon(const uint8_t * s3, size_t l3, const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, std::vector<float>& out, Info& info, std::string& error, bool partial);
     }
     namespace {
         uint32_t be32(const uint8_t * p) { return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]); }
@@ -53,7 +53,7 @@ namespace Grib {
         };
 
         // Unpacks sections 5-7 into floats laid out row 0 = south, columns west to east (whatever the scan order of the file was).
-        bool unpack(const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, int nx, int ny, int scan, std::vector<float>& out, std::string& error) {
+        bool unpack(const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, int nx, int ny, int scan, std::vector<float>& out, std::string& error, bool partial, int64_t & decoded) {
         // ---- the packing (section 5) ----
         const uint32_t npoints = be32(s5 + 5);                         // the values stored (the grid's points that are in the bitmap)
         const int tmpl = be16(s5 + 9);
@@ -83,6 +83,7 @@ namespace Grib {
         if (tmpl == 0) {
             Bits b{data7, size7};
             for (uint32_t i = 0; i < npoints; i += 1) {
+                if (partial && b.bit + static_cast<uint64_t>(bitsPerValue) > size7 * 8) break;
                 const double x = bitsPerValue == 0 ? 0.0 : static_cast<double>(b.read(bitsPerValue));
                 values.push_back((reference + x * scale) * decimal);
             }
@@ -131,6 +132,7 @@ namespace Grib {
             for (uint32_t g = 0; g < groups; g += 1) {
                 const int w = static_cast<int>(widths[g]);
                 if (w > 32) { error = "unsupported group width"; return false; }
+                if (partial && w > 0 && b.bit + static_cast<uint64_t>(w) * lengths[g] > size7 * 8) break;       // the data stops inside this group: whole groups only
                 const uint64_t allOnes = w == 0 ? 0 : ((uint64_t(1) << w) - 1);
                 for (uint32_t i = 0; i < lengths[g]; i += 1) {
                     bool miss = false;
@@ -148,7 +150,7 @@ namespace Grib {
                 }
             }
             if (!b.ok) { error = "damaged GRIB data"; return false; }
-            if (x.size() != npoints) { error = "the GRIB group lengths do not add up to the point count"; return false; }
+            if (!partial && x.size() != npoints) { error = "the GRIB group lengths do not add up to the point count"; return false; }
 
             // undo the spatial differencing over the values that are there
             if (order > 0) {
@@ -167,7 +169,8 @@ namespace Grib {
             }
             for (size_t i = 0; i < x.size(); i += 1) values.push_back(gone[i] ? nan : (reference + static_cast<double>(x[i]) * scale) * decimal);
         }
-        if (values.size() != npoints) { error = "the GRIB value count does not match"; return false; }
+        if (!partial && values.size() != npoints) { error = "the GRIB value count does not match"; return false; }
+        decoded = static_cast<int64_t>(values.size());
 
         // ---- lay the values out: row 0 = south, columns west to east ----
         const bool iNegative = (scan & 0x80) != 0, jPositive = (scan & 0x40) != 0, jConsecutive = (scan & 0x20) != 0, alternate = (scan & 0x10) != 0;
@@ -176,7 +179,10 @@ namespace Grib {
         size_t next = 0;
         for (size_t k = 0; k < cells; k += 1) {
             if (!present.empty() && !present[k]) continue;
-            if (next >= values.size()) { error = "the GRIB bitmap has more points than values"; return false; }
+            if (next >= values.size()) {
+                if (partial) break;                                  // the cells after the last decoded value stay NaN
+                error = "the GRIB bitmap has more points than values"; return false;
+            }
             const double v = values[next++];
             // k is the position in the file's scan order
             size_t a = jConsecutive ? k / ny : k % nx;                  // the i index along the scan (before direction)
@@ -190,7 +196,7 @@ namespace Grib {
         }
 
         // Grid template 3.0: a regular latitude / longitude grid (GFS, 0.25 degrees, 1440 x 721). A grid around the whole globe is rolled to start at -180 degrees.
-        bool decodeLatLon(const uint8_t * s3, size_t l3, const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, std::vector<float>& out, Info& info, std::string& error) {
+        bool decodeLatLon(const uint8_t * s3, size_t l3, const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, std::vector<float>& out, Info& info, std::string& error, bool partial) {
             if (l3 < 72) { error = "damaged GRIB grid section"; return false; }
             const int nx = static_cast<int>(be32(s3 + 30)), ny = static_cast<int>(be32(s3 + 34));
             if (nx <= 0 || ny <= 0 || static_cast<int64_t>(nx) * ny > 60000000) { error = "unreasonable GRIB grid size"; return false; }
@@ -199,7 +205,9 @@ namespace Grib {
             const double di = be32(s3 + 63) * 1e-6, dj = be32(s3 + 67) * 1e-6;
             const int scan = s3[71];
             if (di <= 0 || dj <= 0) { error = "unsupported grid spacing"; return false; }
-            if (!unpack(s5, l5, s6, l6, s7, l7, nx, ny, scan, out, error)) return false;
+            int64_t decoded = 0;
+            if (!unpack(s5, l5, s6, l6, s7, l7, nx, ny, scan, out, error, partial, decoded)) return false;
+            info.valuesDecoded = decoded;
             const bool iNegative = (scan & 0x80) != 0;
             double west = iNegative ? lo2 : lo1;
             if (west >= 180.0) west -= 360.0;
@@ -222,7 +230,7 @@ namespace Grib {
         }
     }
 
-    bool decode(const uint8_t * data, size_t size, std::vector<float>& out, Info& info, std::string& error) {
+    bool decode(const uint8_t * data, size_t size, std::vector<float>& out, Info& info, std::string& error, bool partial) {
         if (size < 20 || std::memcmp(data, "GRIB", 4) != 0) { error = "not a GRIB message"; return false; }
         if (data[7] != 2) { error = "not GRIB edition 2"; return false; }
         uint64_t total = 0;
@@ -236,8 +244,9 @@ namespace Grib {
         size_t pos = 16;
         while (pos + 5 <= end) {
             if (std::memcmp(data + pos, "7777", 4) == 0) break;
-            const size_t length = be32(data + pos);
+            size_t length = be32(data + pos);
             const int section = data[pos + 4];
+            if (partial && section == 7 && pos + 5 <= end && pos + length > end) length = end - pos;        // cut off: what there is of the data
             if (length < 5 || pos + length > end) { error = "damaged GRIB section"; return false; }
             const uint8_t * s = data + pos;
             switch (section) {
@@ -266,7 +275,7 @@ namespace Grib {
 
         // ---- the grid (section 3) ----
         const int gridTemplate = l3 >= 14 ? be16(s3 + 12) : -1;
-        if (gridTemplate == 0) return decodeLatLon(s3, l3, s5, l5, s6, l6, s7, l7, out, info, error);
+        if (gridTemplate == 0) return decodeLatLon(s3, l3, s5, l5, s6, l6, s7, l7, out, info, error, partial);
         if (l3 < 81 || gridTemplate != 30) { error = "unsupported grid template (need Lambert conformal 3.30 or latitude / longitude 3.0)"; return false; }
         const int shape = s3[14];
         double radius = 6371229.0;
@@ -299,7 +308,9 @@ namespace Grib {
         const double firstX = r1 * std::sin(n * dl);
         const double firstY = rho0 - r1 * std::cos(n * dl);
 
-        if (!unpack(s5, l5, s6, l6, s7, l7, nx, ny, scan, out, error)) return false;
+        int64_t decoded = 0;
+        if (!unpack(s5, l5, s6, l6, s7, l7, nx, ny, scan, out, error, partial, decoded)) return false;
+        info.valuesDecoded = decoded;
         const bool iNegative = (scan & 0x80) != 0, jPositive = (scan & 0x40) != 0;
         info.columns = nx; info.rows = ny;
         info.parallel = latin1; info.centralMeridian = lovWest; info.radius = radius; info.cellMeters = dx;

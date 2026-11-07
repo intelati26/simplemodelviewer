@@ -584,7 +584,7 @@ internal fun SettingsDialog(
                 if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors (REFS), and for the freezing level and model temperatures (MRMS).", settings.contours) {
                     onChange(settings.copy(contours = it))
                 }
-                if (showCrop) SwitchRow("Crop regions with NOMADS", "Ask NOAA's NOMADS for just the sector's box of each GFS field (tens of kilobytes instead of about 0.8 MB). If NOMADS does not answer, the whole field comes from AWS.", settings.gfsCrop) {
+                if (showCrop) SwitchRow("Crop regions with NOMADS", "Ask NOAA's NOMADS for just the sector's box of each GFS field (tens of kilobytes instead of about 0.8 MB). If NOMADS is off or does not answer, AWS gives the field down to the sector's south edge (about half), and only then the whole field.", settings.gfsCrop) {
                     onChange(settings.copy(gfsCrop = it))
                 }
                 if (showBarbs) Column {

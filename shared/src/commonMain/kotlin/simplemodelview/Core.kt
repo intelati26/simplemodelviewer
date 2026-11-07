@@ -25,7 +25,7 @@ enum class Pool { Max, Mean, Mode }
 class MrmsWindow(val grid: Grid, val values: FloatArray, val validTime: Long, val sourceCellDegrees: Double)
 
 /** A decoded raster: [values] fill [grid] (row 0 = south, NaN where nothing is stored). */
-class GridField(val grid: Grid, val values: FloatArray, val meta: GribMeta? = null)
+class GridField(val grid: Grid, val values: FloatArray, val meta: GribMeta? = null, val decodedValues: Int = -1)
 
 /** What a decoded GRIB message is: its parameter (category / number) and first fixed surface (type and value), to tell the messages of a cropped file apart. */
 class GribMeta(val category: Int, val number: Int, val levelType: Int, val levelValue: Int)
@@ -55,6 +55,12 @@ interface Core {
      * registered by the core. Throws on a damaged / unsupported message.
      */
     fun decodeGrib(message: ByteArray): GridField = throw UnsupportedOperationException()
+
+    /**
+     * Like [decodeGrib] for the first bytes of a message (cut off after its group tables): the whole groups that are there are decoded, in scan order (a GFS
+     * field's top rows), the cells after them are NaN, and [GridField.decodedValues] says how many values there are. Throws when even the tables are cut.
+     */
+    fun decodeGribPrefix(message: ByteArray): GridField = throw UnsupportedOperationException()
 
     /** The longitude (east-positive, -180..180) of every cell of [grid], row 0 = south: for turning east / north wind components into the grid's own axes. */
     fun gridLongitudes(grid: Grid): FloatArray = throw UnsupportedOperationException()

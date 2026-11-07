@@ -162,11 +162,11 @@ int spc_geotiff_decode(const uint8_t * data, size_t size, float ** out, spc_geot
     return 0;
 }
 
-int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap) {
+static int gribDecode(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap, bool partial) {
     std::vector<float> values;
     Grib::Info info;
     std::string message;
-    if (!Grib::decode(data, size, values, info, message)) {
+    if (!Grib::decode(data, size, values, info, message, partial)) {
         if (error && error_cap > 0) {
             std::strncpy(error, message.c_str(), error_cap - 1);
             error[error_cap - 1] = 0;
@@ -190,7 +190,16 @@ int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_re
     result->number = info.number;
     result->level_type = info.levelType;
     result->level_value = info.levelValue;
+    result->values_decoded = info.valuesDecoded;
     return 0;
+}
+
+int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap) {
+    return gribDecode(data, size, out, result, error, error_cap, false);
+}
+
+int spc_grib_decode_prefix(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap) {
+    return gribDecode(data, size, out, result, error, error_cap, true);
 }
 
 void spc_free(void * pointer) { std::free(pointer); }

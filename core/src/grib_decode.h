@@ -26,10 +26,13 @@ namespace Grib {
         int category = -1, number = -1;                 // parameter category / number (section 4)
         int levelType = -1;                             // type of the first fixed surface: 100 isobaric (value in Pa), 103 height above ground (m), 101 mean sea level, 1 surface, 200 whole atmosphere
         int levelValue = 0;                             // its value, in the unit of that type
+        int64_t valuesDecoded = 0;                      // how many of the message's values were decoded (all, unless [partial] was asked and the data stops short)
     };
 
     // decodes the first message of [data, data + size) into floats, row 0 = south, columns west to east, NaN where the message has no value
-    bool decode(const uint8_t * data, size_t size, std::vector<float>& out, Info& info, std::string& error);
+    // With [partial], a message cut off after its group tables is decoded as far as the bytes go (whole groups, in scan order: the top rows of a GFS field);
+    // the cells after that are NaN and Info::valuesDecoded says how many values there are. Complex packing only.
+    bool decode(const uint8_t * data, size_t size, std::vector<float>& out, Info& info, std::string& error, bool partial = false);
 }
 
 #endif

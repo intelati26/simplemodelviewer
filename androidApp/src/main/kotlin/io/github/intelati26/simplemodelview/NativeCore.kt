@@ -37,6 +37,14 @@ class NativeCore : Core {
     private external fun gridLongitudesNative(grid: Int, count: Int): FloatArray
     override fun gridLongitudes(grid: Grid): FloatArray = gridLongitudesNative(grid.id, grid.cells)
 
+    private external fun decodeGribPrefixNative(message: ByteArray, info: IntArray): FloatArray
+
+    override fun decodeGribPrefix(message: ByteArray): GridField {
+        val info = IntArray(8)
+        val values = decodeGribPrefixNative(message, info)
+        return GridField(Grid(info[0], info[1], info[2]), values, GribMeta(info[3], info[4], info[5], info[6]), info[7])
+    }
+
     private external fun decodeGribNative(message: ByteArray, info: IntArray): FloatArray
 
     override fun decodeGrib(message: ByteArray): GridField {

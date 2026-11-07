@@ -141,12 +141,17 @@ typedef struct {
     int forecast_hours;                /* the message's forecast time when it is in hours, else 0 */
     int category, number;              /* parameter category / number of the message (section 4) */
     int level_type, level_value;       /* first fixed surface: 100 isobaric (Pa), 103 height above ground (m), 101 mean sea level, 1 surface, 200 whole atmosphere */
+    int64_t values_decoded;            /* how many values were decoded: all of them, unless spc_grib_decode_prefix was given a cut-off message */
 } spc_grib_result;
 
 /* Decodes the first GRIB2 message of the bytes (a byte range of an NBM file, found with its .idx) into floats (row 0 = south, columns west to east, NaN
  * where the message has no value). On success returns 0 and `*out` is a malloc'd array of result->columns * result->rows floats (release with spc_free).
  * Otherwise returns -1 with a message in `error`. */
 int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap);
+
+/* Like spc_grib_decode for a message cut off after its group tables (the first bytes of it): decodes the whole groups there are, in scan order (a GFS field's
+ * top rows); the cells after that are NaN and result->values_decoded says how many values were decoded. Complex packing only. */
+int spc_grib_decode_prefix(const uint8_t * data, size_t size, float ** out, spc_grib_result * result, char * error, size_t error_cap);
 
 void spc_free(void * pointer);
 

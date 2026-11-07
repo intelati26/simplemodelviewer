@@ -91,9 +91,37 @@ class GfsCropTest {
         }
         GfsRepository(aws, awsCore).loadWind(file, 500, "speed", Grid(9, 2, 1), { awsSteps += it }, region)
         assertTrue(awsSteps.any { it.startsWith("NOMADS:") && "Using AWS" in it })
-        assertTrue(awsSteps.contains("Source: AWS (NOMADS did not answer)"))
-        assertTrue(aws.urls.any { it.endsWith("[100-399]") })
+        assertTrue(awsSteps.contains("Source: AWS (to the sector's south edge; NOMADS did not answer)"))
+        assertTrue(aws.urls.any { it.contains("[") })
         assertNotNull(aws.urls.firstOrNull { it.endsWith(".idx") })
+    }
+
+    @Test fun theTruncatedAwsRoadAsksForTheTopOfEachMessageAndGrowsUntilTheRowsAreThere() = runTest {
+        val region = doubleArrayOf(-125.0, 24.0, -66.5, 50.0)
+        val total = 1_000_000L
+        val idx = "1:0:d=2026110612:HGT:500 mb:120 hour fcst:\n2:$total:d=2026110612:UGRD:500 mb:120 hour fcst:\n3:${2 * total}:d=2026110612:VGRD:500 mb:120 hour fcst:\n4:${3 * total}:d=2026110612:PRMSL:mean sea level:120 hour fcst:\n"
+        val needed = (kotlin.math.ceil((90.0 - 24.0) / 0.25).toInt() + 2) * GfsGrid.COLUMNS
+        val http = FakeHttp { url ->
+            when {
+                url.contains("nomads") -> HttpResult(503, ByteArray(0))
+                url.endsWith(".idx") -> HttpResult(200, idx.encodeToByteArray())
+                else -> HttpResult(206, ByteArray(100))
+            }
+        }
+        // the core gets the cell count from the length it is given: the first guess is too short, the grown one is enough
+        val lengths = ArrayList<Int>()
+        val core = object : Core by StubCore {
+            override fun decodeGrib(message: ByteArray) = GridField(Grid(5, 2, 1), floatArrayOf(1f, 2f))
+            override fun decodeGribPrefix(message: ByteArray) = GridField(Grid(5, 2, 1), floatArrayOf(1f, 2f), null, if (lengths.size % 2 == 0) needed / 2 else needed).also { lengths += 1 }
+            override fun reproject(values: FloatArray, from: Grid, to: Grid) = values
+            override fun gridLongitudes(grid: Grid) = FloatArray(2) { -97.5f }
+        }
+        val steps = ArrayList<String>()
+        GfsRepository(http, core).loadWind(file, 500, "speed", Grid(9, 2, 1), { steps += it }, region, crop = false)
+        assertTrue(steps.contains("Source: AWS (to the sector's south edge)"))
+        val ranges = http.urls.filter { it.contains("[") }
+        assertTrue(ranges.size > 3, ranges.toString())                        // at least one growth for some message
+        assertTrue(ranges.none { it.endsWith("-${total - 1}]") && false })
     }
 
     @Test fun theRunTimeIsReadFromAnEncodedFilterUrl() {

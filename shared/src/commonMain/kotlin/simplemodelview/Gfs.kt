@@ -222,8 +222,8 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
      * The decoded fields of [wanted] (keys "VARIABLE:level"), unconverted: cropped to [region] by NOMADS when a region is given, and from the AWS byte ranges when
      * that is not given or NOMADS does not deliver (the reason is passed to [status]).
      */
-    private suspend fun fields(file: NbmFile, wanted: List<GfsMessage>, region: DoubleArray?, status: (String) -> Unit): Map<String, GridField> {
-        if (region != null) {
+    private suspend fun fields(file: NbmFile, wanted: List<GfsMessage>, region: DoubleArray?, crop: Boolean, status: (String) -> Unit): Map<String, GridField> {
+        if (region != null && crop) {
             try {
                 val bytes = cropDownload(file, wanted, region, status)
                 status("Source: NOMADS (cropped)")
@@ -239,8 +239,20 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
                 status("NOMADS: ${e.message}. Using AWS\u2026")
             }
         }
+        // the second road: from AWS only the first part of each message, down to the sector's south edge (the grid is stored north to south)
+        if (region != null) {
+            try {
+                val got = truncated(file, wanted, region, status)
+                status(if (crop) "Source: AWS (to the sector's south edge; NOMADS did not answer)" else "Source: AWS (to the sector's south edge)")
+                return got
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                status("AWS partial: ${e.message}. Whole fields\u2026")
+            }
+        }
         val bytes = messages(file, wanted, status)
-        status(if (region != null) "Source: AWS (NOMADS did not answer)" else "Source: AWS")
+        status(if (region != null) "Source: AWS (whole fields)" else "Source: AWS")
         status("Decoding\u2026")
         return wanted.associate { "${it.variable}:${it.level}" to decodeRaw(bytes.getValue("${it.variable}:${it.level}")) }
     }
@@ -248,12 +260,64 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     private fun decodeRaw(bytes: ByteArray): GridField = try { core.decodeGrib(bytes) } catch (e: Exception) { throw RefsException("could not decode the GFS message: ${e.message}") }
 
     /** Downloads (and keeps) what a frame of a product needs, so a loop plays without waiting; a wind product when [product] is null. */
-    suspend fun prefetch(file: NbmFile, level: Int, colorKey: String, product: GfsProduct?, region: DoubleArray? = null) {
+    suspend fun prefetch(file: NbmFile, level: Int, colorKey: String, product: GfsProduct?, region: DoubleArray? = null, crop: Boolean = true) {
         val wanted = if (product != null) listOfNotNull(product.message) else windMessages(level, colorKey)
-        if (region != null) {
+        if (region != null && crop) {
             try { cropDownload(file, wanted, region) { }; return } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { /* AWS below */ }
         }
+        if (region != null) {
+            try { truncated(file, wanted, region) { }; return } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { /* whole fields below */ }
+        }
         messages(file, wanted) { }
+    }
+
+    private val awsGate = kotlinx.coroutines.sync.Semaphore(3)
+
+    /**
+     * The fields of [wanted] from the first part of each AWS message only. The grid is stored north to south and the packing runs in that order, so the rows from
+     * the pole down to the sector's south edge are the first bytes of the message: about 37 to 47 % of it for the sectors, not all. A first guess of how many bytes
+     * is made from the message's size, checked by decoding (the core says how many values it got), and more is asked for until the rows are there; kept in the store.
+     */
+    private suspend fun truncated(file: NbmFile, wanted: List<GfsMessage>, region: DoubleArray, status: (String) -> Unit): Map<String, GridField> {
+        val rows = GfsGrid.ROWS
+        val rowsNeeded = minOf(rows, kotlin.math.ceil((90.0 - region[1]) / GfsGrid.DEGREES).toInt() + 2)
+        val needValues = rowsNeeded * GfsGrid.COLUMNS
+        var entries: List<GribIndexEntry>? = null
+        val out = HashMap<String, GridField>()
+        for (m in wanted) {
+            val name = "${m.variable}:${m.level}"
+            // a whole message already kept is used as it is
+            store.get(file.url, name)?.let { out[name] = decodeRaw(it); return@let }
+            if (name in out) continue
+            store.get(file.url, "$name|top")?.let { kept ->
+                val f = try { core.decodeGribPrefix(kept) } catch (e: Exception) { null }
+                if (f != null && f.decodedValues >= needValues) { out[name] = f; return@let }
+            }
+            if (name in out) continue
+            val idx = entries ?: run { status("Reading the GFS index\u2026"); index(file) }.also { entries = it }
+            val (first, last) = findGfsMessage(idx, m, file.leadHours) ?: throw RefsException("that hour has no ${m.variable} at ${m.level}")
+            val total = (last ?: (file.size - 1)) - first + 1
+            var length = minOf(total, (total * (rowsNeeded.toDouble() / rows) * 1.2).toLong() + 8192)
+            var field: GridField? = null
+            for (attempt in 0..3) {
+                status("Downloading ${length / 1000} of ${total / 1000} kB of ${m.variable}\u2026")
+                val part = awsGate.withPermit { http.getRange(file.url, first, first + length - 1) }
+                if (part.status != 200 && part.status != 206 || part.body.isEmpty()) throw RefsException("the GFS data could not be downloaded (HTTP ${part.status})")
+                val f = try { if (length >= total) core.decodeGrib(part.body) else core.decodeGribPrefix(part.body) } catch (e: Exception) { null }
+                val got = f?.let { if (length >= total) GfsGrid.ROWS * GfsGrid.COLUMNS else it.decodedValues } ?: 0
+                if (f != null && got >= needValues) {
+                    field = f
+                    store.put(file.url, if (length >= total) name else "$name|top", part.body)
+                    break
+                }
+                if (length >= total) throw RefsException("could not decode the GFS message")
+                // not enough rows yet (or not even the group tables): ask for more, in proportion to what was missing
+                val grow = if (got > 0) ((needValues - got).toDouble() / got * length * 1.2).toLong() else length
+                length = minOf(total, length + maxOf(total / 6, grow))
+            }
+            out[name] = field ?: throw RefsException("not enough of the GFS message arrived")
+        }
+        return out
     }
 
     private fun plane(field: GridField, convert: (Float) -> Float, target: Grid): FloatArray {
@@ -263,9 +327,9 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     }
 
     /** A single field of [product] on [target] (a sector's Lambert grid); [region] crops the download (see [fields]). */
-    suspend fun loadField(file: NbmFile, product: GfsProduct, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null): FloatArray {
+    suspend fun loadField(file: NbmFile, product: GfsProduct, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null, crop: Boolean = true): FloatArray {
         val message = product.message ?: throw RefsException("not a single field")
-        val field = fields(file, listOf(message), region, status).getValue("${message.variable}:${message.level}")
+        val field = fields(file, listOf(message), region, crop, status).getValue("${message.variable}:${message.level}")
         return plane(field, product.convert, target)
     }
 
@@ -273,9 +337,9 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
      * The four planes of a wind product (see [WindProducts.pack]) for [level] over [colorKey], on [target]: the color field (the speed when the color is
      * "speed"), the height, and the wind turned onto the grid's axes, in knots.
      */
-    suspend fun loadWind(file: NbmFile, level: Int, colorKey: String, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null): FloatArray {
+    suspend fun loadWind(file: NbmFile, level: Int, colorKey: String, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null, crop: Boolean = true): FloatArray {
         val wanted = windMessages(level, colorKey)
-        val fields = fields(file, wanted, region, status)
+        val fields = fields(file, wanted, region, crop, status)
         fun field(m: GfsMessage) = fields.getValue("${m.variable}:${m.level}")
         val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
         val height = plane(field(wanted[0]), { it }, target)
@@ -285,4 +349,11 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         val colorPlane = wanted.getOrNull(3)?.let { plane(field(it), GfsCatalog.colorConvert(colorKey), target) }
         return WindProducts.pack(target.cells, height, u, v, colorPlane)
     }
+}
+
+/** The grid of the GFS 0.25 degree files: 1440 columns from -180 (as the core lays them out) and 721 rows from the north pole in the file. */
+object GfsGrid {
+    const val COLUMNS = 1440
+    const val ROWS = 721
+    const val DEGREES = 0.25
 }

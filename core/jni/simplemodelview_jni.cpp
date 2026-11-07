@@ -117,6 +117,26 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     return out;
 }
 
+JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_decodeGribPrefixNative(JNIEnv * env, jobject, jbyteArray file, jintArray info) {
+    const jsize size = env->GetArrayLength(file);
+    std::vector<uint8_t> in(static_cast<size_t>(size));
+    env->GetByteArrayRegion(file, 0, size, reinterpret_cast<jbyte *>(in.data()));
+    spc_grib_result result{};
+    float * values = nullptr;
+    char error[200] = {0};
+    if (spc_grib_decode_prefix(in.data(), in.size(), &values, &result, error, sizeof error) != 0) {
+        throwRuntime(env, error);
+        return nullptr;
+    }
+    const jsize count = result.columns * result.rows;
+    jfloatArray out = env->NewFloatArray(count);
+    if (out != nullptr) env->SetFloatArrayRegion(out, 0, count, values);
+    spc_free(values);
+    const jint v[8] = {result.grid, result.columns, result.rows, result.category, result.number, result.level_type, result.level_value, static_cast<jint>(result.values_decoded)};
+    env->SetIntArrayRegion(info, 0, 8, v);
+    return out;
+}
+
 JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_gridLongitudesNative(JNIEnv * env, jobject, jint grid, jint count) {
     std::vector<float> lon(static_cast<size_t>(count));
     spc_grid_longitudes(grid, lon.data());

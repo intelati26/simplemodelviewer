@@ -534,6 +534,45 @@ static void testGfsFile(const char * name) {
     spc_free(values);
 }
 
+// a GFS message cut off part of the way (the first bytes of it): the top rows decode, as they do in the whole message, and the rest is NaN
+static void testGfsPrefix() {
+    const std::vector<uint8_t> grib = readFile(std::string(GFS_FIXTURE_DIR) + "/gfs_hgt500.grib2");
+    float * whole = nullptr;
+    spc_grib_result full{};
+    char error[200] = {0};
+    CHECK(spc_grib_decode(grib.data(), grib.size(), &whole, &full, error, sizeof error) == 0);
+    if (whole == nullptr) return;
+    CHECK(full.values_decoded == 1440 * 721);
+    for (double fraction : {0.4, 0.7}) {
+        const size_t cut = static_cast<size_t>(grib.size() * fraction);
+        float * part = nullptr;
+        spc_grib_result result{};
+        CHECK(spc_grib_decode_prefix(grib.data(), cut, &part, &result, error, sizeof error) == 0);
+        if (part == nullptr) { std::printf("  prefix %.1f: %s\n", fraction, error); continue; }
+        // some rows decoded, in order, equal to the whole message's; every cell after the last decoded value is NaN
+        CHECK(result.values_decoded > 1440 * 100 && result.values_decoded < 1440 * 721);
+        CHECK(result.columns == 1440 && result.rows == 721 && result.level_type == 100);
+        const long decoded = static_cast<long>(result.values_decoded);
+        const long rowsDone = decoded / 1440;
+        long wrong = 0;
+        // the grid is south first: the decoded values are the north rows, the last rows of the array
+        for (long k = 0; k < decoded; k += 1) {
+            const long row = 720 - k / 1440, col = (k % 1440 + 720) % 1440;             // north row first; the columns were rolled to start at -180
+            const float a = part[row * 1440 + col], b = whole[row * 1440 + col];
+            if (!(a == b || (std::isnan(a) && std::isnan(b)))) wrong += 1;
+        }
+        CHECK(wrong == 0);
+        CHECK(std::isnan(part[0]));                                                    // the far south is not there
+        CHECK(rowsDone >= 100);
+        spc_free(part);
+    }
+    // cut off inside the header (before the group tables): refused cleanly
+    float * none = nullptr;
+    spc_grib_result bad{};
+    CHECK(spc_grib_decode_prefix(grib.data(), 200, &none, &bad, error, sizeof error) != 0);
+    spc_free(whole);
+}
+
 static void testGfs() {
     for (const char * name : {"gfs_hgt500.grib2", "gfs_ugrd500.grib2"}) testGfsFile(name);
 }
@@ -635,6 +674,7 @@ int main() {
     testGeotiff();
     testGrib();
     testGfs();
+    testGfsPrefix();
     testCategorical();
     testOpacityAndTop();
     testReproject();
