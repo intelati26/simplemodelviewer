@@ -42,6 +42,7 @@ internal val GFS_SECTORS = listOf(
 data class GfsState(
     val busy: Boolean = true,
     val loadStatus: String? = null,
+    val source: String? = null,                       // where the last field came from: NOMADS (cropped) or AWS (whole fields, slower)
     val error: String? = null,
     val notice: String? = null,
     val cycles: List<NbmCycle> = emptyList(),
@@ -84,6 +85,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private var lastLoad = 0L
     private var pickedCycle: NbmCycle? = null
     private val grids = HashMap<String, Grid>()
+    private var fallbackShown = false
     private val computed = object : LinkedHashMap<String, FloatArray>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FloatArray>?) = size > 40
     }
@@ -195,7 +197,20 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(busy = true, error = null) }
         val target = gridFor(st.sector)
         val surface = GfsCatalog.surfaceById(st.product)
-        val status: (String) -> Unit = { text -> update { it.copy(loadStatus = text) } }
+        val status: (String) -> Unit = { text ->
+            when {
+                text.startsWith("Source: ") -> {
+                    update { it.copy(source = text.removePrefix("Source: ")) }
+                    if (text.startsWith("Source: NOMADS")) fallbackShown = false
+                }
+                // NOMADS did not deliver: say so once (the frames after it take the same slower road), until it works again
+                text.startsWith("NOMADS:") -> update {
+                    val reason = text.removePrefix("NOMADS: ").substringBefore(". Using")
+                    it.copy(loadStatus = text, notice = if (fallbackShown) it.notice else "NOMADS did not answer ($reason). Loading the whole fields from AWS instead: bigger downloads and slower.")
+                }.also { fallbackShown = true }
+                else -> update { it.copy(loadStatus = text) }
+            }
+        }
         val key = "${file.url}|${st.product}|${st.level}|${st.color}|${st.sector.name}"
         val region = regionFor(st)
         val values = computed[key] ?: withContext(Dispatchers.Default) {

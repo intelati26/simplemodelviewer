@@ -122,7 +122,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        s.file?.let { nbmFrameLabel(it) + "   frame ${s.index + 1}/${s.frames.size}" } ?: "",
+                        s.file?.let { nbmFrameLabel(it) + "   frame ${s.index + 1}/${s.frames.size}" + (s.source?.let { src -> "   \u00B7 " + src } ?: "") } ?: "",
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)

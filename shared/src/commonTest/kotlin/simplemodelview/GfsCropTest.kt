@@ -70,6 +70,7 @@ class GfsCropTest {
         val steps = ArrayList<String>()
         val planes = GfsRepository(ok, TagCore()).loadWind(file, 500, "speed", Grid(9, 2, 1), { steps += it }, region)
         assertEquals(1, ok.urls.size)
+        assertTrue(steps.contains("Source: NOMADS (cropped)"))
         assertTrue(ok.urls[0].contains("nomads.ncep.noaa.gov") && "var_VGRD=on" in ok.urls[0])
         assertEquals(8, planes.size)                                          // four planes of two cells
         assertEquals(1f, planes[2], 1e-4f)                                    // the height plane is the tag-1 message
@@ -90,6 +91,7 @@ class GfsCropTest {
         }
         GfsRepository(aws, awsCore).loadWind(file, 500, "speed", Grid(9, 2, 1), { awsSteps += it }, region)
         assertTrue(awsSteps.any { it.startsWith("NOMADS:") && "Using AWS" in it })
+        assertTrue(awsSteps.contains("Source: AWS (NOMADS did not answer)"))
         assertTrue(aws.urls.any { it.endsWith("[100-399]") })
         assertNotNull(aws.urls.firstOrNull { it.endsWith(".idx") })
     }

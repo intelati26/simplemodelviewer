@@ -226,6 +226,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         if (region != null) {
             try {
                 val bytes = cropDownload(file, wanted, region, status)
+                status("Source: NOMADS (cropped)")
                 status("Decoding\u2026")
                 val decoded = splitGribMessages(bytes).map { decodeRaw(it) }
                 return wanted.associate { m ->
@@ -239,6 +240,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
             }
         }
         val bytes = messages(file, wanted, status)
+        status(if (region != null) "Source: AWS (NOMADS did not answer)" else "Source: AWS")
         status("Decoding\u2026")
         return wanted.associate { "${it.variable}:${it.level}" to decodeRaw(bytes.getValue("${it.variable}:${it.level}")) }
     }
