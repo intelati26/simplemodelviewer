@@ -59,7 +59,7 @@ sealed class ShareArea {
 }
 
 data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150, val contactEmail: String = "", val contours: Boolean = true, val minimalUi: Boolean = false,
-    val barbDensity: Int = DEFAULT_BARB_DENSITY, val counties: Int = 0, val optionsInExport: Boolean = false, val dailyLimitMb: Int = 0) {
+    val barbDensity: Int = DEFAULT_BARB_DENSITY, val counties: Int = 0, val optionsInExport: Boolean = false) {
     /** What an export is drawn with: the screen's wind barb spacing and county lines only when [optionsInExport] is on, else the defaults. */
     fun forExport(): Settings = if (optionsInExport) this else copy(barbDensity = DEFAULT_BARB_DENSITY, counties = 0)
     fun displayDiffers(o: Settings) = barbDensity != o.barbDensity || counties != o.counties
@@ -68,10 +68,10 @@ data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = 
 const val DEFAULT_BARB_DENSITY = 2
 
 fun Settings.withDisplayPrefs(prefs: android.content.SharedPreferences) =
-    copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false), dailyLimitMb = prefs.getInt("daily_limit_mb", 0))
+    copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false))
 
 fun android.content.SharedPreferences.Editor.putDisplay(s: Settings): android.content.SharedPreferences.Editor =
-    putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport).putInt("daily_limit_mb", s.dailyLimitMb)
+    putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport)
 
 data class UiState(
     val busy: Boolean = true,

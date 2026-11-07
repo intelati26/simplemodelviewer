@@ -606,19 +606,9 @@ internal fun SettingsDialog(
                     onChange(settings.copy(optionsInExport = it))
                 }
                 Column {
-                    Text("Daily data limit (all pages)")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((mb, name) in listOf(0 to "Off", 250 to "250 MB", 500 to "500 MB", 1000 to "1 GB", 2000 to "2 GB")) FilterChip(settings.dailyLimitMb == mb, { onChange(settings.copy(dailyLimitMb = mb)) }, label = { Text(name) })
-                    }
-                    Text(
-                        "Used in the last 24 hours: ${AppContainer.budget.usedBytes() / 1_000_000} MB. Only downloads from the network count; cached frames are free. Over the limit, big files stop loading until older ones age out.",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Column {
                     Text("Cache size (applies on the next launch)")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (mb in listOf(50, 150, 300)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text("$mb MB") })
+                        for (mb in listOf(50, 150, 300, 1000)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text(if (mb == 1000) "1 GB" else "$mb MB") })
                     }
                 }
                 if (units != null) Column {      // (the MRMS page only: SPC's fields have their own fixed units)

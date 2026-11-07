@@ -105,6 +105,19 @@ fun parseGribListing(xml: String, cycle: NbmCycle, fieldId: String): List<NbmFil
 }
 
 /**
+ * The initialization time of the model run a GRIB file belongs to, read from its url (`.../blend.20261104/23/core/...`, `.../gfs.20261106/12/atmos/...`), epoch
+ * seconds; null for anything else. Kept data is dropped 24 hours after this (or after its download when the url has no run).
+ */
+fun gribSourceInitEpoch(url: String): Long? {
+    val m = Regex("/(?:blend|gfs)\\.(\\d{4})(\\d{2})(\\d{2})/(\\d{2})/").find(url) ?: return null
+    val (y, mo, d, h) = m.destructured
+    return try { epochOf(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), 0, 0) } catch (e: Exception) { null }
+}
+
+/** How long kept GRIB data lives: 24 hours from the model run (or the download). */
+const val GRIB_KEEP_SECONDS = 24 * 3600L
+
+/**
  * Where downloaded GRIB messages are kept, per source file: the messages fetched from one big file go together (the app keeps them as one file of concatenated
  * messages, which is itself a valid GRIB2 file). [source] is the file's url, [message] names the field.
  */

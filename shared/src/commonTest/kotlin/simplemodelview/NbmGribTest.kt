@@ -155,3 +155,12 @@ class GribStoreTest {
         assertNull(store.get("other", "temp"))
     }
 }
+
+class GribKeepTest {
+    @Test fun theRunTimeIsReadFromTheUrl() {
+        assertEquals(epochOf(2026, 11, 4, 23, 0, 0), gribSourceInitEpoch("https://noaa-nbm-grib2-pds.s3.amazonaws.com/blend.20261104/23/core/blend.t23z.core.f012.co.grib2"))
+        assertEquals(epochOf(2026, 11, 6, 12, 0, 0), gribSourceInitEpoch("https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261106/12/atmos/gfs.t12z.pgrb2.0p25.f120"))
+        assertNull(gribSourceInitEpoch("https://example.com/some/file.grib2"))
+        assertEquals(86400L, GRIB_KEEP_SECONDS)
+    }
+}
