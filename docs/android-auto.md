@@ -20,6 +20,16 @@ follow. Check the Play Console policy pages before planning a launch.
 - Still pictures only: no loop. A moving picture does not belong on a driver's display, and the car app quality rules for weather apps are strict
   about distraction.
 
+## Why the app may not show in the car
+
+Nothing is logged when Android Auto hides a car app. Two silent causes are guarded against:
+
+- **Car API level.** The manifest asks for level 1 only; the radar screen needs 7 (map template). On an older host the app now starts and says "Update Android Auto"
+  instead of vanishing.
+- **Weather category (beta).** A second entry, "simplemodelview (car test)", is declared in the points-of-interest category, which every Android Auto lists. If it
+  appears in the car's launcher and the weather entry does not, the host is hiding the weather category. Sideloaded apps also need "Unknown sources" turned on in
+  Android Auto's developer settings.
+
 ## Not done yet
 
 - Overlays (warnings and watches, the SPC outlook, LightningCast) and contours on the car map.
