@@ -204,11 +204,17 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     /** The cropped file of [wanted] inside [region] (see [nomadsGfsUrl]): from the store, else asked of NOMADS and kept. Throws when NOMADS does not deliver. */
     private suspend fun cropDownload(file: NbmFile, wanted: List<GfsMessage>, region: DoubleArray, status: (String) -> Unit): ByteArray {
         val url = nomadsGfsUrl(file, wanted, region) ?: throw RefsException("the NOMADS filter does not know one of the fields")
-        store.get(url, "crop")?.let { return it }
+        // the file as NOMADS sent it is kept as it is, with the other frames of the same run, box and fields in one subset file (a message per forecast hour)
+        val run = civilFromEpoch(file.run)
+        fun two(n: Int) = n.toString().padStart(2, '0')
+        val source = "https://nomads.ncep.noaa.gov/gfs.${run[0]}${two(run[1])}${two(run[2])}/${two(run[3])}/atmos|box=${region.joinToString(",")}|" +
+            wanted.joinToString(",") { "${it.variable}:${it.level}" }
+        val name = file.key.substringAfterLast('/')
+        store.get(source, name)?.let { return it }
         status("Asking NOMADS for the region\u2026")
         val result = nomadsGate.withPermit { http.get(url).also { kotlinx.coroutines.delay(150) } }
         if (result.status != 200 || result.body.size < 100 || result.body[0] != 'G'.code.toByte()) throw RefsException("NOMADS did not return the data (HTTP ${result.status})")
-        store.put(url, "crop", result.body)
+        store.put(source, name, result.body)
         return result.body
     }
 

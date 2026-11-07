@@ -99,3 +99,43 @@ class GfsCropTest {
         assertEquals(run, gribSourceInitEpoch(url))
     }
 }
+
+class GfsCropStoreTest {
+    private val run = NbmCycle(2026, 11, 6, 12).epoch
+    private fun frame(lead: Int) = NbmFile("gfs.20261106/12/atmos/gfs.t12z.pgrb2.0p25.f${lead.toString().padStart(3, '0')}", run, run + lead * 3600L, null, 1L, grib = true, field = "gfs", bucketUrl = GfsBucket.URL)
+
+    private class RecordingStore : GribStore {
+        val kept = LinkedHashMap<Pair<String, String>, ByteArray>()
+        override fun get(source: String, message: String) = kept[source to message]
+        override fun put(source: String, message: String, bytes: ByteArray) { kept[source to message] = bytes }
+    }
+
+    @Test fun theFiltersFileIsKeptAsSentWithTheOtherFramesOfTheSameRunBoxAndFields() = runTest {
+        val tag = { n: Int -> ByteArray(24).also { "GRIB".encodeToByteArray().copyInto(it); it[7] = 2; it[15] = 24; it[16] = n.toByte() } }
+        val reply = tag(1) + tag(2) + tag(3)
+        val http = object : Http {
+            var calls = 0
+            override suspend fun get(url: String): HttpResult { calls += 1; return HttpResult(200, reply + ByteArray(100)) }
+        }
+        val core = object : Core by StubCore {
+            override fun decodeGrib(message: ByteArray) = GridField(Grid(5, 2, 1), floatArrayOf(1f, 2f), mapOf(1 to GribMeta(3, 5, 100, 50000), 2 to GribMeta(2, 2, 100, 50000), 3 to GribMeta(2, 3, 100, 50000))[message[16].toInt()])
+            override fun reproject(values: FloatArray, from: Grid, to: Grid) = values
+            override fun gridLongitudes(grid: Grid) = FloatArray(2) { -97.5f }
+        }
+        val store = RecordingStore()
+        val repo = GfsRepository(http, core, store)
+        val region = doubleArrayOf(-128.0, 21.0, -63.5, 53.0)
+        repo.loadWind(frame(120), 500, "speed", Grid(9, 2, 1), { }, region)
+        repo.loadWind(frame(123), 500, "speed", Grid(9, 2, 1), { }, region)
+        assertEquals(2, http.calls)
+        assertEquals(1, store.kept.keys.map { it.first }.distinct().size)                               // one subset file for the run, box and fields
+        assertEquals(listOf("gfs.t12z.pgrb2.0p25.f120", "gfs.t12z.pgrb2.0p25.f123"), store.kept.keys.map { it.second })
+        assertEquals(reply.size + 100, store.kept.values.first().size)                                  // the bytes as NOMADS sent them
+        repo.loadWind(frame(120), 500, "speed", Grid(9, 2, 1), { }, region)                             // a second look: from the store, no request
+        assertEquals(2, http.calls)
+        assertEquals(run, gribSourceInitEpoch(store.kept.keys.first().first))                           // and it expires 24 hours from the run
+        repo.loadWind(frame(120), 500, "speed", Grid(9, 2, 1), { }, doubleArrayOf(-170.0, 8.0, -50.0, 72.0))   // another box: another file
+        assertEquals(3, http.calls)
+        assertEquals(2, store.kept.keys.map { it.first }.distinct().size)
+    }
+}

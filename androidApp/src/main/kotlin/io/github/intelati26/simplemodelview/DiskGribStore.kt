@@ -35,7 +35,7 @@ class DiskGribStore(context: Context, private val dir: File, private val capByte
 
     private fun fileName(source: String) = MessageDigest.getInstance("SHA-1").digest(source.toByteArray()).joinToString("") { "%02x".format(it) }.take(24) + ".grib2"
 
-    private fun kindOf(source: String) = when { "noaa-gfs" in source -> "GFS"; "noaa-nbm" in source -> "NBM"; else -> "Other" }
+    private fun kindOf(source: String) = when { "gfs" in source -> "GFS"; "noaa-nbm" in source || "blend." in source -> "NBM"; else -> "Other" }
 
     override fun get(source: String, message: String): ByteArray? = synchronized(lock) {
         try {
