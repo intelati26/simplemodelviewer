@@ -77,7 +77,7 @@ private const val MRMS_DISCLAIMER = "Data: NOAA/NSSL MRMS. Experimental viewer, 
 
 /** The MRMS page: composite reflectivity, rotation tracks and 24 h rainfall (and variants) over the same map machinery as the REFS page. */
 @Composable
-internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit) {
+internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -130,8 +130,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onSpc: () -> Unit, onNbm: () -> Unit)
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
                     AssistChip(onClick = { picker = true }, label = { Text(s.product.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
-                    TextButton(onClick = onSpc, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("REFS") }
-                    TextButton(onClick = onNbm, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("NBM") }
+                    PageMenu("mrms", onOpen)
                     MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
                 }
                 s.notice?.let {

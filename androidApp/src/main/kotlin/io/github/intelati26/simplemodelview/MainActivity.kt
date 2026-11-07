@@ -110,6 +110,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: RefsViewModel by viewModels()
     private val mrmsViewModel: MrmsViewModel by viewModels()
     private val nbmViewModel: NbmViewModel by viewModels()
+    private val gfsViewModel: GfsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,16 +119,22 @@ class MainActivity : ComponentActivity() {
         val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm").firstOrNull { it == start } ?: "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs").firstOrNull { it == start } ?: "spc") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     // each page's view model is created only when the page is first opened
-                    if (page == "nbm") NbmScreen(nbmViewModel, onSpc = { open("spc"); viewModel.reloadFromPrefs() }, onMrms = { open("mrms"); mrmsViewModel.reloadFromPrefs() })
-                    else if (page == "mrms") MrmsScreen(mrmsViewModel, onSpc = { open("spc"); viewModel.reloadFromPrefs() }, onNbm = { open("nbm"); nbmViewModel.reloadFromPrefs() })
+                    // the page menu opens any page; the page being opened reads the favorites, places and settings the others may have changed
+                    val go: (String) -> Unit = { p ->
+                        open(p)
+                        when (p) { "spc" -> viewModel.reloadFromPrefs(); "mrms" -> mrmsViewModel.reloadFromPrefs(); "nbm" -> nbmViewModel.reloadFromPrefs() }
+                    }
+                    if (page == "gfs") GfsScreen(gfsViewModel, go)
+                    else if (page == "nbm") NbmScreen(nbmViewModel, go)
+                    else if (page == "mrms") MrmsScreen(mrmsViewModel, go)
                     else {
                         LaunchedEffect(dark) { viewModel.setDark(dark) }
-                        RefsScreen(viewModel, onMrms = { open("mrms"); mrmsViewModel.reloadFromPrefs() }, onNbm = { open("nbm"); nbmViewModel.reloadFromPrefs() })
+                        RefsScreen(viewModel, go)
                     }
                 }
             }
@@ -137,7 +144,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit) {
+private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -177,8 +184,7 @@ private fun RefsScreen(vm: RefsViewModel, onMrms: () -> Unit, onNbm: () -> Unit)
                     modifier = Modifier.weight(1f))
                 ProductStepButton(next = true, enabled = at in 0 until s.products.size - 1) { vm.stepProduct(1) }
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
-                TextButton(onClick = onMrms, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("MRMS") }
-                TextButton(onClick = onNbm, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("NBM") }
+                PageMenu("spc", onOpen)
                 MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)

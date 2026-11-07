@@ -71,7 +71,7 @@ private const val NBM_DISCLAIMER = "Data: NOAA/NWS National Blend of Models. Exp
 
 /** The National Blend of Models page: forecasts to 11 days from NOAA's open data, over the same map machinery as the other pages. */
 @Composable
-internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) {
+internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -125,8 +125,7 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
                     AssistChip(onClick = { picker = true }, label = { Text(s.product.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.all.size - 1) { vm.stepProduct(1) }
-                    TextButton(onClick = onSpc, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("REFS") }
-                    TextButton(onClick = onMrms, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("MRMS") }
+                    PageMenu("nbm", onOpen)
                     MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
                 }
                 s.notice?.let {

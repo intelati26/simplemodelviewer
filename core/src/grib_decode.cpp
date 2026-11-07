@@ -9,6 +9,10 @@
 
 namespace Grib {
     namespace {
+        bool unpack(const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, int nx, int ny, int scan, std::vector<float>& out, std::string& error);
+        bool decodeLatLon(const uint8_t * s3, size_t l3, const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, std::vector<float>& out, Info& info, std::string& error);
+    }
+    namespace {
         uint32_t be32(const uint8_t * p) { return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]); }
         uint16_t be16(const uint8_t * p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
         // GRIB2 signed integers are sign and magnitude
@@ -47,79 +51,9 @@ namespace Grib {
             }
             void align() { bit = (bit + 7) & ~size_t(7); }
         };
-    }
 
-    bool decode(const uint8_t * data, size_t size, std::vector<float>& out, Info& info, std::string& error) {
-        if (size < 20 || std::memcmp(data, "GRIB", 4) != 0) { error = "not a GRIB message"; return false; }
-        if (data[7] != 2) { error = "not GRIB edition 2"; return false; }
-        uint64_t total = 0;
-        for (int i = 8; i < 16; i += 1) total = (total << 8) | data[i];
-        const size_t end = std::min<uint64_t>(total, size);
-
-        const uint8_t * s3 = nullptr; size_t l3 = 0;
-        const uint8_t * s5 = nullptr; size_t l5 = 0;
-        const uint8_t * s6 = nullptr; size_t l6 = 0;
-        const uint8_t * s7 = nullptr; size_t l7 = 0;
-        size_t pos = 16;
-        while (pos + 5 <= end) {
-            if (std::memcmp(data + pos, "7777", 4) == 0) break;
-            const size_t length = be32(data + pos);
-            const int section = data[pos + 4];
-            if (length < 5 || pos + length > end) { error = "damaged GRIB section"; return false; }
-            const uint8_t * s = data + pos;
-            switch (section) {
-                case 1:
-                    if (length >= 19) info.referenceTime = daysFromCivil(be16(s + 12), s[14], s[15]) * 86400LL + s[16] * 3600 + s[17] * 60 + s[18];
-                    break;
-                case 3: s3 = s; l3 = length; break;
-                case 4:
-                    if (length >= 28) {
-                        info.category = s[9]; info.number = s[10];
-                        if (s[17] == 1) info.forecastHours = static_cast<int>(be32(s + 18));
-                    }
-                    break;
-                case 5: s5 = s; l5 = length; break;
-                case 6: s6 = s; l6 = length; break;
-                case 7: s7 = s; l7 = length; break;
-                default: break;
-            }
-            pos += length;
-        }
-        if (!s3 || !s5 || !s6 || !s7) { error = "the GRIB message is missing a section"; return false; }
-
-        // ---- the grid (section 3) ----
-        if (l3 < 81 || be16(s3 + 12) != 30) { error = "unsupported grid template (need Lambert conformal, 3.30)"; return false; }
-        const int shape = s3[14];
-        double radius = 6371229.0;
-        if (shape == 0) radius = 6367470.0;
-        else if (shape == 1) radius = be32(s3 + 16) / std::pow(10.0, s3[15]);
-        else if (shape == 6) radius = 6371229.0;
-        else { error = "unsupported earth shape (need a sphere)"; return false; }
-        const int nx = static_cast<int>(be32(s3 + 30)), ny = static_cast<int>(be32(s3 + 34));
-        if (nx <= 0 || ny <= 0 || static_cast<int64_t>(nx) * ny > 60000000) { error = "unreasonable GRIB grid size"; return false; }
-        const double la1 = sm32(s3 + 38) * 1e-6, lo1 = be32(s3 + 42) * 1e-6;
-        const double lov = be32(s3 + 51) * 1e-6;
-        const double dx = be32(s3 + 55) * 1e-3, dy = be32(s3 + 59) * 1e-3;
-        const int scan = s3[64];
-        const double latin1 = sm32(s3 + 65) * 1e-6, latin2 = sm32(s3 + 69) * 1e-6;
-        if (std::fabs(latin1 - latin2) > 1e-6) { error = "unsupported projection (two different standard parallels)"; return false; }
-        if (std::fabs(dx - dy) > 1.0 || dx <= 0) { error = "unsupported grid spacing (need square cells)"; return false; }
-        if (be32(s3 + 6) != static_cast<uint32_t>(nx) * static_cast<uint32_t>(ny)) { error = "the grid size does not match its point count"; return false; }
-
-        const double pi = 3.14159265358979323846;
-        const double lovWest = (lov > 180.0) ? lov - 360.0 : lov;
-        const double lo1West = (lo1 > 180.0) ? lo1 - 360.0 : lo1;
-        const double phi1 = latin1 * pi / 180.0;
-        const double n = std::sin(phi1);
-        const double f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
-        auto rho = [&](double phi) { return radius * f / std::pow(std::tan(pi / 4.0 + phi / 2.0), n); };
-        const double rho0 = rho(phi1);
-        double dl = (lo1West - lovWest) * pi / 180.0;
-        dl = std::fmod(dl + 3.0 * pi, 2.0 * pi) - pi;
-        const double r1 = rho(la1 * pi / 180.0);
-        const double firstX = r1 * std::sin(n * dl);
-        const double firstY = rho0 - r1 * std::cos(n * dl);
-
+        // Unpacks sections 5-7 into floats laid out row 0 = south, columns west to east (whatever the scan order of the file was).
+        bool unpack(const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, int nx, int ny, int scan, std::vector<float>& out, std::string& error) {
         // ---- the packing (section 5) ----
         const uint32_t npoints = be32(s5 + 5);                         // the values stored (the grid's points that are in the bitmap)
         const int tmpl = be16(s5 + 9);
@@ -252,6 +186,117 @@ namespace Grib {
             const size_t row = jPositive ? b2 : static_cast<size_t>(ny) - 1 - b2;
             out[row * nx + col] = static_cast<float>(v);
         }
+            return true;
+        }
+
+        // Grid template 3.0: a regular latitude / longitude grid (GFS, 0.25 degrees, 1440 x 721). A grid around the whole globe is rolled to start at -180 degrees.
+        bool decodeLatLon(const uint8_t * s3, size_t l3, const uint8_t * s5, size_t l5, const uint8_t * s6, size_t l6, const uint8_t * s7, size_t l7, std::vector<float>& out, Info& info, std::string& error) {
+            if (l3 < 72) { error = "damaged GRIB grid section"; return false; }
+            const int nx = static_cast<int>(be32(s3 + 30)), ny = static_cast<int>(be32(s3 + 34));
+            if (nx <= 0 || ny <= 0 || static_cast<int64_t>(nx) * ny > 60000000) { error = "unreasonable GRIB grid size"; return false; }
+            if (be32(s3 + 6) != static_cast<uint32_t>(nx) * static_cast<uint32_t>(ny)) { error = "the grid size does not match its point count"; return false; }
+            const double la1 = sm32(s3 + 46) * 1e-6, lo1 = be32(s3 + 50) * 1e-6, la2 = sm32(s3 + 55) * 1e-6, lo2 = be32(s3 + 59) * 1e-6;
+            const double di = be32(s3 + 63) * 1e-6, dj = be32(s3 + 67) * 1e-6;
+            const int scan = s3[71];
+            if (di <= 0 || dj <= 0) { error = "unsupported grid spacing"; return false; }
+            if (!unpack(s5, l5, s6, l6, s7, l7, nx, ny, scan, out, error)) return false;
+            const bool iNegative = (scan & 0x80) != 0;
+            double west = iNegative ? lo2 : lo1;
+            if (west >= 180.0) west -= 360.0;
+            const double south = std::min(la1, la2);
+            if (nx * di >= 359.9) {                              // all the way around: start at -180, so a longitude is its column whatever the file's start
+                const int shift = ((static_cast<int>(std::lround((west + 180.0) / di)) % nx) + nx) % nx;
+                if (shift != 0) {
+                    std::vector<float> rolled(out.size());
+                    for (int r = 0; r < ny; r += 1)
+                        for (int c = 0; c < nx; c += 1) rolled[static_cast<size_t>(r) * nx + (c + shift) % nx] = out[static_cast<size_t>(r) * nx + c];
+                    out.swap(rolled);
+                }
+                west = -180.0;
+            }
+            info.columns = nx; info.rows = ny;
+            info.latLon = true;
+            info.southLat = south; info.westLon = west; info.dLat = dj; info.dLon = di;
+            info.cellMeters = di * 111195.0;
+            return true;
+        }
+    }
+
+    bool decode(const uint8_t * data, size_t size, std::vector<float>& out, Info& info, std::string& error) {
+        if (size < 20 || std::memcmp(data, "GRIB", 4) != 0) { error = "not a GRIB message"; return false; }
+        if (data[7] != 2) { error = "not GRIB edition 2"; return false; }
+        uint64_t total = 0;
+        for (int i = 8; i < 16; i += 1) total = (total << 8) | data[i];
+        const size_t end = std::min<uint64_t>(total, size);
+
+        const uint8_t * s3 = nullptr; size_t l3 = 0;
+        const uint8_t * s5 = nullptr; size_t l5 = 0;
+        const uint8_t * s6 = nullptr; size_t l6 = 0;
+        const uint8_t * s7 = nullptr; size_t l7 = 0;
+        size_t pos = 16;
+        while (pos + 5 <= end) {
+            if (std::memcmp(data + pos, "7777", 4) == 0) break;
+            const size_t length = be32(data + pos);
+            const int section = data[pos + 4];
+            if (length < 5 || pos + length > end) { error = "damaged GRIB section"; return false; }
+            const uint8_t * s = data + pos;
+            switch (section) {
+                case 1:
+                    if (length >= 19) info.referenceTime = daysFromCivil(be16(s + 12), s[14], s[15]) * 86400LL + s[16] * 3600 + s[17] * 60 + s[18];
+                    break;
+                case 3: s3 = s; l3 = length; break;
+                case 4:
+                    if (length >= 28) {
+                        info.category = s[9]; info.number = s[10];
+                        if (s[17] == 1) info.forecastHours = static_cast<int>(be32(s + 18));
+                    }
+                    break;
+                case 5: s5 = s; l5 = length; break;
+                case 6: s6 = s; l6 = length; break;
+                case 7: s7 = s; l7 = length; break;
+                default: break;
+            }
+            pos += length;
+        }
+        if (!s3 || !s5 || !s6 || !s7) { error = "the GRIB message is missing a section"; return false; }
+
+        // ---- the grid (section 3) ----
+        const int gridTemplate = l3 >= 14 ? be16(s3 + 12) : -1;
+        if (gridTemplate == 0) return decodeLatLon(s3, l3, s5, l5, s6, l6, s7, l7, out, info, error);
+        if (l3 < 81 || gridTemplate != 30) { error = "unsupported grid template (need Lambert conformal 3.30 or latitude / longitude 3.0)"; return false; }
+        const int shape = s3[14];
+        double radius = 6371229.0;
+        if (shape == 0) radius = 6367470.0;
+        else if (shape == 1) radius = be32(s3 + 16) / std::pow(10.0, s3[15]);
+        else if (shape == 6) radius = 6371229.0;
+        else { error = "unsupported earth shape (need a sphere)"; return false; }
+        const int nx = static_cast<int>(be32(s3 + 30)), ny = static_cast<int>(be32(s3 + 34));
+        if (nx <= 0 || ny <= 0 || static_cast<int64_t>(nx) * ny > 60000000) { error = "unreasonable GRIB grid size"; return false; }
+        const double la1 = sm32(s3 + 38) * 1e-6, lo1 = be32(s3 + 42) * 1e-6;
+        const double lov = be32(s3 + 51) * 1e-6;
+        const double dx = be32(s3 + 55) * 1e-3, dy = be32(s3 + 59) * 1e-3;
+        const int scan = s3[64];
+        const double latin1 = sm32(s3 + 65) * 1e-6, latin2 = sm32(s3 + 69) * 1e-6;
+        if (std::fabs(latin1 - latin2) > 1e-6) { error = "unsupported projection (two different standard parallels)"; return false; }
+        if (std::fabs(dx - dy) > 1.0 || dx <= 0) { error = "unsupported grid spacing (need square cells)"; return false; }
+        if (be32(s3 + 6) != static_cast<uint32_t>(nx) * static_cast<uint32_t>(ny)) { error = "the grid size does not match its point count"; return false; }
+
+        const double pi = 3.14159265358979323846;
+        const double lovWest = (lov > 180.0) ? lov - 360.0 : lov;
+        const double lo1West = (lo1 > 180.0) ? lo1 - 360.0 : lo1;
+        const double phi1 = latin1 * pi / 180.0;
+        const double n = std::sin(phi1);
+        const double f = std::cos(phi1) * std::pow(std::tan(pi / 4.0 + phi1 / 2.0), n) / n;
+        auto rho = [&](double phi) { return radius * f / std::pow(std::tan(pi / 4.0 + phi / 2.0), n); };
+        const double rho0 = rho(phi1);
+        double dl = (lo1West - lovWest) * pi / 180.0;
+        dl = std::fmod(dl + 3.0 * pi, 2.0 * pi) - pi;
+        const double r1 = rho(la1 * pi / 180.0);
+        const double firstX = r1 * std::sin(n * dl);
+        const double firstY = rho0 - r1 * std::cos(n * dl);
+
+        if (!unpack(s5, l5, s6, l6, s7, l7, nx, ny, scan, out, error)) return false;
+        const bool iNegative = (scan & 0x80) != 0, jPositive = (scan & 0x40) != 0;
         info.columns = nx; info.rows = ny;
         info.parallel = latin1; info.centralMeridian = lovWest; info.radius = radius; info.cellMeters = dx;
         info.firstX = firstX; info.firstY = firstY;

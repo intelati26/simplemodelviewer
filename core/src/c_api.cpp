@@ -169,7 +169,8 @@ int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_re
     }
     std::memcpy(copy, values.data(), values.size() * sizeof(float));
     *out = copy;
-    result->grid = Grids::defineLambertProjected(info.columns, info.rows, info.cellMeters, info.parallel, info.centralMeridian, info.firstX, info.firstY, info.radius);
+    result->grid = info.latLon ? Grids::defineLatLon(info.columns, info.rows, info.southLat, info.westLon, info.dLat, info.dLon)
+                               : Grids::defineLambertProjected(info.columns, info.rows, info.cellMeters, info.parallel, info.centralMeridian, info.firstX, info.firstY, info.radius);
     result->columns = info.columns;
     result->rows = info.rows;
     result->reference_time = info.referenceTime;

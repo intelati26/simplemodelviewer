@@ -492,6 +492,50 @@ static void testGrib() {
     if (spc_grib_decode(flipped.data(), flipped.size(), &values, &result, error, sizeof error) == 0) spc_free(values);   // wrong numbers or an error, never a crash
 }
 
+// GFS 0.25 degree GRIB2 messages (scripts/make_gfs_grib_fixtures.py): a latitude / longitude grid rolled to start at -180 degrees
+static void testGfsFile(const char * name) {
+    const std::string base = std::string(GFS_FIXTURE_DIR) + "/" + name;
+    const std::vector<uint8_t> grib = readFile(base);
+    CHECK(!grib.empty());
+    float * values = nullptr;
+    spc_grib_result result{};
+    char error[200] = {0};
+    CHECK(spc_grib_decode(grib.data(), grib.size(), &values, &result, error, sizeof error) == 0);
+    if (values == nullptr) { std::printf("  %s: %s\n", name, error); return; }
+    CHECK(result.columns == 1440 && result.rows == 721);
+    CHECK(spc_grid_columns(result.grid) == 1440 && spc_grid_rows(result.grid) == 721);
+    std::ifstream samples(base + ".samples.txt");
+    std::string line;
+    int checked = 0, wrong = 0;
+    while (std::getline(samples, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream in(line);
+        int c, r;
+        std::string v;
+        in >> c >> r >> v;
+        const float got = values[static_cast<size_t>(r) * result.columns + c];
+        const bool ok = v == "nan" ? std::isnan(got) : std::fabs(got - std::stof(v)) <= 1e-5 * std::fabs(std::stof(v)) + 1e-5;
+        if (!ok) wrong += 1;
+        checked += 1;
+    }
+    CHECK(checked >= 400 && wrong == 0);
+    // the grid: south-west cell at 90 S, 180 W; a longitude and latitude land on the right cell, wrapping all the way around
+    double lat, lon, col, row;
+    spc_grid_to_latlon(result.grid, 0, 0, &lat, &lon);
+    CHECK(std::fabs(lat + 90.0) < 1e-6 && std::fabs(lon + 180.0) < 1e-6);
+    spc_grid_to_latlon(result.grid, 1439, 720, &lat, &lon);
+    CHECK(std::fabs(lat - 90.0) < 1e-6 && std::fabs(lon - 179.75) < 1e-6);
+    spc_latlon_to_grid(result.grid, 39.0, -95.0, &col, &row);
+    CHECK(std::fabs(col - 340.0) < 1e-6 && std::fabs(row - 516.0) < 1e-6);
+    spc_latlon_to_grid(result.grid, 0.0, 170.0, &col, &row);       // east of the date line: the far end of the grid, not off it
+    CHECK(std::fabs(col - 1400.0) < 1e-6);
+    spc_free(values);
+}
+
+static void testGfs() {
+    for (const char * name : {"gfs_hgt500.grib2", "gfs_ugrd500.grib2"}) testGfsFile(name);
+}
+
 static void testGeotiff() {
     for (const char * name : {"nbm_temp.tif", "nbm_qpf06.tif", "nbm_ceil.tif", "nbm_tstm01.tif"}) testGeotiffFile(name);
     // damaged or cut-off input fails cleanly
@@ -588,6 +632,7 @@ int main() {
     testMrms();
     testGeotiff();
     testGrib();
+    testGfs();
     testCategorical();
     testOpacityAndTop();
     testReproject();

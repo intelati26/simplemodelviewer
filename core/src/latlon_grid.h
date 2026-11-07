@@ -17,8 +17,12 @@ struct LatLonGrid : GridBase {
 
     void toGrid(double lat, double lon, double& column, double& row) const override {
         double d = lon - westLon;
-        if (d < -180.0) d += 360.0;
-        if (d > 180.0) d -= 360.0;
+        if (columns * dLon >= 359.9) {                 // all the way around (GFS): a column in 0..cols, wrapped
+            d = std::fmod(d + 720.0, 360.0);
+        } else {
+            if (d < -180.0) d += 360.0;
+            if (d > 180.0) d -= 360.0;
+        }
         column = d / dLon;
         row = (lat - southLat) / dLat;
     }

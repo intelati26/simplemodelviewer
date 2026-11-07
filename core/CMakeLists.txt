@@ -31,7 +31,8 @@ if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(core_tests tests/test_core.cpp)
     target_include_directories(core_tests PRIVATE src)
     target_compile_definitions(core_tests PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/mrms"
-        NBM_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/nbm")
+        NBM_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/nbm"
+        GFS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/gfs")
     target_link_libraries(core_tests PRIVATE spcrefs_core)
     # optional: encode with the reference libblosc and check the decoder is byte-identical
     find_path(BLOSC_INCLUDE blosc.h)
