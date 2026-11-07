@@ -183,7 +183,7 @@ fun nbmLoopWindow(frames: List<NbmFile>, spanHours: Int): IntRange {
 fun nbmFrameLabel(file: NbmFile): String = "${formatUtc(file.valid)}  (+${file.leadHours} h)"
 
 /** Lists, downloads and decodes the blend's files over [http]. */
-class NbmRepository(private val http: Http, private val core: Core) {
+class NbmRepository(private val http: Http, private val core: Core, private val store: GribStore = MemoryGribStore()) {
     /** The runs from the last [hours] hours up to [nowEpochSeconds], newest first (each day's folder lists the runs it holds). */
     private var versionsAt = 0L
     private var versions: List<String> = emptyList()
@@ -313,13 +313,12 @@ class NbmRepository(private val http: Http, private val core: Core) {
         return GridField(decoded.grid, values)
     }
 
-    // the last few messages and indexes (a range request is not kept by the HTTP cache): a loop or a re-visited frame does not download them again
-    private val messages = LinkedHashMap<String, ByteArray>(16, 0.75f, true)
+    // the indexes of the last files; the messages themselves are in the [store] (a range request is not kept by the HTTP cache)
     private val indexes = LinkedHashMap<String, List<GribIndexEntry>>(16, 0.75f, true)
 
     /** The bytes of the file's message: from the cache, or its index and then just its byte range. [status] says which step is running. */
     private suspend fun gribMessage(file: NbmFile, status: (String) -> Unit): ByteArray {
-        messages[file.cacheKey]?.let { return it }
+        store.get(file.url, file.field)?.let { return it }
         val field = NbmGribFields.byId[file.field] ?: throw RefsException("that field is not in NOAA's GRIB files")
         val index = indexes[file.url] ?: run {
             status("Reading the GRIB index\u2026")
@@ -332,8 +331,7 @@ class NbmRepository(private val http: Http, private val core: Core) {
         status("Downloading ${field.variable} (${(end - first + 1) / 1000} kB)\u2026")
         val part = http.getRange(file.url, first, end)
         if (part.status != 200 && part.status != 206 || part.body.isEmpty()) throw RefsException("the GRIB message could not be downloaded (HTTP ${part.status})")
-        messages[file.cacheKey] = part.body
-        while (messages.size > 12) messages.remove(messages.keys.first())
+        store.put(file.url, file.field, part.body)
         return part.body
     }
 

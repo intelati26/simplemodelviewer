@@ -103,3 +103,36 @@ fun parseGribListing(xml: String, cycle: NbmCycle, fieldId: String): List<NbmFil
     }
     return files.sortedBy { it.valid }
 }
+
+/**
+ * Where downloaded GRIB messages are kept, per source file: the messages fetched from one big file go together (the app keeps them as one file of concatenated
+ * messages, which is itself a valid GRIB2 file). [source] is the file's url, [message] names the field.
+ */
+interface GribStore {
+    fun get(source: String, message: String): ByteArray?
+    fun put(source: String, message: String, bytes: ByteArray)
+}
+
+/** The last few messages in memory (what a platform without a disk store uses, and the tests). */
+class MemoryGribStore(private val limit: Int = 12) : GribStore {
+    private val messages = LinkedHashMap<String, ByteArray>(16, 0.75f, true)
+    override fun get(source: String, message: String): ByteArray? = messages["$source#$message"]
+    override fun put(source: String, message: String, bytes: ByteArray) {
+        messages["$source#$message"] = bytes
+        while (messages.size > limit) messages.remove(messages.keys.first())
+    }
+}
+
+/**
+ * Byte ranges (first, last inclusive) merged where they touch or overlap, in order of position: messages that are next to each other in a file (the U and V
+ * wind of a level, for one) are then one request. The result remembers which ranges it covers so the reply can be cut back into the messages.
+ */
+fun coalesceRanges(ranges: List<LongRange>): List<LongRange> {
+    val sorted = ranges.sortedBy { it.first }
+    val out = ArrayList<LongRange>()
+    for (r in sorted) {
+        val last = out.lastOrNull()
+        if (last != null && r.first <= last.last + 1) out[out.size - 1] = last.first..maxOf(last.last, r.last) else out += r
+    }
+    return out
+}

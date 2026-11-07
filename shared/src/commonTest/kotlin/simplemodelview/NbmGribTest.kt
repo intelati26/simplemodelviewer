@@ -134,3 +134,24 @@ class NbmGribTest {
         assertNotNull(cycles.first().epoch)
     }
 }
+
+class GribStoreTest {
+    @Test fun adjacentRangesAreOneRequest() {
+        // U and V wind of a level are next to each other in the file; height is elsewhere; an overlapping one merges too
+        assertEquals(listOf(100L..299L, 500L..599L), coalesceRanges(listOf(200L..299L, 500L..599L, 100L..199L)))
+        assertEquals(listOf(0L..9L), coalesceRanges(listOf(0L..5L, 3L..9L)))
+        assertEquals(emptyList(), coalesceRanges(emptyList()))
+        assertEquals(listOf(0L..4L, 6L..9L), coalesceRanges(listOf(0L..4L, 6L..9L)))       // a one-byte gap stays two
+    }
+
+    @Test fun memoryStoreKeepsTheLastMessages() {
+        val store = MemoryGribStore(limit = 2)
+        store.put("file", "temp", byteArrayOf(1))
+        store.put("file", "dewpoint", byteArrayOf(2))
+        store.get("file", "temp")                                  // used: now the newest
+        store.put("file", "rh", byteArrayOf(3))
+        assertEquals(1, store.get("file", "temp")?.single()?.toInt())
+        assertNull(store.get("file", "dewpoint"))                  // the one not used for longest went
+        assertNull(store.get("other", "temp"))
+    }
+}
