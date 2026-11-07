@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  * requests, and a disk cache. Chunks of one cycle (and MRMS scan files) never change, so they are cached whatever the server's
  * headers say; only the `.zgroup` probes (does a newer cycle exist yet?) and the MRMS listings are always fresh.
  */
-class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val contact: () -> String = { "" }) : Http {
+class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val contact: () -> String = { "" }, private val budget: DataBudget? = null) : Http {
     private val client = OkHttpClient.Builder()
         .cache(Cache(File(context.cacheDir, "http"), cacheMegabytes * 1024 * 1024))
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -37,24 +37,31 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val conta
         })
         .build().also { it.dispatcher.maxRequestsPerHost = 4 }
 
-    override suspend fun get(url: String): HttpResult = withContext(Dispatchers.IO) {
-        try {
-            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                HttpResult(response.code, response.body?.bytes() ?: ByteArray(0), response.headers.getDate("Last-Modified")?.time?.div(1000))
-            }
-        } catch (e: IOException) {
-            HttpResult(0, ByteArray(0))
+    /** Big files (rasters, GRIB and Zarr data) are held to the daily data limit; listings, indexes, metadata and small feeds are not. */
+    private fun isBulk(url: String): Boolean =
+        url.endsWith(".tif") || url.endsWith(".grib2.gz") || (".grib2" in url && !url.endsWith(".idx")) ||
+            (".zarr/" in url && !url.substringAfterLast('/').startsWith(".z"))
+
+    /** One request, counted against the daily limit: over the limit a bulk file is served from the cache or refused with a message. */
+    private fun call(url: String, range: String?): HttpResult {
+        val over = budget?.exceeded() == true && isBulk(url)
+        val builder = Request.Builder().url(url)
+        if (range != null) builder.header("Range", range)
+        if (over) builder.cacheControl(okhttp3.CacheControl.FORCE_CACHE)
+        client.newCall(builder.build()).execute().use { response ->
+            if (over && response.code == 504) throw simplemodelview.RefsException(budget!!.message())
+            val body = response.body?.bytes() ?: ByteArray(0)
+            if (response.cacheResponse == null) budget?.add(body.size.toLong())          // a cache hit costs nothing
+            return HttpResult(response.code, body, response.headers.getDate("Last-Modified")?.time?.div(1000))
         }
     }
 
+    override suspend fun get(url: String): HttpResult = withContext(Dispatchers.IO) {
+        try { call(url, null) } catch (e: IOException) { HttpResult(0, ByteArray(0)) }
+    }
+
     override suspend fun getRange(url: String, first: Long, lastInclusive: Long): HttpResult = withContext(Dispatchers.IO) {
-        try {
-            client.newCall(Request.Builder().url(url).header("Range", "bytes=$first-$lastInclusive").build()).execute().use { response ->
-                HttpResult(response.code, response.body?.bytes() ?: ByteArray(0), response.headers.getDate("Last-Modified")?.time?.div(1000))
-            }
-        } catch (e: IOException) {
-            HttpResult(0, ByteArray(0))
-        }
+        try { call(url, "bytes=$first-$lastInclusive") } catch (e: IOException) { HttpResult(0, ByteArray(0)) }
     }
 
     companion object {

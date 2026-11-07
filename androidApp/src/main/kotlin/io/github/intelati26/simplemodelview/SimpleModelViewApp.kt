@@ -35,7 +35,8 @@ object AppContainer {
     val prefs by lazy { app.getSharedPreferences("simplemodelview", Context.MODE_PRIVATE) }
     val core by lazy { NativeCore() }
     val lines by lazy { MapLines(app, core) }
-    private val http by lazy { OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()) { prefs.getString("contact_email", "").orEmpty() } }   // a new cache size applies on the next launch
+    val budget by lazy { DataBudget(prefs) }
+    private val http by lazy { OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong(), { prefs.getString("contact_email", "").orEmpty() }, budget) }   // a new cache size applies on the next launch
     val repo by lazy { RefsRepository(http, core) }
     val mrms by lazy { MrmsRepository(http, core) }
     val gribStore by lazy { DiskGribStore(File(app.cacheDir, "grib")) { prefs.getInt("cache_mb", 150).toLong() * 1024 * 1024 } }
