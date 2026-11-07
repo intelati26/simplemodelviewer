@@ -109,7 +109,7 @@ fun parseGribListing(xml: String, cycle: NbmCycle, fieldId: String): List<NbmFil
  * seconds; null for anything else. Kept data is dropped 24 hours after this (or after its download when the url has no run).
  */
 fun gribSourceInitEpoch(url: String): Long? {
-    val m = Regex("/(?:blend|gfs)\\.(\\d{4})(\\d{2})(\\d{2})/(\\d{2})/").find(url) ?: return null
+    val m = Regex("(?:/|%2F)(?:blend|gfs)\\.(\\d{4})(\\d{2})(\\d{2})(?:/|%2F)(\\d{2})(?:/|%2F)").find(url) ?: return null
     val (y, mo, d, h) = m.destructured
     return try { epochOf(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), 0, 0) } catch (e: Exception) { null }
 }

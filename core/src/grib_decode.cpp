@@ -248,6 +248,10 @@ namespace Grib {
                 case 4:
                     if (length >= 28) {
                         info.category = s[9]; info.number = s[10];
+                        if (length >= 28 && s[22] != 255) {
+                            info.levelType = s[22];
+                            info.levelValue = static_cast<int>(std::lround(be32(s + 24) * std::pow(10.0, -static_cast<int>(static_cast<int8_t>(s[23])))));
+                        }
                         if (s[17] == 1) info.forecastHours = static_cast<int>(be32(s + 18));
                     }
                     break;

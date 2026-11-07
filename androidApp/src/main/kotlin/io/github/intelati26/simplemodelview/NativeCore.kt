@@ -2,6 +2,7 @@ package io.github.intelati26.simplemodelview
 
 import simplemodelview.Core
 import simplemodelview.Grid
+import simplemodelview.GribMeta
 import simplemodelview.GridField
 import simplemodelview.Kind
 import simplemodelview.MrmsWindow
@@ -39,9 +40,9 @@ class NativeCore : Core {
     private external fun decodeGribNative(message: ByteArray, info: IntArray): FloatArray
 
     override fun decodeGrib(message: ByteArray): GridField {
-        val info = IntArray(3)
+        val info = IntArray(7)
         val values = decodeGribNative(message, info)
-        return GridField(Grid(info[0], info[1], info[2]), values)
+        return GridField(Grid(info[0], info[1], info[2]), values, GribMeta(info[3], info[4], info[5], info[6]))
     }
 
     private external fun planLambertBoxNative(west: Double, south: Double, east: Double, north: Double, cell: Double): IntArray

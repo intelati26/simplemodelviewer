@@ -190,7 +190,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     )
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
-        onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, disclaimer = GFS_DISCLAIMER, showContours = true, showBarbs = true,
+        onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, disclaimer = GFS_DISCLAIMER, showContours = true, showBarbs = true, showCrop = true,
     ) { settings = false }
     if (about) AlertDialog(
         onDismissRequest = { about = false },

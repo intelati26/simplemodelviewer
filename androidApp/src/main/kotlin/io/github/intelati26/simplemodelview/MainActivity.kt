@@ -564,7 +564,7 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
 @Composable
 internal fun SettingsDialog(
     settings: Settings, onChange: (Settings) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
-    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, showContours: Boolean = false, showBarbs: Boolean = false, onDismiss: () -> Unit,
+    units: simplemodelview.Units? = null, onUnits: (simplemodelview.Units) -> Unit = {}, disclaimer: String = DISCLAIMER, showContours: Boolean = false, showBarbs: Boolean = false, showCrop: Boolean = false, onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -583,6 +583,9 @@ internal fun SettingsDialog(
                 }
                 if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors (REFS), and for the freezing level and model temperatures (MRMS).", settings.contours) {
                     onChange(settings.copy(contours = it))
+                }
+                if (showCrop) SwitchRow("Crop regions with NOMADS", "Ask NOAA's NOMADS for just the sector's box of each GFS field (tens of kilobytes instead of about 0.8 MB). If NOMADS does not answer, the whole field comes from AWS.", settings.gfsCrop) {
+                    onChange(settings.copy(gfsCrop = it))
                 }
                 if (showBarbs) Column {
                     Text("Wind barb spacing")

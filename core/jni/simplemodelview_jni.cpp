@@ -112,8 +112,8 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     jfloatArray out = env->NewFloatArray(count);
     if (out != nullptr) env->SetFloatArrayRegion(out, 0, count, values);
     spc_free(values);
-    const jint v[3] = {result.grid, result.columns, result.rows};
-    env->SetIntArrayRegion(info, 0, 3, v);
+    const jint v[7] = {result.grid, result.columns, result.rows, result.category, result.number, result.level_type, result.level_value};
+    env->SetIntArrayRegion(info, 0, 7, v);
     return out;
 }
 

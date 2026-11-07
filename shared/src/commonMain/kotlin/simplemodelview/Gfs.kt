@@ -2,6 +2,7 @@ package simplemodelview
 
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * NOAA's Global Forecast System as the public AWS bucket `noaa-gfs-bdp-pds` has it: a run every six hours, one GRIB2 file per forecast hour
@@ -194,50 +195,86 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return out
     }
 
-    private fun decode(bytes: ByteArray, convert: (Float) -> Float): GridField {
-        val field = try { core.decodeGrib(bytes) } catch (e: Exception) { throw RefsException("could not decode the GFS message: ${e.message}") }
-        val v = field.values
-        for (i in v.indices) v[i] = convert(v[i])
-        return field
-    }
-
     /** The messages a wind product needs, in the order [loadWind] reads them: height, u, v, and the color field unless it is the speed. */
     fun windMessages(level: Int, colorKey: String): List<GfsMessage> =
         listOfNotNull(GfsMessage("HGT", "$level mb"), GfsMessage("UGRD", "$level mb"), GfsMessage("VGRD", "$level mb"), GfsCatalog.colorMessage(level, colorKey))
 
-    /** Downloads (and keeps) what a frame of a product needs, so a loop plays without waiting; a wind product when [product] is null. */
-    suspend fun prefetch(file: NbmFile, level: Int, colorKey: String, product: GfsProduct?) {
-        messages(file, if (product != null) listOfNotNull(product.message) else windMessages(level, colorKey)) { }
+    private val nomadsGate = kotlinx.coroutines.sync.Semaphore(2)     // NOMADS is asked politely: two requests at a time, a short rest after each
+
+    /** The cropped file of [wanted] inside [region] (see [nomadsGfsUrl]): from the store, else asked of NOMADS and kept. Throws when NOMADS does not deliver. */
+    private suspend fun cropDownload(file: NbmFile, wanted: List<GfsMessage>, region: DoubleArray, status: (String) -> Unit): ByteArray {
+        val url = nomadsGfsUrl(file, wanted, region) ?: throw RefsException("the NOMADS filter does not know one of the fields")
+        store.get(url, "crop")?.let { return it }
+        status("Asking NOMADS for the region\u2026")
+        val result = nomadsGate.withPermit { http.get(url).also { kotlinx.coroutines.delay(150) } }
+        if (result.status != 200 || result.body.size < 100 || result.body[0] != 'G'.code.toByte()) throw RefsException("NOMADS did not return the data (HTTP ${result.status})")
+        store.put(url, "crop", result.body)
+        return result.body
     }
 
-    /** A single field of [product] on [target] (a sector's Lambert grid). */
-    suspend fun loadField(file: NbmFile, product: GfsProduct, target: Grid, status: (String) -> Unit = {}): FloatArray {
+    /**
+     * The decoded fields of [wanted] (keys "VARIABLE:level"), unconverted: cropped to [region] by NOMADS when a region is given, and from the AWS byte ranges when
+     * that is not given or NOMADS does not deliver (the reason is passed to [status]).
+     */
+    private suspend fun fields(file: NbmFile, wanted: List<GfsMessage>, region: DoubleArray?, status: (String) -> Unit): Map<String, GridField> {
+        if (region != null) {
+            try {
+                val bytes = cropDownload(file, wanted, region, status)
+                status("Decoding\u2026")
+                val decoded = splitGribMessages(bytes).map { decodeRaw(it) }
+                return wanted.associate { m ->
+                    val spec = gfsCropSpec(m)!!
+                    "${m.variable}:${m.level}" to (decoded.firstOrNull { it.meta?.matches(spec) == true } ?: throw RefsException("NOMADS sent no ${m.variable} at ${m.level}"))
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                status("NOMADS: ${e.message}. Using AWS\u2026")
+            }
+        }
+        val bytes = messages(file, wanted, status)
+        status("Decoding\u2026")
+        return wanted.associate { "${it.variable}:${it.level}" to decodeRaw(bytes.getValue("${it.variable}:${it.level}")) }
+    }
+
+    private fun decodeRaw(bytes: ByteArray): GridField = try { core.decodeGrib(bytes) } catch (e: Exception) { throw RefsException("could not decode the GFS message: ${e.message}") }
+
+    /** Downloads (and keeps) what a frame of a product needs, so a loop plays without waiting; a wind product when [product] is null. */
+    suspend fun prefetch(file: NbmFile, level: Int, colorKey: String, product: GfsProduct?, region: DoubleArray? = null) {
+        val wanted = if (product != null) listOfNotNull(product.message) else windMessages(level, colorKey)
+        if (region != null) {
+            try { cropDownload(file, wanted, region) { }; return } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { /* AWS below */ }
+        }
+        messages(file, wanted) { }
+    }
+
+    private fun plane(field: GridField, convert: (Float) -> Float, target: Grid): FloatArray {
+        val v = field.values
+        for (i in v.indices) v[i] = convert(v[i])
+        return core.reproject(v, field.grid, target)
+    }
+
+    /** A single field of [product] on [target] (a sector's Lambert grid); [region] crops the download (see [fields]). */
+    suspend fun loadField(file: NbmFile, product: GfsProduct, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null): FloatArray {
         val message = product.message ?: throw RefsException("not a single field")
-        val bytes = messages(file, listOf(message), status).getValue("${message.variable}:${message.level}")
-        status("Decoding…")
-        val field = decode(bytes, product.convert)
-        return core.reproject(field.values, field.grid, target)
+        val field = fields(file, listOf(message), region, status).getValue("${message.variable}:${message.level}")
+        return plane(field, product.convert, target)
     }
 
     /**
      * The four planes of a wind product (see [WindProducts.pack]) for [level] over [colorKey], on [target]: the color field (the speed when the color is
      * "speed"), the height, and the wind turned onto the grid's axes, in knots.
      */
-    suspend fun loadWind(file: NbmFile, level: Int, colorKey: String, target: Grid, status: (String) -> Unit = {}): FloatArray {
-        val color = GfsCatalog.colorMessage(level, colorKey)
+    suspend fun loadWind(file: NbmFile, level: Int, colorKey: String, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null): FloatArray {
         val wanted = windMessages(level, colorKey)
-        val bytes = messages(file, wanted, status)
-        status("Decoding…")
-        fun plane(m: GfsMessage, convert: (Float) -> Float = { it }): FloatArray {
-            val f = decode(bytes.getValue("${m.variable}:${m.level}"), convert)
-            return core.reproject(f.values, f.grid, target)
-        }
-        val height = plane(wanted[0])
+        val fields = fields(file, wanted, region, status)
+        fun field(m: GfsMessage) = fields.getValue("${m.variable}:${m.level}")
         val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
-        val east = plane(wanted[1], knots)
-        val north = plane(wanted[2], knots)
+        val height = plane(field(wanted[0]), { it }, target)
+        val east = plane(field(wanted[1]), knots, target)
+        val north = plane(field(wanted[2]), knots, target)
         val (u, v) = GfsWinds.rotate(east, north, core.gridLongitudes(target))
-        val colorPlane = color?.let { plane(it, GfsCatalog.colorConvert(colorKey)) }
+        val colorPlane = wanted.getOrNull(3)?.let { plane(field(it), GfsCatalog.colorConvert(colorKey), target) }
         return WindProducts.pack(target.cells, height, u, v, colorPlane)
     }
 }

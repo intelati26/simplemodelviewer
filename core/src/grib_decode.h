@@ -24,6 +24,8 @@ namespace Grib {
         int64_t referenceTime = 0;                      // the run's time (section 1), epoch seconds
         int forecastHours = 0;                          // octet 19-22 of section 4 (when the unit is hours), else 0
         int category = -1, number = -1;                 // parameter category / number (section 4)
+        int levelType = -1;                             // type of the first fixed surface: 100 isobaric (value in Pa), 103 height above ground (m), 101 mean sea level, 1 surface, 200 whole atmosphere
+        int levelValue = 0;                             // its value, in the unit of that type
     };
 
     // decodes the first message of [data, data + size) into floats, row 0 = south, columns west to east, NaN where the message has no value

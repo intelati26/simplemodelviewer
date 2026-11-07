@@ -519,6 +519,8 @@ static void testGfsFile(const char * name) {
         checked += 1;
     }
     CHECK(checked >= 400 && wrong == 0);
+    if (std::string(name) == "gfs_hgt500.grib2") CHECK(result.category == 3 && result.number == 5 && result.level_type == 100 && result.level_value == 50000);      // height, 500 mb
+    if (std::string(name) == "gfs_ugrd500.grib2") CHECK(result.category == 2 && result.number == 2 && result.level_type == 100 && result.level_value == 50000);   // u wind
     // the grid: south-west cell at 90 S, 180 W; a longitude and latitude land on the right cell, wrapping all the way around
     double lat, lon, col, row;
     spc_grid_to_latlon(result.grid, 0, 0, &lat, &lon);

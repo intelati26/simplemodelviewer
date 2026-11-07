@@ -25,7 +25,10 @@ enum class Pool { Max, Mean, Mode }
 class MrmsWindow(val grid: Grid, val values: FloatArray, val validTime: Long, val sourceCellDegrees: Double)
 
 /** A decoded raster: [values] fill [grid] (row 0 = south, NaN where nothing is stored). */
-class GridField(val grid: Grid, val values: FloatArray)
+class GridField(val grid: Grid, val values: FloatArray, val meta: GribMeta? = null)
+
+/** What a decoded GRIB message is: its parameter (category / number) and first fixed surface (type and value), to tell the messages of a cropped file apart. */
+class GribMeta(val category: Int, val number: Int, val levelType: Int, val levelValue: Int)
 
 /** The native core (C++: blosc decode, grids, MRMS GRIB2 decode, rasteriser). Implemented over JNI on Android and cinterop on iOS. */
 interface Core {

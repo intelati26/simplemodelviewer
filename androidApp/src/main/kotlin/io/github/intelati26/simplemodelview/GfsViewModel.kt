@@ -177,6 +177,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissNotice() = update { it.copy(notice = null) }
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
+    /** The box NOMADS is asked for: the sector and a margin (the sector's Lambert box bends), or null when cropping is off. */
+    private fun regionFor(st: GfsState): DoubleArray? = if (st.settings.gfsCrop) st.sector.let { doubleArrayOf(maxOf(-180.0, it.west - 3), maxOf(-90.0, it.south - 3), minOf(180.0, it.east + 3), minOf(90.0, it.north + 3)) } else null
+
     private fun gridFor(sector: Sector): Grid = grids.getOrPut(sector.name) { core.planLambertBox(sector.west, sector.south, sector.east, sector.north, 25_000.0) }
 
     private fun showFrame() {
@@ -194,8 +197,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val surface = GfsCatalog.surfaceById(st.product)
         val status: (String) -> Unit = { text -> update { it.copy(loadStatus = text) } }
         val key = "${file.url}|${st.product}|${st.level}|${st.color}|${st.sector.name}"
+        val region = regionFor(st)
         val values = computed[key] ?: withContext(Dispatchers.Default) {
-            if (surface != null) repo.loadField(file, surface, target, status) else repo.loadWind(file, st.level, st.color, target, status)
+            if (surface != null) repo.loadField(file, surface, target, status, region) else repo.loadWind(file, st.level, st.color, target, status, region)
         }.also { computed[key] = it }
         val product: Product
         val title: String
@@ -235,7 +239,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
             .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours)
             .putBoolean("minimal_ui", settings.minimalUi).putDisplay(settings).apply()
-        val redraw = settings.contours != _state.value.settings.contours || settings.displayDiffers(_state.value.settings)
+        val redraw = settings.contours != _state.value.settings.contours || settings.displayDiffers(_state.value.settings) || settings.gfsCrop != _state.value.settings.gfsCrop
         update { it.copy(settings = settings) }
         if (redraw && shown != null) showFrame()
     }
@@ -300,7 +304,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 val count = window.count()
                 var done = 0
                 for (i in window) {
-                    repo.prefetch(st.frames[i], st.level, st.color, surface)
+                    repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st))
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }

@@ -188,6 +188,8 @@ int spc_grib_decode(const uint8_t * data, size_t size, float ** out, spc_grib_re
     result->forecast_hours = info.forecastHours;
     result->category = info.category;
     result->number = info.number;
+    result->level_type = info.levelType;
+    result->level_value = info.levelValue;
     return 0;
 }
 

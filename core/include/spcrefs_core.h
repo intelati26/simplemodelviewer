@@ -140,6 +140,7 @@ typedef struct {
     int64_t reference_time;            /* the run's time, epoch seconds */
     int forecast_hours;                /* the message's forecast time when it is in hours, else 0 */
     int category, number;              /* parameter category / number of the message (section 4) */
+    int level_type, level_value;       /* first fixed surface: 100 isobaric (Pa), 103 height above ground (m), 101 mean sea level, 1 surface, 200 whole atmosphere */
 } spc_grib_result;
 
 /* Decodes the first GRIB2 message of the bytes (a byte range of an NBM file, found with its .idx) into floats (row 0 = south, columns west to east, NaN
