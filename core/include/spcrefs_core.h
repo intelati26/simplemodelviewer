@@ -32,6 +32,8 @@ long spc_blosc_inflate(const uint8_t * data, size_t size, uint8_t * out, size_t 
  * west-negative both fine), and back. */
 void spc_latlon_to_grid(int grid, double lat, double lon, double * column, double * row);
 void spc_grid_to_latlon(int grid, double column, double row, double * lat, double * lon);
+/* Fills `out` (columns * rows floats, row 0 = south) with each cell's longitude (east-positive, -180..180). */
+void spc_grid_longitudes(int grid, float * out);
 
 /* A window of a grid: cells from col0 / row0 (south-west), `cols` x `rows` cells, drawn `scale` pixels per cell. */
 /* `step` > 1 (with scale 1) draws every step-th cell: a half-memory "data saver" picture, (cols/step) x (rows/step) pixels. */

@@ -33,6 +33,9 @@ class NativeCore : Core {
         return GridField(Grid(info[0], info[1], info[2]), values)
     }
 
+    private external fun gridLongitudesNative(grid: Int, count: Int): FloatArray
+    override fun gridLongitudes(grid: Grid): FloatArray = gridLongitudesNative(grid.id, grid.cells)
+
     private external fun decodeGribNative(message: ByteArray, info: IntArray): FloatArray
 
     override fun decodeGrib(message: ByteArray): GridField {

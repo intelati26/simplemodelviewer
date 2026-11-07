@@ -53,6 +53,9 @@ interface Core {
      */
     fun decodeGrib(message: ByteArray): GridField = throw UnsupportedOperationException()
 
+    /** The longitude (east-positive, -180..180) of every cell of [grid], row 0 = south: for turning east / north wind components into the grid's own axes. */
+    fun gridLongitudes(grid: Grid): FloatArray = throw UnsupportedOperationException()
+
     /**
      * A Lambert conformal grid (REFS's projection) covering a latitude / longitude box with square cells of [cellMeters]; the same definition gives the
      * same grid. MRMS windows are reprojected onto it ([reproject]) so the map is not stretched and every line / outline uses one projection.

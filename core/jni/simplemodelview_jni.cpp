@@ -117,6 +117,14 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     return out;
 }
 
+JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_gridLongitudesNative(JNIEnv * env, jobject, jint grid, jint count) {
+    std::vector<float> lon(static_cast<size_t>(count));
+    spc_grid_longitudes(grid, lon.data());
+    jfloatArray out = env->NewFloatArray(count);
+    if (out != nullptr) env->SetFloatArrayRegion(out, 0, count, lon.data());
+    return out;
+}
+
 JNIEXPORT jintArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_planLambertBoxNative(
     JNIEnv * env, jobject, jdouble west, jdouble south, jdouble east, jdouble north, jdouble cell) {
     int columns = 0, rows = 0;

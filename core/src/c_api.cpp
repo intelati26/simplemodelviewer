@@ -60,6 +60,17 @@ void spc_grid_to_latlon(int grid, double column, double row, double * lat, doubl
     Grids::get(grid).toLatLon(column, row, *lat, *lon);
 }
 
+void spc_grid_longitudes(int grid, float * out) {
+    const GridBase & g = Grids::get(grid);
+    for (int r = 0; r < g.rows; r += 1) {
+        for (int c = 0; c < g.columns; c += 1) {
+            double lat, lon;
+            g.toLatLon(c, r, lat, lon);
+            out[static_cast<size_t>(r) * g.columns + c] = static_cast<float>(lon);
+        }
+    }
+}
+
 int spc_plan_lambert_box(double west, double south, double east, double north, double cell_meters, int * columns, int * rows) {
     return Grids::planLambertBox(west, south, east, north, cell_meters, columns, rows);
 }

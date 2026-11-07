@@ -32,9 +32,13 @@ data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int, 
     val label: String get() = "$year-${two(month)}-${two(day)} ${two(hour)}Z"
 
     /** The folder of this run (with a trailing slash). */
-    val prefix: String get() = if (grib) "blend.$year${two(month)}${two(day)}/${two(hour)}/core/" else "$version/${NbmBucket.REGION}/$year/${two(month)}/${two(day)}/${two(hour)}00/"
+    val prefix: String get() = when {
+        version == GfsBucket.VERSION -> "gfs.$year${two(month)}${two(day)}/${two(hour)}/atmos/"
+        grib -> "blend.$year${two(month)}${two(day)}/${two(hour)}/core/"
+        else -> "$version/${NbmBucket.REGION}/$year/${two(month)}/${two(day)}/${two(hour)}00/"
+    }
 
-    /** True for a run found in the GRIB bucket (see [NbmGribBucket]). */
+    /** True for a run found in the NBM GRIB bucket (see [NbmGribBucket]). */
     val grib: Boolean get() = version == NbmGribBucket.VERSION
 
     companion object {
@@ -43,9 +47,9 @@ data class NbmCycle(val year: Int, val month: Int, val day: Int, val hour: Int, 
 }
 
 /** One field at one forecast time: its key, the run and valid times, and when it was uploaded (the bucket's LastModified), epoch seconds. */
-data class NbmFile(val key: String, val run: Long, val valid: Long, val uploaded: Long?, val size: Long, val grib: Boolean = false, val field: String = "") {
+data class NbmFile(val key: String, val run: Long, val valid: Long, val uploaded: Long?, val size: Long, val grib: Boolean = false, val field: String = "", val bucketUrl: String = "") {
     /** The colons of the time stamps are percent-encoded, as the bucket's own links do. A GRIB file is in the other bucket ([field] says which of its messages is meant). */
-    val url: String get() = (if (grib) NbmGribBucket.URL else NbmBucket.URL) + "/" + key.replace(":", "%3A")
+    val url: String get() = (bucketUrl.ifEmpty { if (grib) NbmGribBucket.URL else NbmBucket.URL }) + "/" + key.replace(":", "%3A")
 
     /** Hours after the run's start. */
     val leadHours: Int get() = ((valid - run) / 3600).toInt()

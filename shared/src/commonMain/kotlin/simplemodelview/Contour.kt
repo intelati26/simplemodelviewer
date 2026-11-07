@@ -48,6 +48,7 @@ object Contours {
     /** Which fields get contour lines, from the array name and the shown units; null: none. Intervals follow the usual charts. */
     fun specFor(id: String, units: String): ContourSpec? = when {
         id.startsWith("z500") -> ContourSpec(60.0, boldEvery = 300.0, labelDivisor = 10.0)       // 6 dam lines, the 540 / 570 / 600 bold
+        id.startsWith("z250") || id.startsWith("z300") -> ContourSpec(120.0, boldEvery = 600.0, labelDivisor = 10.0)
         id.startsWith("z700") -> ContourSpec(30.0, boldEvery = 150.0, labelDivisor = 10.0)
         id.startsWith("z850") -> ContourSpec(30.0, boldEvery = 150.0, labelDivisor = 10.0)
         id.startsWith("pmsl") -> ContourSpec(4.0, boldEvery = 20.0)                              // hPa

@@ -11,7 +11,10 @@ import kotlin.math.roundToInt
  * `values.size >= cells` check see.
  */
 object WindProducts {
-    val levels = listOf(500, 700, 850)
+    val levels = listOf(250, 300, 500, 700, 850)
+    /** Degrees the map's north is turned per degree of longitude from 97.5 W, for the Lambert conformal projection of the REFS and sector grids (n = sin 38.5 N). */
+    const val CONVERGENCE = 0.6225
+
     const val SPEED = 0
     const val HEIGHT = 1
     const val U = 2
@@ -28,6 +31,7 @@ object WindProducts {
         Color("tlev", "Temperature at the level", "t%d_mean"),
         Color("td2m", "2-m dewpoint", "td2m_mean"),
         Color("rh2m", "2-m relative humidity", "rh2m_mean"),
+        Color("rhlev", "Relative humidity at the level", "rh%d_mean"),
     )
 
     /** The id of the virtual product of [level] drawn over [color]: `wind500_mean` for the speed, `wind500_t2m_mean` and so on for the others. */
