@@ -4,7 +4,7 @@ package simplemodelview
  * NOAA's other copy of the National Blend of Models: the GRIB2 files of the bucket `noaa-nbm-grib2-pds`, one file per run and forecast hour
  * (`blend.<yyyyMMdd>/<HH>/core/blend.t<HH>z.core.f<FFF>.co.grib2`) with a text index (`.idx`) of the messages' byte ranges. It is the fallback for when
  * the rendered GeoTIFFs of [NbmBucket] fall behind (they stopped for days when version 5.1 started), so only the fields the GRIB files have as they are
- * (not the 6 and 12 h accumulations, daily extremes and probabilities, which the GeoTIFFs make from other messages) can be shown from it.
+ * (the percentiles and threshold chances are in the `qmd` files, only for the 00, 06, 12 and 18Z runs, not read yet) can be shown from it.
  */
 object NbmGribBucket {
     const val URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
@@ -17,7 +17,16 @@ object NbmGribBucket {
 }
 
 /** One field of the GRIB files: its message in the index (variable, level, extra text after the time) and how to turn its numbers into the GeoTIFF's units. */
-class GribField(val variable: String, val level: String, val convert: (Float) -> Float = { it }, val extra: String = "")
+class GribField(
+    val variable: String,
+    val level: String,
+    val convert: (Float) -> Float = { it },
+    val extra: String = "",
+    /** The index's time text for a message [lead] hours after the run ("12 hour fcst"; "18-24 hour acc fcst" for a 6 h accumulation). */
+    val time: (Int) -> String = { "$it hour fcst" },
+    /** Whether the file of [lead] hours has this message at all (6 h accumulations end at multiples of 6, and so on). */
+    val leadOk: (Int) -> Boolean = { true },
+)
 
 object NbmGribFields {
     private fun kelvinToF(k: Float) = (k - 273.15f) * 1.8f + 32f
@@ -25,6 +34,11 @@ object NbmGribFields {
     private fun millimetersToInches(v: Float) = v / 25.4f
     private fun metersToMiles(v: Float) = v / 1609.344f
     private fun metersToHundredsOfFeet(v: Float) = v / 30.48f
+    private fun metersToInches(v: Float) = v / 0.0254f
+
+    // accumulations and extremes over [hours] ending at the lead, as the index words them
+    private fun acc(hours: Int): (Int) -> String = { "${it - hours}-$it hour acc fcst" }
+    private fun every6(hours: Int): (Int) -> Boolean = { it >= hours && it % 6 == 0 }
 
     /** The products (by [NbmProduct.id]) that have a message in the GRIB files, with the units of the GeoTIFFs (see [NbmCatalog]). */
     val byId: Map<String, GribField> = mapOf(
@@ -39,6 +53,15 @@ object NbmGribFields {
         "vis" to GribField("VIS", "surface", ::metersToMiles),
         "ceil" to GribField("CEIL", "cloud ceiling", ::metersToHundredsOfFeet),
         "sbcape" to GribField("CAPE", "surface"),
+        // the `core` files also have these, which the GeoTIFFs make from the same messages: the 6 and 12 hour amounts and chances, thunderstorms, daily extremes
+        "maxt" to GribField("TMAX", "2 m above ground", ::kelvinToF, time = { "${it - 12}-$it hour max fcst" }, leadOk = { it >= 12 && it % 24 == 12 }),
+        "mint" to GribField("TMIN", "2 m above ground", ::kelvinToF, time = { "${it - 12}-$it hour min fcst" }, leadOk = { it >= 12 && it % 24 == 0 }),
+        "pop06" to GribField("APCP", "surface", extra = "prob >0.254:prob fcst 255/255", time = acc(6), leadOk = every6(6)),
+        "pop12" to GribField("APCP", "surface", extra = "prob >0.254:prob fcst 255/255", time = acc(12), leadOk = every6(12)),
+        "qpf06" to GribField("APCP", "surface", ::millimetersToInches, time = acc(6), leadOk = every6(6)),
+        "snowamt06" to GribField("ASNOW", "surface", ::metersToInches, time = acc(6), leadOk = every6(6)),
+        "tstm12" to GribField("TSTM", "surface", extra = "probability forecast", time = acc(12), leadOk = every6(12)),
+        "probasnow06gt040" to GribField("ASNOW", "surface", extra = "prob >0.1016:prob fcst 255/255", time = acc(6), leadOk = every6(6)),
     )
 
     fun supports(id: String) = id in byId
@@ -61,7 +84,7 @@ fun parseGribIndex(text: String): List<GribIndexEntry> {
 
 /** The byte range of [field]'s message at [leadHours] after the run: first byte and last byte (null for the last message of the file), or null when it is not there. */
 fun findGribMessage(index: List<GribIndexEntry>, field: GribField, leadHours: Int): Pair<Long, Long?>? {
-    val at = index.indexOfFirst { it.variable == field.variable && it.level == field.level && it.time == "$leadHours hour fcst" && it.extra == field.extra }
+    val at = index.indexOfFirst { it.variable == field.variable && it.level == field.level && it.time == field.time(leadHours) && it.extra == field.extra }
     if (at < 0) return null
     val next = index.getOrNull(at + 1)?.offset
     return index[at].offset to next?.let { it - 1 }
@@ -97,6 +120,7 @@ fun parseGribListing(xml: String, cycle: NbmCycle, fieldId: String): List<NbmFil
         val key = block.substringAfter("<Key>", "").substringBefore("</Key>")
         if (!key.endsWith(".co.grib2")) continue
         val lead = key.substringAfterLast(".core.f", "").substringBefore('.').toIntOrNull() ?: continue
+        if (NbmGribFields.byId[fieldId]?.leadOk?.invoke(lead) == false) continue
         val uploaded = isoToEpoch(block.substringAfter("<LastModified>", "").substringBefore("</LastModified>"))
         val size = block.substringAfter("<Size>", "").substringBefore("</Size>").toLongOrNull() ?: 0L
         files += NbmFile(key, cycle.epoch, cycle.epoch + lead * 3600L, uploaded, size, grib = true, field = fieldId)
