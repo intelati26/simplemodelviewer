@@ -419,7 +419,7 @@ private fun RowScope.CycleMenu(current: Cycle?, cycles: List<Cycle>, onPick: (Cy
 
 /** The Heights & Winds product's two choices: the level (500 / 700 / 850 mb) and what is in color under its height contours and barbs. */
 @Composable
-private fun WindChooser(products: List<Product>, level: Int, colorKey: String, onLevel: (Int) -> Unit, onColor: (String) -> Unit) {
+internal fun WindChooser(products: List<Product>, level: Int, colorKey: String, onLevel: (Int) -> Unit, onColor: (String) -> Unit) {
     val ids = products.map { it.id }.toSet()
     val levels = simplemodelview.WindProducts.levels.filter { l -> simplemodelview.WindProducts.id(l) in ids }
     val colors = simplemodelview.WindProducts.colors.filter { c -> simplemodelview.WindProducts.id(level, c) in ids }

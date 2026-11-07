@@ -201,6 +201,15 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return field
     }
 
+    /** The messages a wind product needs, in the order [loadWind] reads them: height, u, v, and the color field unless it is the speed. */
+    fun windMessages(level: Int, colorKey: String): List<GfsMessage> =
+        listOfNotNull(GfsMessage("HGT", "$level mb"), GfsMessage("UGRD", "$level mb"), GfsMessage("VGRD", "$level mb"), GfsCatalog.colorMessage(level, colorKey))
+
+    /** Downloads (and keeps) what a frame of a product needs, so a loop plays without waiting; a wind product when [product] is null. */
+    suspend fun prefetch(file: NbmFile, level: Int, colorKey: String, product: GfsProduct?) {
+        messages(file, if (product != null) listOfNotNull(product.message) else windMessages(level, colorKey)) { }
+    }
+
     /** A single field of [product] on [target] (a sector's Lambert grid). */
     suspend fun loadField(file: NbmFile, product: GfsProduct, target: Grid, status: (String) -> Unit = {}): FloatArray {
         val message = product.message ?: throw RefsException("not a single field")
@@ -216,7 +225,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
      */
     suspend fun loadWind(file: NbmFile, level: Int, colorKey: String, target: Grid, status: (String) -> Unit = {}): FloatArray {
         val color = GfsCatalog.colorMessage(level, colorKey)
-        val wanted = listOfNotNull(GfsMessage("HGT", "$level mb"), GfsMessage("UGRD", "$level mb"), GfsMessage("VGRD", "$level mb"), color)
+        val wanted = windMessages(level, colorKey)
         val bytes = messages(file, wanted, status)
         status("Decoding…")
         fun plane(m: GfsMessage, convert: (Float) -> Float = { it }): FloatArray {

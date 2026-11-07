@@ -4,6 +4,7 @@ import java.io.File
 import android.app.Application
 import android.content.Context
 import simplemodelview.AlertsRepository
+import simplemodelview.GfsRepository
 import simplemodelview.LightningCastRepository
 import simplemodelview.MrmsRepository
 import simplemodelview.NbmRepository
@@ -41,6 +42,7 @@ object AppContainer {
     val mrms by lazy { MrmsRepository(http, core) }
     val gribStore by lazy { DiskGribStore(File(app.cacheDir, "grib")) { prefs.getInt("cache_mb", 150).toLong() * 1024 * 1024 } }
     val nbm by lazy { NbmRepository(http, core, gribStore) }
+    val gfs by lazy { GfsRepository(http, core, gribStore) }
     val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
     val lightning by lazy { LightningCastModel(LightningCastRepository(http), prefs) }
     val alerts by lazy { AlertsRepository(http) }
