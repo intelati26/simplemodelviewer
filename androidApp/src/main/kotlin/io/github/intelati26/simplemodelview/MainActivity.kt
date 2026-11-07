@@ -606,6 +606,20 @@ internal fun SettingsDialog(
                     onChange(settings.copy(optionsInExport = it))
                 }
                 Column {
+                    var stats by remember { mutableStateOf(AppContainer.gribStore.stats()) }
+                    Text("Downloaded model data (GFS and NBM GRIB)")
+                    Text(
+                        if (stats.files == 0) "Nothing kept." else "${stats.bytes / 1_000_000} MB in ${stats.files} files" +
+                            stats.byModel.entries.sortedBy { it.key }.joinToString("") { " \u00B7 ${it.key} ${it.value / 1_000_000} MB" } +
+                            ". Kept 24 hours from the model run.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { AppContainer.gribStore.clear("GFS"); stats = AppContainer.gribStore.stats() }, enabled = stats.byModel.containsKey("GFS")) { Text("Clear GFS") }
+                        TextButton(onClick = { AppContainer.gribStore.clear("NBM"); stats = AppContainer.gribStore.stats() }, enabled = stats.byModel.containsKey("NBM")) { Text("Clear NBM") }
+                    }
+                }
+                Column {
                     Text("Cache size (applies on the next launch)")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (mb in listOf(50, 150, 300, 1000)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text(if (mb == 1000) "1 GB" else "$mb MB") })

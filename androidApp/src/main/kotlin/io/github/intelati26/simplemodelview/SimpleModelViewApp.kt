@@ -43,7 +43,7 @@ object AppContainer {
     private val http by lazy { OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()) { prefs.getString("contact_email", "").orEmpty() } }   // a new cache size applies on the next launch
     val repo by lazy { RefsRepository(http, core) }
     val mrms by lazy { MrmsRepository(http, core) }
-    val gribStore by lazy { DiskGribStore(File(app.cacheDir, "grib"), capBytes = { prefs.getInt("cache_mb", 150).toLong() * 1024 * 1024 }) }
+    val gribStore by lazy { DiskGribStore(app, File(app.cacheDir, "grib"), capBytes = { prefs.getInt("cache_mb", 150).toLong() * 1024 * 1024 }) }
     val nbm by lazy { NbmRepository(http, core, gribStore) }
     val gfs by lazy { GfsRepository(http, core, gribStore) }
     val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
