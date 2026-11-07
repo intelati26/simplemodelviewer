@@ -163,4 +163,28 @@ class GribKeepTest {
         assertNull(gribSourceInitEpoch("https://example.com/some/file.grib2"))
         assertEquals(86400L, GRIB_KEEP_SECONDS)
     }
+
+    @Test fun accumulationsAndChancesAreFoundByTheirWindowText() {
+        val idx = parseGribIndex(
+            "1:0:d=2026110712:APCP:surface:18-24 hour acc fcst:prob >0.254:prob fcst 255/255\n" +
+                "2:100:d=2026110712:APCP:surface:18-24 hour acc fcst:\n" +
+                "3:200:d=2026110712:ASNOW:surface:18-24 hour acc fcst:\n" +
+                "4:300:d=2026110712:TMIN:2 m above ground:12-24 hour min fcst:\n" +
+                "5:400:d=2026110712:TSTM:surface:12-24 hour acc fcst:probability forecast\n" +
+                "6:500:d=2026110712:TMP:2 m above ground:24 hour fcst:\n",
+        )
+        fun find(id: String, lead: Int) = findGribMessage(idx, NbmGribFields.byId.getValue(id), lead)
+        assertEquals(0L to 99L, find("pop06", 24))
+        assertEquals(100L to 199L, find("qpf06", 24))
+        assertEquals(200L to 299L, find("snowamt06", 24))
+        assertEquals(300L to 399L, find("mint", 24))
+        assertEquals(400L to 499L, find("tstm12", 24))
+        assertEquals(500L to null, find("temp", 24))
+        assertNull(find("qpf06", 23))
+        // only the hours that can have the message are frames
+        assertEquals(true, NbmGribFields.byId.getValue("qpf06").leadOk(24))
+        assertEquals(false, NbmGribFields.byId.getValue("qpf06").leadOk(25))
+        assertEquals(false, NbmGribFields.byId.getValue("tstm12").leadOk(6))
+        assertEquals(25.4f, NbmGribFields.byId.getValue("qpf06").convert(645.16f), 0.01f)
+    }
 }
