@@ -49,6 +49,10 @@ data class NbmFile(val key: String, val run: Long, val valid: Long, val uploaded
 
     /** Hours after the run's start. */
     val leadHours: Int get() = ((valid - run) / 3600).toInt()
+
+    /** What a decoded frame is kept under: a GRIB file holds every field, so the field is part of it. */
+    val cacheKey: String
+        get() = if (grib) key + "#" + this.field else key
 }
 
 /** "2026-10-30T17:00" -> epoch seconds, or null. */
@@ -281,8 +285,8 @@ class NbmRepository(private val http: Http, private val core: Core) {
     }
 
     /** Downloads a file (an HTTP cache keeps it) and decodes it whole: the field on the blend's own Lambert grid. */
-    suspend fun loadFrame(file: NbmFile): GridField {
-        if (file.grib) return loadGribFrame(file)
+    suspend fun loadFrame(file: NbmFile, status: (String) -> Unit = {}): GridField {
+        if (file.grib) return loadGribFrame(file, status)
         val bytes = download(file)
         return try {
             core.decodeGeotiff(bytes)
@@ -292,24 +296,45 @@ class NbmRepository(private val http: Http, private val core: Core) {
     }
 
     /** Downloads a file without decoding it, so the HTTP cache has it for a loop. */
-    suspend fun prefetch(file: NbmFile) { if (!file.grib) download(file) }
+    suspend fun prefetch(file: NbmFile) { if (file.grib) gribMessage(file) { } else download(file) }
 
     /** A GRIB frame: the file's index says where the field's message is, only that byte range is downloaded, decoded and put into the GeoTIFFs' units. */
-    private suspend fun loadGribFrame(file: NbmFile): GridField {
+    private suspend fun loadGribFrame(file: NbmFile, status: (String) -> Unit): GridField {
         val field = NbmGribFields.byId[file.field] ?: throw RefsException("that field is not in NOAA's GRIB files")
-        val index = http.get(file.url + ".idx")
-        if (index.status != 200) throw RefsException("the GRIB index could not be read (HTTP ${index.status})")
-        val (first, last) = findGribMessage(parseGribIndex(index.body.decodeToString()), field, file.leadHours) ?: throw RefsException("that hour has no ${field.variable} message")
-        val part = http.getRange(file.url, first, last ?: (file.size - 1))
-        if (part.status != 200 && part.status != 206 || part.body.isEmpty()) throw RefsException("the GRIB message could not be downloaded (HTTP ${part.status})")
+        val bytes = gribMessage(file, status)
+        status("Decoding\u2026")
         val decoded = try {
-            core.decodeGrib(part.body)
+            core.decodeGrib(bytes)
         } catch (e: Exception) {
             throw RefsException("could not decode the GRIB message: ${e.message}")
         }
         val values = decoded.values
         for (i in values.indices) values[i] = field.convert(values[i])
         return GridField(decoded.grid, values)
+    }
+
+    // the last few messages and indexes (a range request is not kept by the HTTP cache): a loop or a re-visited frame does not download them again
+    private val messages = LinkedHashMap<String, ByteArray>(16, 0.75f, true)
+    private val indexes = LinkedHashMap<String, List<GribIndexEntry>>(16, 0.75f, true)
+
+    /** The bytes of the file's message: from the cache, or its index and then just its byte range. [status] says which step is running. */
+    private suspend fun gribMessage(file: NbmFile, status: (String) -> Unit): ByteArray {
+        messages[file.cacheKey]?.let { return it }
+        val field = NbmGribFields.byId[file.field] ?: throw RefsException("that field is not in NOAA's GRIB files")
+        val index = indexes[file.url] ?: run {
+            status("Reading the GRIB index\u2026")
+            val result = http.get(file.url + ".idx")
+            if (result.status != 200) throw RefsException("the GRIB index could not be read (HTTP ${result.status})")
+            parseGribIndex(result.body.decodeToString()).also { indexes[file.url] = it; while (indexes.size > 24) indexes.remove(indexes.keys.first()) }
+        }
+        val (first, last) = findGribMessage(index, field, file.leadHours) ?: throw RefsException("that hour has no ${field.variable} message")
+        val end = last ?: (file.size - 1)
+        status("Downloading ${field.variable} (${(end - first + 1) / 1000} kB)\u2026")
+        val part = http.getRange(file.url, first, end)
+        if (part.status != 200 && part.status != 206 || part.body.isEmpty()) throw RefsException("the GRIB message could not be downloaded (HTTP ${part.status})")
+        messages[file.cacheKey] = part.body
+        while (messages.size > 12) messages.remove(messages.keys.first())
+        return part.body
     }
 
     private suspend fun download(file: NbmFile): ByteArray {

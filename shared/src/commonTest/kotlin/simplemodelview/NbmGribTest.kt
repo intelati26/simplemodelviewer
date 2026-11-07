@@ -87,6 +87,30 @@ class NbmGribTest {
         assertFailsWith<RefsException> { NbmRepository(http, GribCore()).loadFrame(NbmFile(file.key.replace("f012", "f013"), file.run, file.run + 13 * 3600, null, 1L, grib = true, field = "temp")) }
     }
 
+    @Test fun statusIsReportedAndAMessageIsNotDownloadedTwice() = runTest {
+        val http = FakeHttp { url, range ->
+            when {
+                url.endsWith(".idx") -> HttpResult(200, idx.encodeToByteArray())
+                range != null -> HttpResult(206, ByteArray(10) { 1 })
+                else -> HttpResult(404, ByteArray(0))
+            }
+        }
+        val run = NbmCycle(2026, 11, 4, 23).epoch
+        val temp = NbmFile("blend.20261104/23/core/blend.t23z.core.f012.co.grib2", run, run + 12 * 3600, null, 200_000_000L, grib = true, field = "temp")
+        val dew = temp.copy(field = "dewpoint")
+        assertTrue(temp.cacheKey != dew.cacheKey)                                           // one file, two fields
+        val repo = NbmRepository(http, GribCore())
+        val steps = ArrayList<String>()
+        repo.loadFrame(temp) { steps += it }
+        assertEquals(3, steps.size)
+        assertTrue(steps[0].startsWith("Reading the GRIB index") && steps[1].startsWith("Downloading TMP") && steps[2].startsWith("Decoding"))
+        val before = http.urls.size
+        repo.loadFrame(temp)                                                                // cached: no request at all
+        assertEquals(before, http.urls.size)
+        repo.loadFrame(dew)                                                                 // the index of the same file is kept: one more request, for the range
+        assertEquals(before + 1, http.urls.size)
+    }
+
     @Test fun newerGribRunsGoOnTopWhenTheRenderedFilesAreBehind() = runTest {
         val now = epochOf(2026, 11, 5, 16, 0, 0)
         val http = FakeHttp { url, _ ->

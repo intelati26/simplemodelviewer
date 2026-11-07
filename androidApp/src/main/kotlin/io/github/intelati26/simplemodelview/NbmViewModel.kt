@@ -49,6 +49,7 @@ import kotlin.math.floor
 /** The National Blend of Models page: a field, a run, a sector, the run's forecast frames and the one being shown. */
 data class NbmState(
     val busy: Boolean = true,
+    val loadStatus: String? = null,                   // what a slow load (a GRIB frame) is doing: reading the index, downloading, decoding
     val error: String? = null,
     val notice: String? = null,
     val product: NbmProduct = NbmCatalog.default,
@@ -275,9 +276,10 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The decoded field of [file]: cached for a few frames, decoded again (a few tens of milliseconds) otherwise. */
     private suspend fun decode(file: NbmFile, cache: Boolean = true): GridField {
-        if (cache) decoded[file.key]?.let { return it }
-        val field = withContext(Dispatchers.Default) { repo.loadFrame(file) }
-        if (cache) { decoded[file.key] = field; trimCache() }
+        if (cache) decoded[file.cacheKey]?.let { return it }
+        val field = withContext(Dispatchers.Default) { repo.loadFrame(file) { text -> if (file.grib) update { it.copy(loadStatus = text) } } }
+        if (cache) { decoded[file.cacheKey] = field; trimCache() }
+        if (file.grib) update { it.copy(loadStatus = null) }
         return field
     }
 

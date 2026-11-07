@@ -97,7 +97,9 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
     val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
     // the catalog as the picker's product type (it groups, searches and stars them like the other pages do)
-    val products = remember { NbmCatalog.all.map { Product(it.pickerId, it.title, it.group, it.style, false, null, Grid.REFS) } }
+    // while a run comes from the GRIB files only some products are there: the others are marked, and show the last rendered run
+    val fromGrib = s.cycle?.grib == true
+    val products = remember(fromGrib) { NbmCatalog.all.map { Product(it.pickerId, it.title + if (fromGrib && !simplemodelview.NbmGribFields.supports(it.id)) "  (older run only)" else "", it.group, it.style, false, null, Grid.REFS) } }
 
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
@@ -141,12 +143,13 @@ internal fun NbmScreen(vm: NbmViewModel, onSpc: () -> Unit, onMrms: () -> Unit) 
                     if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
                     AssistChip(
                         onClick = { cyclePicker = true },
-                        label = { Text(s.cycle?.let { "Run " + it.shortLabel + (if (s.following) "" else " · set") } ?: "Run") },
+                        label = { Text(s.cycle?.let { "Run " + it.shortLabel + (if (it.grib) " · GRIB" else "") + (if (s.following) "" else " · set") } ?: "Run") },
                         modifier = Modifier.height(32.dp),
                     )
                     SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
+                s.loadStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 NbmTimesLine(s.cycle, s.file)
             }
         }
