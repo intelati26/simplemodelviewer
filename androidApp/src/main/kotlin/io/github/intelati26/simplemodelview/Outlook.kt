@@ -162,7 +162,9 @@ data class LightningState(
  */
 class LightningCastModel(private val repo: simplemodelview.LightningCastRepository, private val prefs: SharedPreferences) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val _state = MutableStateFlow(LightningState(enabled = prefs.getBoolean("lightningcast", false)))
+    /** The placefile link the user pasted; null until then (the layer cannot be on without it). */
+    val url: String? get() = prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() }
+    private val _state = MutableStateFlow(LightningState(enabled = prefs.getBoolean("lightningcast", false) && url != null))
     val state: StateFlow<LightningState> = _state
     private var job: Job? = null
 
@@ -170,7 +172,16 @@ class LightningCastModel(private val repo: simplemodelview.LightningCastReposito
 
     private fun now() = System.currentTimeMillis() / 1000
 
+    /** Keeps the pasted [text] as the placefile link and switches the layer on; false (nothing kept) when it is not an https link. */
+    fun setUrl(text: String): Boolean {
+        val clean = simplemodelview.LightningCast.cleanUrl(text) ?: return false
+        prefs.edit().putString("lightningcast_url", clean).apply()
+        setEnabled(true)
+        return true
+    }
+
     fun setEnabled(on: Boolean) {
+        if (on && url == null) return
         prefs.edit().putBoolean("lightningcast", on).apply()
         job?.cancel()
         _state.value = LightningState(enabled = on, busy = on)

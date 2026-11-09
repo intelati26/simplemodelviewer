@@ -5,7 +5,19 @@ package simplemodelview
  * for the last hour. Read from the GRLevelX placefile CIMSS publishes (the feed and its parsing are those of wxqt's LightningCastLayer).
  */
 object LightningCast {
-    const val FEED = "https://cimss.ssec.wisc.edu/severe_conv/NOAACIMSS_PLTG_GOES-East_CONUS_LOOP"
+    /**
+     * The page where the placefile's link is published (it is public for GRLevelX users). The app does not carry the link itself: the user copies it from
+     * that page and pastes it in, so the data's provider is asked by the user and not by the app's own list.
+     */
+    const val INFO_PAGE = "https://cimss.ssec.wisc.edu/severe_conv/"
+
+    /** The pasted text as a placefile link: trimmed, an https address with a host and no spaces; null when it is not one. */
+    fun cleanUrl(text: String): String? {
+        val t = text.trim()
+        if (!t.startsWith("https://") || t.any { it.isWhitespace() }) return null
+        val host = t.removePrefix("https://").substringBefore('/').substringBefore('?')
+        return t.takeIf { host.contains('.') && host.length > 3 }
+    }
 }
 
 /** One contour of a scan: the chance in percent, its color in the placefile (0xRRGGBB) and its points as lat0, lon0, lat1, lon1, ... */
@@ -66,9 +78,10 @@ fun lightningFrameFor(frames: List<LightningFrame>, seconds: Long?): LightningFr
 }
 
 /** Reads the LightningCast placefile over [http]. */
-class LightningCastRepository(private val http: Http) {
+class LightningCastRepository(private val http: Http, private val url: () -> String?) {
     suspend fun load(): List<LightningFrame> {
-        val result = http.get(LightningCast.FEED)
+        val feed = url() ?: throw RefsException("LightningCast needs the placefile link (see the LightningCast overlay)")
+        val result = http.get(feed)
         if (result.status != 200) throw RefsException("the LightningCast feed could not be read (HTTP ${result.status})")
         return parseLightningCast(result.body.decodeToString()).also { if (it.isEmpty()) throw RefsException("the LightningCast feed has no scans") }
     }

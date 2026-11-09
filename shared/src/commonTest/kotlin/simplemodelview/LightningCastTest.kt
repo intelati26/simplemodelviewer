@@ -76,10 +76,21 @@ class LightningCastTest {
 
     @Test fun loadsTheFeed() = runTest {
         val http = FakeHttp(200, feed)
-        assertEquals(2, LightningCastRepository(http).load().size)
-        assertEquals("https://cimss.ssec.wisc.edu/severe_conv/NOAACIMSS_PLTG_GOES-East_CONUS_LOOP", http.url)
-        assertFailsWith<RefsException> { LightningCastRepository(FakeHttp(503, "")).load() }
-        assertFailsWith<RefsException> { LightningCastRepository(FakeHttp(200, "nothing")).load() }
-        assertTrue(LightningCast.FEED.startsWith("https://cimss.ssec.wisc.edu/"))
+        assertEquals(2, LightningCastRepository(http) { "https://example.org/placefile" }.load().size)
+        assertEquals("https://example.org/placefile", http.url)
+        assertFailsWith<RefsException> { LightningCastRepository(FakeHttp(503, "")) { "https://example.org/p" }.load() }
+        assertFailsWith<RefsException> { LightningCastRepository(FakeHttp(200, "nothing")) { "https://example.org/p" }.load() }
+        // no link pasted yet: nothing is asked for
+        val none = FakeHttp(200, feed)
+        assertFailsWith<RefsException> { LightningCastRepository(none) { null }.load() }
+        assertNull(none.url)
+    }
+
+    @Test fun aPastedLinkMustBeAnHttpsAddress() {
+        assertEquals("https://example.org/a/b?c=1", LightningCast.cleanUrl("  https://example.org/a/b?c=1\n"))
+        assertEquals(null, LightningCast.cleanUrl("http://example.org/a"))
+        assertEquals(null, LightningCast.cleanUrl("https://exa mple.org"))
+        assertEquals(null, LightningCast.cleanUrl("https://x"))
+        assertEquals(null, LightningCast.cleanUrl(""))
     }
 }

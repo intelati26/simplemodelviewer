@@ -47,6 +47,6 @@ object AppContainer {
     val nbm by lazy { NbmRepository(http, core, gribStore) }
     val gfs by lazy { GfsRepository(http, core, gribStore) }
     val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
-    val lightning by lazy { LightningCastModel(LightningCastRepository(http), prefs) }
+    val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val alerts by lazy { AlertsRepository(http) }
 }
