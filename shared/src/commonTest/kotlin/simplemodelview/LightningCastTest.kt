@@ -83,7 +83,7 @@ class LightningCastTest {
         // no link pasted yet: nothing is asked for
         val none = FakeHttp(200, feed)
         assertFailsWith<RefsException> { LightningCastRepository(none) { null }.load() }
-        assertNull(none.url)
+        assertEquals("", none.url)
     }
 
     @Test fun aPastedLinkMustBeAnHttpsAddress() {
