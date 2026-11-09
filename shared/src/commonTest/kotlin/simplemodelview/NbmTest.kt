@@ -126,6 +126,24 @@ class NbmTest {
         assertTrue(NbmCatalog.groups.all { g -> NbmCatalog.all.any { it.group == g } })
     }
 
+    @Test fun fieldsOfOneQuantityAreChoicesOfOneProduct() {
+        // every field is in exactly one family, ids are unique, and a family's choices lead to its fields
+        assertEquals(NbmCatalog.all.size, NbmCatalog.all.map { it.id }.toSet().size)
+        for (f in NbmCatalog.families) {
+            assertTrue(f.variants.all { it.family == f.id && it.group == f.group }, f.id)
+            assertEquals(f.variants.size, f.variants.map { it.a to it.b }.toSet().size, f.id)
+        }
+        val snow = NbmCatalog.families.first { it.id == "snowamt" }
+        assertEquals(listOf("1 h", "6 h", "24 h", "48 h", "72 h", "Total so far"), snow.firstChoices)
+        assertEquals("snow24p50", snow.variant("24 h", "Median").id)
+        assertEquals("snowamt48", snow.variant("48 h", NbmCatalog.BLEND).id)
+        assertEquals(listOf(NbmCatalog.BLEND), snow.secondChoices("Total so far"))
+        // an unknown second choice falls back to the first of that window
+        assertEquals("snowamt06total", snow.variant("Total so far", "Median").id)
+        assertEquals("ficeac", NbmCatalog.familyOf(NbmCatalog.byId("ice24p90")!!).id)
+        assertTrue(NbmCatalog.families.size < 50)
+    }
+
     @Test fun contourLinesOnlyForTheTemperatureFields() {
         for (id in listOf("nbm_temp", "nbm_appttemp", "nbm_dewpoint", "nbm_maxt", "nbm_mint", "nbm_tempp90")) assertNotNull(Contours.specFor(id, "F"), id)
         assertNull(Contours.specFor("nbm_temp", "C"))
