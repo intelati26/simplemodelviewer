@@ -99,7 +99,13 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     // the catalog as the picker's product type (it groups, searches and stars them like the other pages do)
     // while a run comes from the GRIB files only some products are there: the others are marked, and show the last rendered run
     val fromGrib = s.cycle?.grib == true
-    val products = remember(fromGrib) { NbmCatalog.all.map { Product(it.pickerId, it.title + if (fromGrib && !simplemodelview.NbmGribFields.supports(it.id)) "  (older run only)" else "", it.group, it.style, false, null, Grid.REFS) } }
+    // one entry per product; its time windows, percentiles and thresholds are drop lists under the product chip
+    val products = remember(fromGrib) {
+        NbmCatalog.families.map { f ->
+            Product(f.first.pickerId, f.title + if (fromGrib && f.variants.none { simplemodelview.NbmGribFields.supports(it.id) }) "  (older run only)" else "", f.group, f.first.style, false, null, Grid.REFS)
+        }
+    }
+    val family = NbmCatalog.familyOf(s.product)
 
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
@@ -121,13 +127,14 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val at = NbmCatalog.all.indexOfFirst { it.id == s.product.id }
+                    val at = NbmCatalog.families.indexOfFirst { it.id == s.product.family }
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
-                    AssistChip(onClick = { picker = true }, label = { Text(s.product.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
-                    ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.all.size - 1) { vm.stepProduct(1) }
+                    AssistChip(onClick = { picker = true }, label = { Text(family.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
+                    ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.families.size - 1) { vm.stepProduct(1) }
                     PageMenu("nbm", onOpen)
                     MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
                 }
+                NbmVariantRow(family, s.product, vm::pickProduct)
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -189,7 +196,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
         provider = "NOAA", server = "NOAA's servers",
     )
     if (picker) ProductPicker(
-        products, products.firstOrNull { it.id == s.product.pickerId }, s.favorites, onToggle = vm::toggleFavorite,
+        products, products.firstOrNull { it.id == family.first.pickerId }, s.favorites, onToggle = vm::toggleFavorite,
         onPick = { picked -> picker = false; NbmCatalog.byPickerId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
         groups = NbmCatalog.groups,
     )
@@ -345,4 +352,29 @@ private fun NbmTimesLine(cycle: NbmCycle?, file: NbmFile?) {
         },
         Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, bottom = 2.dp), style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
+}
+
+
+/** The drop lists of a product that has several fields: the first (time window, hour or 24 h maximum) and the second (percentile, threshold), when there are choices. */
+@Composable
+private fun NbmVariantRow(family: simplemodelview.NbmFamily, current: simplemodelview.NbmProduct, onPick: (simplemodelview.NbmProduct) -> Unit) {
+    if (family.variants.size < 2) return
+    val firsts = family.firstChoices.filter { it.isNotEmpty() }
+    val seconds = family.secondChoices(current.a).filter { it.isNotEmpty() }
+    if (firsts.size < 2 && seconds.size < 2) return
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (firsts.size > 1) NbmChoiceMenu(current.a, firsts) { onPick(family.variant(it, current.b)) }
+        if (seconds.size > 1) NbmChoiceMenu(current.b, seconds) { onPick(family.variant(current.a, it)) }
+    }
+}
+
+@Composable
+private fun NbmChoiceMenu(selected: String, choices: List<String>, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(onClick = { open = true }, label = { Text(selected + " \u25BE", maxLines = 1) }, modifier = Modifier.height(32.dp))
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (choice in choices) DropdownMenuItem(text = { Text(choice, fontWeight = if (choice == selected) FontWeight.Bold else FontWeight.Normal) }, onClick = { open = false; onPick(choice) })
+        }
+    }
 }

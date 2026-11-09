@@ -204,9 +204,9 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The product [delta] places along in the catalog (the arrows beside the product chip). */
     fun stepProduct(delta: Int) {
-        val all = NbmCatalog.all
-        val at = all.indexOfFirst { it.id == _state.value.product.id }
-        all.getOrNull(at + delta)?.let { pickProduct(it) }
+        val all = NbmCatalog.families
+        val at = all.indexOfFirst { it.id == _state.value.product.family }
+        all.getOrNull(at + delta)?.let { pickProduct(it.first) }
     }
 
     fun pickProduct(picked: NbmProduct) {
