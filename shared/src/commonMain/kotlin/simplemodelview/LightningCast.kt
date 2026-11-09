@@ -9,7 +9,7 @@ object LightningCast {
      * The page where the placefile's link is published (it is public for GRLevelX users). The app does not carry the link itself: the user copies it from
      * that page and pastes it in, so the data's provider is asked by the user and not by the app's own list.
      */
-    const val INFO_PAGE = "https://cimss.ssec.wisc.edu/severe_conv/"
+    const val INFO_PAGE = "https://cimss.ssec.wisc.edu/probsevere/lc/"
 
     /** The pasted text as a placefile link: trimmed, an https address with a host and no spaces; null when it is not one. */
     fun cleanUrl(text: String): String? {
