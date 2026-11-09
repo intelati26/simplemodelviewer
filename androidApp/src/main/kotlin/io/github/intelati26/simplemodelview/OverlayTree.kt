@@ -78,7 +78,7 @@ internal fun OverlayTreeDialog(
     layers: List<OverlayLayer>, styles: List<Style>, onRadarNone: () -> Unit, onRadarCombo: (Boolean, Boolean, Boolean) -> Unit, rotationChoice: String, hailChoice: String, onRotationChoice: (String) -> Unit, onHailChoice: (String) -> Unit, onRadarProduct: () -> Unit, onThreshold: (Int) -> Unit,
     alertKinds: Set<AlertKind>, alertsAsOf: Long?, alertNote: String?, newestOnly: Boolean, onAlertKinds: (Set<AlertKind>) -> Unit,
     outlook: OutlookState, valid: Long?, onOutlook: (OutlookType?) -> Unit,
-    lightning: LightningState, onLightning: (Boolean) -> Unit,
+    lightning: LightningState, onLightning: (Boolean) -> Unit, onLightningLink: () -> Unit = {},
     contours: Boolean, contoursAvailable: Boolean, onContours: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -202,6 +202,7 @@ internal fun OverlayTreeDialog(
                                 Text(" ${c.percent}%", style = MaterialTheme.typography.labelSmall)
                             }
                         }
+                        TextButton(onClick = onLightningLink, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Placefile link\u2026") }
                         if (lightning.busy) Note("Reading…")
                         if (lightning.enabled) lightning.note?.let { Note(it, true) }
                     }

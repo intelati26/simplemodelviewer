@@ -91,6 +91,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     val lightningState by AppContainer.lightning.state.collectAsStateWithLifecycle()
+    var lightningLink by remember { mutableStateOf(false) }
+    if (lightningLink) LightningLinkDialog(AppContainer.lightning.url, onSave = { AppContainer.lightning.setUrl(it) }, onDismiss = { lightningLink = false })
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
@@ -264,7 +266,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         onRadarProduct = { overlayPicker = true }, onThreshold = vm::setOverlayThreshold,
         alertKinds = s.alertKinds, alertsAsOf = s.alertsAsOf, alertNote = s.alertNote, newestOnly = s.index != s.files.lastIndex, onAlertKinds = vm::setAlertKinds,
         outlook = outlookState, valid = s.file?.validTime, onOutlook = { AppContainer.outlook.setType(it) },
-        lightning = lightningState, onLightning = { AppContainer.lightning.setEnabled(it) },
+        lightning = lightningState, onLightning = { on -> if (on && AppContainer.lightning.url == null) lightningLink = true else AppContainer.lightning.setEnabled(on) },
+        onLightningLink = { lightningLink = true },
         contours = s.settings.contours, contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null,
         onContours = { vm.setSettings(s.settings.copy(contours = it)) },
         onDismiss = { overlayTree = false },

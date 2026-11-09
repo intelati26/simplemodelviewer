@@ -16,7 +16,13 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,4 +133,36 @@ internal fun LightningCastRow(state: LightningState, onToggle: () -> Unit) {
         }
         if (state.enabled) state.note?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
     }
+}
+
+/**
+ * Asks for the LightningCast placefile's link. The app does not carry it: it is published on CIMSS's page for GRLevelX users, and the user copies it from there
+ * and pastes it here ([onSave] gets the text and says whether it was kept).
+ */
+@Composable
+internal fun LightningLinkDialog(current: String?, onSave: (String) -> Boolean, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(current.orEmpty()) }
+    var bad by remember { mutableStateOf(false) }
+    val uri = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("LightningCast") },
+        text = {
+            Column {
+                Text(
+                    "The chance of lightning in the next hour, from NOAA and CIMSS (GOES-East). The placefile's link is published on CIMSS's page, where it is public for " +
+                        "GRLevelX users: open the page, copy the link and paste it here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                TextButton(onClick = { uri.openUri(simplemodelview.LightningCast.INFO_PAGE) }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Open the page") }
+                OutlinedTextField(
+                    text, { text = it; bad = false }, singleLine = true, label = { Text("Placefile link") }, isError = bad,
+                    supportingText = { if (bad) Text("That is not an https link") },
+                )
+                Text("Unofficial copy of the data: not for safety decisions.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = { if (onSave(text)) onDismiss() else bad = true }, enabled = text.isNotBlank()) { Text("Save and show") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
