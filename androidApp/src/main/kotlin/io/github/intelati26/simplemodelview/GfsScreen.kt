@@ -77,7 +77,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
     // the level and color chips look at the wind products of every level and color
     val windProducts = remember {
-        GfsCatalog.levels.flatMap { l -> WindProducts.colors.mapNotNull { c -> GfsCatalog.windId(l, c.key) } }.map { Product(it, "", "", Style(), false, null, Grid.REFS) }
+        (GfsCatalog.levels + WindProducts.STACK).flatMap { l -> WindProducts.colors.mapNotNull { c -> GfsCatalog.windId(l, c.key) } }.map { Product(it, "", "", Style(), false, null, Grid.REFS) }
     }
 
     Box(Modifier.fillMaxSize().background(mapBackground)) {

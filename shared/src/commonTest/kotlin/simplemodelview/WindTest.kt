@@ -109,4 +109,30 @@ class WindTest {
         val calm = WindBarbs.glyphs(FloatArray(64), v, grid, view, 8f, 6f)
         assertTrue(calm.isEmpty())
     }
+
+    @Test fun theStackHasItsOwnIdsAndEightPlanes() {
+        assertEquals("windstack_mean", WindProducts.id(WindProducts.STACK))
+        assertEquals(WindProducts.STACK, WindProducts.level("windstack_mean"))
+        val td = WindProducts.colors.first { it.key == "td2m" }
+        assertEquals("windstack_td2m_mean", WindProducts.id(WindProducts.STACK, td))
+        assertEquals(WindProducts.STACK to td, WindProducts.parse("windstack_td2m_mean"))
+        assertEquals("t500_mean", WindProducts.colorSource(WindProducts.STACK, WindProducts.colors.first { it.key == "tlev" }))
+        assertEquals(listOf("z500_mean", "u850_mean", "v850_mean", "u700_mean", "v700_mean", "u500_mean", "v500_mean"), WindProducts.stackSources())
+        val cells = 2
+        val winds = (0 until 6).map { k -> FloatArray(cells) { (k * 10 + it).toFloat() } }
+        val frame = WindProducts.packStack(cells, floatArrayOf(5000f, 5100f), winds)
+        assertEquals(cells * WindProducts.STACK_PLANES, frame.size)
+        assertTrue(WindProducts.isStackFrame(frame, cells))
+        assertEquals(5100f, frame[cells * WindProducts.HEIGHT + 1])
+        assertEquals(winds[2][1], frame[cells * WindProducts.stackU(1) + 1])       // 700 mb u
+        assertEquals(winds[5][0], frame[cells * WindProducts.stackV(2)])           // 500 mb v
+        assertEquals(WindProducts.speed(winds[4][0], winds[5][0]), frame[0])       // the first plane: the 500 mb speed
+        assertEquals(WindProducts.STACK, WindProducts.planeLevel("windstack_mean"))
+    }
+
+    @Test fun theStackNeedsTheMessagesOfThreeLevels() {
+        val wanted = GfsRepository(object : Http { override suspend fun get(url: String) = HttpResult(404, ByteArray(0)) }, StubCore).windMessages(WindProducts.STACK, "speed")
+        assertEquals(listOf("HGT:500 mb", "UGRD:850 mb", "VGRD:850 mb", "UGRD:700 mb", "VGRD:700 mb", "UGRD:500 mb", "VGRD:500 mb"), wanted.map { "${it.variable}:${it.level}" })
+        assertEquals("TMP:500 mb", GfsRepository(object : Http { override suspend fun get(url: String) = HttpResult(404, ByteArray(0)) }, StubCore).windMessages(WindProducts.STACK, "tlev").last().let { "${it.variable}:${it.level}" })
+    }
 }

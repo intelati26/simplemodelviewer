@@ -141,7 +141,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
             sector = Sector.all.firstOrNull { it.name == prefs.getString("sector", null) } ?: Sector.all[0],
             loopLength = prefs.getInt("loop_frames", 0),
-            windLevel = prefs.getInt("wind_level", 500).takeIf { it in WindProducts.levels } ?: 500,
+            windLevel = prefs.getInt("wind_level", 500).takeIf { it in WindProducts.levels || it == WindProducts.STACK } ?: 500,
             windColor = prefs.getString("wind_color", "speed")?.takeIf { k -> WindProducts.colors.any { it.key == k } } ?: "speed",
         )
     )

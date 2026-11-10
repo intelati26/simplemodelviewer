@@ -12,6 +12,19 @@ import kotlin.math.roundToInt
  */
 object WindProducts {
     val levels = listOf(250, 300, 500, 700, 850)
+
+    /**
+     * The stack: the height of 500 mb and the winds of 850, 700 and 500 mb drawn together, a barb set per level in its own color. It is a pseudo level of the
+     * wind products: its frame has [STACK_PLANES] planes (the color field or the 500 mb speed, the 500 mb height, then u and v of [stackLevels] in turn).
+     */
+    const val STACK = 0
+    val stackLevels = listOf(850, 700, 500)
+    const val STACK_PLANES = 8
+    fun stackU(i: Int) = 2 + 2 * i
+    fun stackV(i: Int) = 3 + 2 * i
+    /** The store arrays of the stack: the 500 mb height, then u and v of each of [stackLevels]. */
+    fun stackSources(): List<String> = listOf("z500_mean") + stackLevels.flatMap { listOf("u${it}_mean", "v${it}_mean") }
+    fun isStackFrame(values: FloatArray, cells: Int) = values.size >= cells * STACK_PLANES
     /** Degrees the map's north is turned per degree of longitude from 97.5 W, for the Lambert conformal projection of the REFS and sector grids (n = sin 38.5 N). */
     const val CONVERGENCE = 0.6225
 
@@ -21,8 +34,8 @@ object WindProducts {
     const val V = 3
     const val PLANES = 4
 
-    fun id(level: Int) = "wind${level}_mean"
-    fun level(id: String): Int? = levels.firstOrNull { id == id(it) }
+    fun id(level: Int) = if (level == STACK) "windstack_mean" else "wind${level}_mean"
+    fun level(id: String): Int? = (levels + STACK).firstOrNull { id == id(it) }
     /** What can be in color under a level's height contours and barbs: the wind speed itself or another field ([source] = the store array, `%d` the level). */
     class Color(val key: String, val title: String, val source: String?)
     val colors = listOf(
@@ -35,16 +48,16 @@ object WindProducts {
     )
 
     /** The id of the virtual product of [level] drawn over [color]: `wind500_mean` for the speed, `wind500_t2m_mean` and so on for the others. */
-    fun id(level: Int, color: Color) = if (color.source == null) id(level) else "wind${level}_${color.key}_mean"
+    fun id(level: Int, color: Color) = if (color.source == null) id(level) else if (level == STACK) "windstack_${color.key}_mean" else "wind${level}_${color.key}_mean"
 
     /** The level and color of a virtual product id, or null. */
     fun parse(id: String): Pair<Int, Color>? {
-        for (l in levels) for (c in colors) if (id == id(l, c)) return l to c
+        for (l in levels + STACK) for (c in colors) if (id == id(l, c)) return l to c
         return null
     }
 
     /** The store array behind the color of [level]'s product (null for the wind speed, which is computed). */
-    fun colorSource(level: Int, color: Color): String? = color.source?.let { if ("%d" in it) it.format(level) else it }
+    fun colorSource(level: Int, color: Color): String? = color.source?.let { if ("%d" in it) it.format(if (level == STACK) 500 else level) else it }
 
     /** The picker's single entry for all of these: the level and the color are chosen with chips beside the product. */
     const val CHOOSER_ID = "heightwind"
@@ -68,6 +81,15 @@ object WindProducts {
         height.copyInto(out, cells, 0, cells)
         u.copyInto(out, cells * U, 0, cells)
         v.copyInto(out, cells * V, 0, cells)
+        return out
+    }
+
+    /** The frame of the stack: [color] (or the speed of 500 mb), the 500 mb [height], then [winds] = u and v of each of [stackLevels] (six planes). */
+    fun packStack(cells: Int, height: FloatArray, winds: List<FloatArray>, color: FloatArray? = null): FloatArray {
+        val out = FloatArray(cells * STACK_PLANES)
+        if (color != null) color.copyInto(out, 0, 0, cells) else for (i in 0 until cells) out[i] = speed(winds[4][i], winds[5][i])
+        height.copyInto(out, cells, 0, cells)
+        for (k in winds.indices) winds[k].copyInto(out, cells * (2 + k), 0, cells)
         return out
     }
 
