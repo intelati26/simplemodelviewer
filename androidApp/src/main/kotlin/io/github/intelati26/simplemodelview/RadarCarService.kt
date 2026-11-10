@@ -1,6 +1,8 @@
 package io.github.intelati26.simplemodelview
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ApplicationInfo
 import androidx.car.app.CarAppService
 import androidx.car.app.Screen
@@ -32,4 +34,22 @@ internal class CarInfoScreen(carContext: androidx.car.app.CarContext, private va
     override fun onGetTemplate(): androidx.car.app.model.Template = androidx.car.app.model.PaneTemplate.Builder(
         androidx.car.app.model.Pane.Builder().addRow(androidx.car.app.model.Row.Builder().setTitle(text).build()).build(),
     ).setHeader(androidx.car.app.model.Header.Builder().setTitle("simplemodelview").setStartHeaderAction(androidx.car.app.model.Action.APP_ICON).build()).build()
+}
+
+/**
+ * What the phone can say about the car app, for Settings: whether the system finds the car service and in which category, whether the car permissions are
+ * granted, and which Android Auto is installed. Android Auto logs nothing when it hides an app, so this is what the phone side shows.
+ */
+@Suppress("DEPRECATION")
+internal fun carAppStatus(context: Context): String {
+    val pm = context.packageManager
+    val found = pm.queryIntentServices(Intent("androidx.car.app.CarAppService").setPackage(context.packageName), PackageManager.GET_RESOLVED_FILTER)
+    val service = found.firstOrNull()
+    val categories = service?.filter?.categoriesIterator()?.asSequence()?.map { it.removePrefix("androidx.car.app.category.") }?.joinToString(", ").orEmpty()
+    val permissions = listOf("androidx.car.app.MAP_TEMPLATES", "androidx.car.app.ACCESS_SURFACE")
+        .joinToString(", ") { it.substringAfterLast('.') + if (context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED) " yes" else " NO" }
+    val auto = try { pm.getPackageInfo("com.google.android.projection.gearhead", 0).versionName ?: "?" } catch (e: Exception) { null }
+    return "Car service: " + (if (service == null) "NOT FOUND" else "found ($categories)") +
+        "\nPermissions: $permissions" +
+        "\nAndroid Auto: " + (auto ?: "not installed (or not visible)")
 }

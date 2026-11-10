@@ -609,6 +609,10 @@ internal fun SettingsDialog(
                     onChange(settings.copy(optionsInExport = it))
                 }
                 Column {
+                    Text("Android Auto")
+                    Text(carAppStatus(androidx.compose.ui.platform.LocalContext.current), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Column {
                     var stats by remember { mutableStateOf(AppContainer.gribStore.stats()) }
                     Text("Downloaded model data (GFS and NBM GRIB)")
                     Text(
