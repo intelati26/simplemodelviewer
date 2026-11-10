@@ -36,6 +36,9 @@ class Overlay(
  */
 class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false, val shade: Boolean = false, val heavy: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
 
+/** How many barbs the density levels (1 to 5) put across a picture's width. */
+internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f }
+
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
     fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0): Bitmap {
@@ -111,7 +114,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
-        val across = when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f }
+        val across = barbsAcross(barbDensity)
         // the stack draws three sets from the same point (as stacked barbs are drawn), so its lattice is a little sparser
         val spacing = pictureWidth / if (stack) across * 0.8f else across
         // SPC's mesoanalysis barbs measure about 0.8 of their spacing corner to corner and are drawn with thin lines: lighter than the contours' lines

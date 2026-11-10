@@ -413,7 +413,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
         val bitmap = withContext(Dispatchers.Default) {
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -637,7 +637,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             val size = 1500
             val globeProduct = synthetic(st.product, field.grid)
             val bitmap = withContext(Dispatchers.Default) {
-                globeRenderer.render(field.grid, field.values, globeProduct.style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false)
+                globeRenderer.render(field.grid, field.values, globeProduct.style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false, product = globeProduct, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
             }
             return Triple(bitmap, globeProduct, globeProduct.style)
         }

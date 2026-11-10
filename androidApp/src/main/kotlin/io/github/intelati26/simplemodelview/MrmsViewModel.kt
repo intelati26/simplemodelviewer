@@ -807,7 +807,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
         val bitmap = withContext(Dispatchers.Default) {
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -1004,7 +1004,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             val size = 1500
             val bitmap = withContext(Dispatchers.Default) {
-                globeRenderer.render(frame.window.grid, frame.window.values, style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false)
+                globeRenderer.render(frame.window.grid, frame.window.values, style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
             }
             return bitmap to style
         }

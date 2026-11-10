@@ -443,7 +443,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val (bitmap, style) = withContext(Dispatchers.Default) {
             val style = withAutoStops(product.style, data)
-            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark) to style
+            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity) to style
         }
         update { it.copy(map = bitmap, style = style, busy = false) }
     }
@@ -741,7 +741,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (area == ShareArea.Globe && globeW > 0) {
             val size = 1500
             val h = size * globeH / globeW
-            globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
+            globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
         } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
