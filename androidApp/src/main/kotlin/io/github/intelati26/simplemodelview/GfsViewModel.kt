@@ -37,7 +37,7 @@ internal val GFS_SECTORS = listOf(
     Sector("North America", -170.0, 8.0, -50.0, 72.0),
     Sector("Pacific", -180.0, 5.0, -105.0, 62.0),
     Sector("Atlantic", -105.0, 5.0, -10.0, 62.0),
-)
+) + Sector.all.drop(1)         // and the regional sectors of the other pages (Midwest, Great Lakes, ...)
 
 data class GfsState(
     val busy: Boolean = true,

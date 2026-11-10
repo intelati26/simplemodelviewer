@@ -112,8 +112,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
         val across = when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f }
-        // the stack draws three sets, so its lattice is a third sparser, each set a little to the side of the point
-        val spacing = pictureWidth / if (stack) across * 0.65f else across
+        // the stack draws three sets from the same point (as stacked barbs are drawn), so its lattice is a little sparser
+        val spacing = pictureWidth / if (stack) across * 0.8f else across
         // SPC's mesoanalysis barbs measure about 0.8 of their spacing corner to corner and are drawn with thin lines: lighter than the contours' lines
         val width = maxOf(1.2f, pictureWidth / 1300f)
         val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
@@ -141,12 +141,12 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             drawSet(WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.7f), ink, 0f)
             return
         }
-        // 850 mb green, 700 mb blue, 500 mb red (lighter on a dark map), left to right
+        // 850 mb green, 700 mb blue, 500 mb red (lighter on a dark map), all from the grid point; the lower levels are drawn first so the 500 mb barb is on top
         val inks = if (dark) listOf(0xFF5EDC8A.toInt(), 0xFF6CB4FF.toInt(), 0xFFFF7A7A.toInt()) else listOf(0xFF157A3A.toInt(), 0xFF1F5FBF.toInt(), 0xFFC62828.toInt())
         for (k in WindProducts.stackLevels.indices) {
             val u = WindProducts.plane(values, cells, WindProducts.stackU(k))
             val v = WindProducts.plane(values, cells, WindProducts.stackV(k))
-            drawSet(WindBarbs.glyphs(u, v, product.grid, view, spacing, spacing * 0.6f), inks[k], (k - 1) * spacing * 0.3f)
+            drawSet(WindBarbs.glyphs(u, v, product.grid, view, spacing, spacing * 0.7f), inks[k], 0f)
         }
         // the key, in the picture so a shared picture has it too
         val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(14f, pictureWidth / 70f); isFakeBoldText = true }
