@@ -6,7 +6,7 @@ package simplemodelview
  */
 object ProbSevere {
     /** The page that publishes the placefile links. */
-    const val INFO_PAGE = "https://cimss.ssec.wisc.edu/probsevere/"
+    const val INFO_PAGE = "https://cimss.ssec.wisc.edu/probsevere/ps/"
 }
 
 /**
