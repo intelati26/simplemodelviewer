@@ -6,6 +6,7 @@ import android.content.Context
 import simplemodelview.AlertsRepository
 import simplemodelview.GfsRepository
 import simplemodelview.LightningCastRepository
+import simplemodelview.ProbSevereRepository
 import simplemodelview.MrmsRepository
 import simplemodelview.NbmRepository
 import simplemodelview.OutlookRepository
@@ -47,6 +48,7 @@ object AppContainer {
     val nbm by lazy { NbmRepository(http, core, gribStore) }
     val gfs by lazy { GfsRepository(http, core, gribStore) }
     val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
+    val probSevere by lazy { ProbSevereModel(ProbSevereRepository(http) { prefs.getString("probsevere_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val alerts by lazy { AlertsRepository(http) }
 }

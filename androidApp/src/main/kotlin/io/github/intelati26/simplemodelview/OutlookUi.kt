@@ -135,26 +135,37 @@ internal fun LightningCastRow(state: LightningState, onToggle: () -> Unit) {
     }
 }
 
+/** Asks for the LightningCast placefile's link (see [PlacefileLinkDialog]). */
+@Composable
+internal fun LightningLinkDialog(current: String?, onSave: (String) -> Boolean, onDismiss: () -> Unit) = PlacefileLinkDialog(
+    "LightningCast", "The chance of lightning in the next hour, from NOAA and CIMSS (GOES-East).", simplemodelview.LightningCast.INFO_PAGE, current, onSave, onDismiss,
+)
+
+/** Asks for the ProbSevere placefile's link (see [PlacefileLinkDialog]). */
+@Composable
+internal fun ProbSevereLinkDialog(current: String?, onSave: (String) -> Boolean, onDismiss: () -> Unit) = PlacefileLinkDialog(
+    "ProbSevere", "Storm outlines with their chances of severe weather, from NOAA and CIMSS (built on MRMS).", simplemodelview.ProbSevere.INFO_PAGE, current, onSave, onDismiss,
+)
+
 /**
- * Asks for the LightningCast placefile's link. The app does not carry it: it is published on CIMSS's page for GRLevelX users, and the user copies it from there
- * and pastes it here ([onSave] gets the text and says whether it was kept).
+ * Asks for a placefile's link. The app does not carry it: it is published on the provider's page, public for GRLevelX users, and the user copies it from
+ * there and pastes it here ([onSave] gets the text and says whether it was kept).
  */
 @Composable
-internal fun LightningLinkDialog(current: String?, onSave: (String) -> Boolean, onDismiss: () -> Unit) {
+internal fun PlacefileLinkDialog(title: String, what: String, page: String, current: String?, onSave: (String) -> Boolean, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(current.orEmpty()) }
     var bad by remember { mutableStateOf(false) }
     val uri = LocalUriHandler.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("LightningCast") },
+        title = { Text(title) },
         text = {
             Column {
                 Text(
-                    "The chance of lightning in the next hour, from NOAA and CIMSS (GOES-East). The placefile's link is published on CIMSS's page, where it is public for " +
-                        "GRLevelX users: open the page, copy the link and paste it here.",
+                    "$what The placefile's link is published on CIMSS's page, where it is public for GRLevelX users: open the page, copy the link and paste it here.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                TextButton(onClick = { uri.openUri(simplemodelview.LightningCast.INFO_PAGE) }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Open the page") }
+                TextButton(onClick = { uri.openUri(page) }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Open the page") }
                 OutlinedTextField(
                     text, { text = it; bad = false }, singleLine = true, label = { Text("Placefile link") }, isError = bad,
                     supportingText = { if (bad) Text("That is not an https link") },

@@ -55,6 +55,7 @@ import simplemodelview.overlayThresholdChoices
 /** One line for the strip under the map: what is drawn over it ("Overlays: Rotation, Warnings, Day 2 tornado, LightningCast"), or "Overlays: none". */
 internal fun overlaySummary(
     layers: List<OverlayLayer>, alertKinds: Set<AlertKind>, outlook: OutlookState, valid: Long?, lightning: LightningState, contours: Boolean = false,
+    probSevere: ProbSevereState = ProbSevereState(),
 ): String {
     val now = System.currentTimeMillis() / 1000
     val parts = buildList {
@@ -62,6 +63,7 @@ internal fun overlaySummary(
         if (alertKinds.isNotEmpty()) add(alertKinds.sortedBy { it.ordinal }.joinToString(", ") { it.label })
         outlook.type?.let { add(outlookChoiceFor(it, valid ?: now, now)?.label ?: it.label) }
         if (lightning.enabled) add("LightningCast")
+        if (probSevere.enabled) add("ProbSevere")
         if (contours) add("Contours")
     }
     return if (parts.isEmpty()) "Overlays: none" else "Overlays: " + parts.joinToString(", ")
@@ -79,6 +81,7 @@ internal fun OverlayTreeDialog(
     alertKinds: Set<AlertKind>, alertsAsOf: Long?, alertNote: String?, newestOnly: Boolean, onAlertKinds: (Set<AlertKind>) -> Unit,
     outlook: OutlookState, valid: Long?, onOutlook: (OutlookType?) -> Unit,
     lightning: LightningState, onLightning: (Boolean) -> Unit, onLightningLink: () -> Unit = {},
+    probSevere: ProbSevereState = ProbSevereState(), onProbSevere: (Boolean) -> Unit = {}, onProbSevereLink: () -> Unit = {},
     contours: Boolean, contoursAvailable: Boolean, onContours: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -205,6 +208,23 @@ internal fun OverlayTreeDialog(
                         TextButton(onClick = onLightningLink, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Placefile link\u2026") }
                         if (lightning.busy) Note("Reading…")
                         if (lightning.enabled) lightning.note?.let { Note(it, true) }
+                    }
+                    // ProbSevere
+                    TreeNode("ProbSevere", if (probSevere.enabled) "on" else "off", "probsevere" in open, { toggle("probsevere") }) {
+                        Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Storm objects", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "NOAA and CIMSS ProbSevere: outlines of storms with their chances of severe weather" + (probSevere.asOf?.takeIf { probSevere.enabled }?.let { " \u00B7 read ${formatClock(it)}" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = probSevere.enabled, onCheckedChange = onProbSevere)
+                        }
+                        TextButton(onClick = onProbSevereLink, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Placefile link\u2026") }
+                        if (probSevere.busy) Note("Reading\u2026")
+                        if (probSevere.enabled) probSevere.note?.let { Note(it, true) }
+                        Note("Unofficial copy: use the NWS warnings for decisions.")
                     }
                     // contours
                     TreeNode("Contours", if (!contoursAvailable) "none for this field" else if (contours) "on" else "off", "contours" in open, { toggle("contours") }) {
