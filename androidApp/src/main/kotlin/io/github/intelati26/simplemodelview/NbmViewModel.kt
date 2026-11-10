@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -161,7 +163,13 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
                     if (chosen == null) {
                         var best: Pair<NbmCycle, List<NbmFile>>? = null
                         var older: Pair<NbmCycle, List<NbmFile>>? = null
-                        for (c in cycles.take(6)) {
+                        // the newest two runs are asked about together (the second only matters when the first is still arriving)
+                        val firstTwo = cycles.take(2).map { c -> async { c to repo.listFrames(product.id, c) } }.awaitAll()
+                        for ((c, frames) in firstTwo) {
+                            if (frames.isEmpty()) continue
+                            if (best == null) best = c to frames else { older = c to frames; break }
+                        }
+                        if (best == null) for (c in cycles.drop(2).take(4)) {
                             val frames = repo.listFrames(product.id, c)
                             if (frames.isEmpty()) continue
                             if (best == null) best = c to frames else { older = c to frames; break }
