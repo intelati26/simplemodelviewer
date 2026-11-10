@@ -1,5 +1,8 @@
 package simplemodelview
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+
 /**
  * NOAA's National Blend of Models as the public AWS bucket `noaa-nbm-pds` has it: one GeoTIFF per field and forecast hour under
  * `blendv5.0/conus/<yyyy>/<MM>/<dd>/<HH>00/<field>/blendv5.0_conus_<field>_<run>_<valid>.tif`. A new run starts every hour; every complete run
@@ -212,24 +215,40 @@ class NbmRepository(private val http: Http, private val core: Core, private val 
         return found.ifEmpty { versions.ifEmpty { NbmBucket.VERSIONS } }
     }
 
+    private var cyclesAt = 0L
+    private var cyclesFor = 0
+    private var cycles: List<NbmCycle> = emptyList()
+
+    /** The runs, newest first. The folders of each day and version are asked for at the same time, and the answer is kept for 90 seconds (a retry or a page change asks again). */
     suspend fun listCycles(nowEpochSeconds: Long, hours: Int = 48): List<NbmCycle> {
+        if (cycles.isNotEmpty() && cyclesFor == hours && nowEpochSeconds - cyclesAt in 0..90) return cycles
+        return listCyclesNow(nowEpochSeconds, hours).also { if (it.isNotEmpty()) { cycles = it; cyclesAt = nowEpochSeconds; cyclesFor = hours } }
+    }
+
+    private suspend fun listCyclesNow(nowEpochSeconds: Long, hours: Int): List<NbmCycle> {
         val folders = versionFolders(nowEpochSeconds)
         val found = ArrayList<NbmCycle>()
         val earliest = nowEpochSeconds - hours * 3600L
+        val days = ArrayList<Long>()
         var day = nowEpochSeconds - nowEpochSeconds % 86400L
-        while (day + 86400L > earliest) {
-            val c = civilFromEpoch(day)
-            for (version in folders) {
-                val prefix = "$version/${NbmBucket.REGION}/${c[0]}/${c[1].toString().padStart(2, '0')}/${c[2].toString().padStart(2, '0')}/"
-                val result = http.get("${NbmBucket.URL}/?list-type=2&delimiter=/&prefix=$prefix")
-                if (result.status == 200) {
-                    for (h in parseNbmRunHours(result.body.decodeToString())) {
-                        val cycle = NbmCycle(c[0], c[1], c[2], h, version)
-                        if (cycle.epoch <= nowEpochSeconds + 300 && cycle.epoch >= earliest && found.none { it.epoch == cycle.epoch }) found += cycle    // (the newer version wins a run both have)
-                    }
-                } else if (result.status != 404) throw RefsException("could not list the blend's runs (HTTP ${result.status})")
-            }
-            day -= 86400L
+        while (day + 86400L > earliest) { days += day; day -= 86400L }
+        // one request per day and version, all at once (the order of the answers is what decides which version wins a run both have)
+        val answers = kotlinx.coroutines.coroutineScope {
+            days.flatMap { d -> folders.map { version -> d to version } }.map { (d, version) ->
+                async {
+                    val c = civilFromEpoch(d)
+                    val prefix = "$version/${NbmBucket.REGION}/${c[0]}/${c[1].toString().padStart(2, '0')}/${c[2].toString().padStart(2, '0')}/"
+                    Triple(c, version, http.get("${NbmBucket.URL}/?list-type=2&delimiter=/&prefix=$prefix"))
+                }
+            }.awaitAll()
+        }
+        for ((c, version, result) in answers) {
+            if (result.status == 200) {
+                for (h in parseNbmRunHours(result.body.decodeToString())) {
+                    val cycle = NbmCycle(c[0], c[1], c[2], h, version)
+                    if (cycle.epoch <= nowEpochSeconds + 300 && cycle.epoch >= earliest && found.none { it.epoch == cycle.epoch }) found += cycle    // (the newer version wins a run both have)
+                }
+            } else if (result.status != 404) throw RefsException("could not list the blend's runs (HTTP ${result.status})")
         }
         val tiffs = found.sortedByDescending { it.epoch }
         // when the rendered files are behind, the GRIB runs newer than they are go on top (a field the GRIB files lack falls back to the older rendered run)
