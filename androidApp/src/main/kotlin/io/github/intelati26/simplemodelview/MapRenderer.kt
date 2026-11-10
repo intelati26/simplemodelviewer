@@ -107,8 +107,9 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
             drawContours(canvas, lines, spec.color, dark, pictureWidth)
         }
-        // barbs per picture width: 10 (sparse) to 30 (dense)
-        val spacing = pictureWidth / (when (barbDensity) { 1 -> 10f; 2 -> 15f; 3 -> 20f; 4 -> 25f; else -> 30f })
+        // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
+        // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
+        val spacing = pictureWidth / (when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f })
         val barbs = WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.85f)
         val width = maxOf(1.5f, pictureWidth / 900f)
         val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()
