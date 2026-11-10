@@ -1,15 +1,15 @@
 # Android Auto (weather category)
 
-The phone app also contains a car app, `WeatherCarService`, built with the Car App Library (`androidx.car.app:app`). It is declared in the **weather**
-category, in which an app may draw its own map (radar, temperature, wind) on the car display and show a short content pane beside it.
+The phone app also contains a car app, `RadarCarService`, built with the Car App Library (`androidx.car.app:app`). It is declared in the **points of
+interest** category (it was the beta weather category first, which the host may not list), in which an app may draw its own map (the radar) on the car
+display and show a short content pane beside it. It needs the `MAP_TEMPLATES` and `ACCESS_SURFACE` permissions, both in the manifest.
 
 ## Status
 
 This is an **initial sketch**. It compiles in CI but has not been run on a car or on the Desktop Head Unit, so the host may reject a template
 or a button that the library accepts at build time.
 
-Google's weather category is in **beta**: apps can be published to Play's internal, closed and open testing tracks; production release is to
-follow. Check the Play Console policy pages before planning a launch.
+The weather category is in **beta** (Play's testing tracks only), which is why the app moved to the points-of-interest category. Check the Play Console's car app policies for that category before planning a launch.
 
 ## What it does now
 
@@ -22,13 +22,9 @@ follow. Check the Play Console policy pages before planning a launch.
 
 ## Why the app may not show in the car
 
-Nothing is logged when Android Auto hides a car app. Two silent causes are guarded against:
-
-- **Car API level.** The manifest asks for level 1 only; the radar screen needs 7 (map template). On an older host the app now starts and says "Update Android Auto"
-  instead of vanishing.
-- **Weather category (beta).** A second entry, "simplemodelview (car test)", is declared in the points-of-interest category, which every Android Auto lists. If it
-  appears in the car's launcher and the weather entry does not, the host is hiding the weather category. Sideloaded apps also need "Unknown sources" turned on in
-  Android Auto's developer settings.
+Nothing is logged when Android Auto hides a car app. The manifest asks for car API level 1 only and the radar screen needs 7 (map template): on an older host
+the app starts and says "Update Android Auto" instead of vanishing. Sideloaded apps also need "Unknown sources" turned on in Android Auto's developer settings.
+If the radar screen is rejected by the host in this category, the fallback is the POI-native `PlaceListMapTemplate`.
 
 ## Not done yet
 
@@ -46,5 +42,5 @@ Nothing is logged when Android Auto hides a car app. Two silent causes are guard
 
 ## Files
 
-`WeatherCarService.kt` (service and host validator), `RadarCarScreen.kt` (template and surface drawing), `CarRadar.kt` (loading and drawing the scan),
+`RadarCarService.kt` (service, host validator and the info screen), `RadarCarScreen.kt` (template and surface drawing), `CarRadar.kt` (loading and drawing the scan),
 `res/xml/automotive_app_desc.xml`, and the service, permission (`androidx.car.app.MAP_TEMPLATES`) and meta-data in `AndroidManifest.xml`.

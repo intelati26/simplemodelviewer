@@ -8,10 +8,11 @@ import androidx.car.app.Session
 import androidx.car.app.validation.HostValidator
 
 /**
- * The Android Auto (and Android Automotive) entry point: a weather app in the Car App Library's weather category. The category is in beta: apps can go
- * to Play's testing tracks, production release comes later. See docs/android-auto.md.
+ * The Android Auto (and Android Automotive) entry point: a points-of-interest app in the Car App Library, the category every Android Auto lists and that may
+ * draw its own map surface (the radar) with a pane beside it. It was a weather-category app first; that category is in beta and the host may hide it. See
+ * docs/android-auto.md.
  */
-class WeatherCarService : CarAppService() {
+class RadarCarService : CarAppService() {
     // any host while the app is a debug build (the Desktop Head Unit); in a release build only the hosts the library lists as Google's
     override fun createHostValidator(): HostValidator =
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
@@ -25,21 +26,6 @@ class WeatherCarService : CarAppService() {
     }
 
     private companion object { const val RADAR_API_LEVEL = 7 }
-}
-
-/**
- * A test entry in the points-of-interest category, which every Android Auto offers (the weather category is in beta and may not be listed). If this shows in the
- * car's launcher and the weather entry does not, the weather category is what the host is hiding. It shows the host's car API level.
- */
-class DiagnosticCarService : CarAppService() {
-    override fun createHostValidator(): HostValidator =
-        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
-        else HostValidator.Builder(applicationContext).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
-
-    override fun onCreateSession(): Session = object : Session() {
-        override fun onCreateScreen(intent: Intent): Screen =
-            CarInfoScreen(carContext, "The car app starts. Host car API level ${carContext.carAppApiLevel}; the radar needs 7. If the weather entry is missing, the host hides that category.")
-    }
 }
 
 internal class CarInfoScreen(carContext: androidx.car.app.CarContext, private val text: String) : Screen(carContext) {
