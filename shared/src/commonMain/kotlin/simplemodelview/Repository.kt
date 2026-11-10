@@ -88,18 +88,20 @@ class RefsRepository(private val http: Http, private val core: Core) {
     /** A wind product's frame: the height, u and v chunks of one time, fetched together and packed (see [WindProducts.pack]); all NaN if one is missing. */
     private suspend fun readWind(store: CycleStore, product: Product, level: Int, timeIndex: Int): Frame {
         val cells = product.grid.cells
-        val (z, u, v) = WindProducts.sources(level)
-        val colorArray = WindProducts.parse(product.id)?.let { (l, c) -> WindProducts.colorSource(l, c) }      // a color field is fetched with the other three
+        val stack = level == WindProducts.STACK
+        val sources = if (stack) WindProducts.stackSources() else WindProducts.sources(level).toList()
+        val colorArray = WindProducts.parse(product.id)?.let { (l, c) -> WindProducts.colorSource(l, c) }      // a color field is fetched with the others
         val fetched = coroutineScope {
-            (listOf(z, u, v) + listOfNotNull(colorArray)).map { name -> async { store.arrays.getValue(name).let { a -> a to fetchChunk(store.cycle, a, listOf(timeIndex, 0, 0)) } } }.awaitAll()
+            (sources + listOfNotNull(colorArray)).map { name -> async { store.arrays.getValue(name).let { a -> a to fetchChunk(store.cycle, a, listOf(timeIndex, 0, 0)) } } }.awaitAll()
         }
-        if (fetched.any { it.second == null }) return Frame(FloatArray(cells * WindProducts.PLANES) { Float.NaN }, null)
+        if (fetched.any { it.second == null }) return Frame(FloatArray(cells * (if (stack) WindProducts.STACK_PLANES else WindProducts.PLANES)) { Float.NaN }, null)
         val planes = try {
             fetched.map { (array, chunk) -> core.decodeFloats(chunk!!.body, array.dtype, array.compressed, cells) }
         } catch (e: Exception) {
             throw RefsException("could not decode ${product.id}: ${e.message}")
         }
-        return Frame(WindProducts.pack(cells, planes[0], planes[1], planes[2], planes.getOrNull(3)), fetched[1].second?.lastModified)
+        val packed = if (stack) WindProducts.packStack(cells, planes[0], planes.subList(1, 7), planes.getOrNull(7)) else WindProducts.pack(cells, planes[0], planes[1], planes[2], planes.getOrNull(3))
+        return Frame(packed, fetched[1].second?.lastModified)
     }
 
     /** A paintball-contour product's frame: every member's chunk of one time, folded into the member bit mask (see [PaintballLines.mask]); all NaN if none is there. */
@@ -120,9 +122,9 @@ class RefsRepository(private val http: Http, private val core: Core) {
     /** Downloads a frame's chunk without decoding it, so an HTTP cache has it for the loop. */
     suspend fun prefetchFrame(store: CycleStore, product: Product, timeIndex: Int, memberIndex: Int) {
         WindProducts.planeLevel(product.id)?.let { level ->
-            val (z, u, v) = WindProducts.sources(level)
+            val sources = if (level == WindProducts.STACK) WindProducts.stackSources() else WindProducts.sources(level).toList()
             val colorArray = WindProducts.parse(product.id)?.let { (l, c) -> WindProducts.colorSource(l, c) }
-            for (name in listOf(z, u, v) + listOfNotNull(colorArray)) fetchChunk(store.cycle, store.arrays.getValue(name), listOf(timeIndex, 0, 0))
+            for (name in sources + listOfNotNull(colorArray)) fetchChunk(store.cycle, store.arrays.getValue(name), listOf(timeIndex, 0, 0))
             return
         }
         PaintballLines.spec(product.id)?.let { spec ->

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import simplemodelview.BarbGlyph
 import simplemodelview.ContourLine
 import simplemodelview.ContourSpec
 import simplemodelview.Contours
@@ -103,34 +104,60 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
     /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
     private fun drawWind(canvas: Canvas, product: Product, values: FloatArray, level: Int, view: View, dark: Boolean, pictureWidth: Int, contours: Boolean, barbDensity: Int) {
         val cells = product.grid.cells
-        if (contours) Contours.specFor("z$level", "m")?.let { spec ->
+        val stack = level == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
+        if (contours) Contours.specFor("z${if (level == WindProducts.STACK) 500 else level}", "m")?.let { spec ->
             val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
             drawContours(canvas, lines, spec.color, dark, pictureWidth)
         }
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
-        val spacing = pictureWidth / (when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f })
-        val barbs = WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.7f)
+        val across = when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f }
+        // the stack draws three sets, so its lattice is a third sparser, each set a little to the side of the point
+        val spacing = pictureWidth / if (stack) across * 0.65f else across
         // SPC's mesoanalysis barbs measure about 0.8 of their spacing corner to corner and are drawn with thin lines: lighter than the contours' lines
         val width = maxOf(1.2f, pictureWidth / 1300f)
-        val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()
         val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        val path = android.graphics.Path()
-        val flags = android.graphics.Path()
-        for (b in barbs) {
-            var i = 0
-            while (i + 3 < b.lines.size) { path.moveTo(b.lines[i], b.lines[i + 1]); path.lineTo(b.lines[i + 2], b.lines[i + 3]); i += 4 }
-            i = 0
-            while (i + 5 < b.pennants.size) {
-                flags.moveTo(b.pennants[i], b.pennants[i + 1]); flags.lineTo(b.pennants[i + 2], b.pennants[i + 3]); flags.lineTo(b.pennants[i + 4], b.pennants[i + 5]); flags.close()
-                i += 6
+        /** One set of barbs in [ink], moved [dx] pixels sideways. */
+        fun drawSet(barbs: List<BarbGlyph>, ink: Int, dx: Float) {
+            val path = android.graphics.Path()
+            val flags = android.graphics.Path()
+            for (b in barbs) {
+                var i = 0
+                while (i + 3 < b.lines.size) { path.moveTo(b.lines[i] + dx, b.lines[i + 1]); path.lineTo(b.lines[i + 2] + dx, b.lines[i + 3]); i += 4 }
+                i = 0
+                while (i + 5 < b.pennants.size) {
+                    flags.moveTo(b.pennants[i] + dx, b.pennants[i + 1]); flags.lineTo(b.pennants[i + 2] + dx, b.pennants[i + 3]); flags.lineTo(b.pennants[i + 4] + dx, b.pennants[i + 5]); flags.close()
+                    i += 6
+                }
             }
+            line.strokeWidth = width + 2f; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
+            line.strokeWidth = width; line.color = ink; canvas.drawPath(path, line)
+            fill.color = ink; canvas.drawPath(flags, fill)
         }
-        line.strokeWidth = width + 2f; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
-        line.strokeWidth = width; line.color = ink; canvas.drawPath(path, line)
-        fill.color = ink; canvas.drawPath(flags, fill)
+        if (!stack) {
+            val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()
+            drawSet(WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.7f), ink, 0f)
+            return
+        }
+        // 850 mb green, 700 mb blue, 500 mb red (lighter on a dark map), left to right
+        val inks = if (dark) listOf(0xFF5EDC8A.toInt(), 0xFF6CB4FF.toInt(), 0xFFFF7A7A.toInt()) else listOf(0xFF157A3A.toInt(), 0xFF1F5FBF.toInt(), 0xFFC62828.toInt())
+        for (k in WindProducts.stackLevels.indices) {
+            val u = WindProducts.plane(values, cells, WindProducts.stackU(k))
+            val v = WindProducts.plane(values, cells, WindProducts.stackV(k))
+            drawSet(WindBarbs.glyphs(u, v, product.grid, view, spacing, spacing * 0.6f), inks[k], (k - 1) * spacing * 0.3f)
+        }
+        // the key, in the picture so a shared picture has it too
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(14f, pictureWidth / 70f); isFakeBoldText = true }
+        var x = pictureWidth / 60f
+        val y = view.pixelHeight - pictureWidth / 60f
+        for (k in WindProducts.stackLevels.indices) {
+            val label = "${WindProducts.stackLevels[k]} mb"
+            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(label, x, y, text)
+            text.style = Paint.Style.FILL; text.color = inks[k]; canvas.drawText(label, x, y, text)
+            x += text.measureText("$label   ")
+        }
     }
 
     /** Contour lines over the data and the map lines: a halo under each line so it reads on any color, heavier for the bold levels, one label per level. */

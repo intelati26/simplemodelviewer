@@ -169,10 +169,11 @@ object Catalog {
     private fun windProducts(arrays: Collection<ArrayInfo>): List<Product> {
         val byName = arrays.associateBy { it.name }
         val out = ArrayList<Product>()
-        for (level in WindProducts.levels) {
-            val (z, u, v) = WindProducts.sources(level)
-            val height = byName[z]?.takeIf { it.isGridField } ?: continue
-            if (byName[u]?.isGridField != true || byName[v]?.isGridField != true) continue
+        for (level in WindProducts.levels + WindProducts.STACK) {
+            val stack = level == WindProducts.STACK
+            val needed = if (stack) WindProducts.stackSources() else WindProducts.sources(level).toList()
+            val height = byName[needed[0]]?.takeIf { it.isGridField } ?: continue
+            if (needed.any { byName[it]?.isGridField != true }) continue
             for (color in WindProducts.colors) {
                 val id = WindProducts.id(level, color)
                 val source = WindProducts.colorSource(level, color)
@@ -180,11 +181,11 @@ object Catalog {
                 val title: String
                 if (source == null) {
                     style = Style(Kind.Banded, Palettes.upperWind, hideBelow = 10.0, units = "kt", digits = 0)
-                    title = curated.getValue(id)
+                    title = curated[id] ?: "500 mb Height with 850 / 700 / 500 mb Wind Barbs"
                 } else {
                     val array = byName[source]?.takeIf { it.isGridField } ?: continue
                     style = describe(array).style
-                    title = "$level mb Height and Wind Barbs over ${color.title}"
+                    title = (if (stack) "500 mb Height with 850 / 700 / 500 mb Wind Barbs" else "$level mb Height and Wind Barbs") + " over ${color.title}"
                 }
                 out += Product(id, title, Groups.SYNOPTIC, style, hasMembers = false, timeDimension = describe(height).timeDimension, grid = height.grid ?: Grid.REFS)
             }

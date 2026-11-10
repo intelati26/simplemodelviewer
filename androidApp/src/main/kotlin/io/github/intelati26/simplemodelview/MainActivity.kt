@@ -421,21 +421,22 @@ private fun RowScope.CycleMenu(current: Cycle?, cycles: List<Cycle>, onPick: (Cy
 @Composable
 internal fun WindChooser(products: List<Product>, level: Int, colorKey: String, onLevel: (Int) -> Unit, onColor: (String) -> Unit) {
     val ids = products.map { it.id }.toSet()
-    val levels = simplemodelview.WindProducts.levels.filter { l -> simplemodelview.WindProducts.id(l) in ids }
+    val levels = (simplemodelview.WindProducts.levels + simplemodelview.WindProducts.STACK).filter { l -> simplemodelview.WindProducts.id(l) in ids }
+    fun levelName(l: Int) = if (l == simplemodelview.WindProducts.STACK) "500 mb height, 850/700/500 winds" else "$l mb"
     val colors = simplemodelview.WindProducts.colors.filter { c -> simplemodelview.WindProducts.id(level, c) in ids }
     Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         var levelOpen by remember { mutableStateOf(false) }
         Box {
-            AssistChip(onClick = { levelOpen = true }, label = { Text("$level mb \u25BE") })
+            AssistChip(onClick = { levelOpen = true }, label = { Text(levelName(level) + " \u25BE") })
             DropdownMenu(expanded = levelOpen, onDismissRequest = { levelOpen = false }) {
-                for (l in levels) DropdownMenuItem(text = { Text("$l mb") }, onClick = { levelOpen = false; onLevel(l) })
+                for (l in levels) DropdownMenuItem(text = { Text(levelName(l)) }, onClick = { levelOpen = false; onLevel(l) })
             }
         }
         var colorOpen by remember { mutableStateOf(false) }
         Box {
             AssistChip(onClick = { colorOpen = true }, label = { Text("Color: " + (colors.firstOrNull { it.key == colorKey }?.title ?: "Wind speed") + " \u25BE") })
             DropdownMenu(expanded = colorOpen, onDismissRequest = { colorOpen = false }) {
-                for (c in colors) DropdownMenuItem(text = { Text(if (c.key == "tlev") "Temperature at $level mb" else c.title) }, onClick = { colorOpen = false; onColor(c.key) })
+                for (c in colors) DropdownMenuItem(text = { Text(if (c.key == "tlev") "Temperature at ${if (level == simplemodelview.WindProducts.STACK) 500 else level} mb" else c.title) }, onClick = { colorOpen = false; onColor(c.key) })
             }
         }
     }

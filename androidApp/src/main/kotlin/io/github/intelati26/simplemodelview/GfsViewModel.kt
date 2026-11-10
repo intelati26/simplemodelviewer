@@ -93,7 +93,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(
         GfsState(
             product = prefs.getString("gfs_product", "hw") ?: "hw",
-            level = prefs.getInt("gfs_level", 500).takeIf { it in GfsCatalog.levels } ?: 500,
+            level = prefs.getInt("gfs_level", 500).takeIf { it in GfsCatalog.levels || it == WindProducts.STACK } ?: 500,
             color = prefs.getString("gfs_color", "speed")?.takeIf { k -> WindProducts.colors.any { it.key == k } } ?: "speed",
             sector = GFS_SECTORS.firstOrNull { it.name == prefs.getString("gfs_sector", null) } ?: GFS_SECTORS[0],
             settings = readSettings(),
@@ -224,7 +224,8 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             val id = GfsCatalog.windId(st.level, st.color) ?: "wind${st.level}_mean"
             val color = WindProducts.colors.firstOrNull { it.key == st.color }
-            title = "${st.level} mb Height and Wind Barbs" + if (color == null || color.source == null) "" else " over ${if (color.key == "tlev" || color.key == "rhlev") color.title.replace("the level", "${st.level} mb") else color.title}"
+            val top = if (st.level == WindProducts.STACK) 500 else st.level
+            title = (if (st.level == WindProducts.STACK) "500 mb Height with 850 / 700 / 500 mb Wind Barbs" else "${st.level} mb Height and Wind Barbs") + if (color == null || color.source == null) "" else " over ${if (color.key == "tlev" || color.key == "rhlev") color.title.replace("the level", "$top mb") else color.title}"
             product = Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color), false, null, target)
         }
         val scale = (1400 / target.columns).coerceIn(2, 8)

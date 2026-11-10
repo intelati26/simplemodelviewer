@@ -62,6 +62,7 @@ object GfsCatalog {
     /** The surface fields (single messages) with their conversions. */
     val surface: List<GfsProduct> = listOf(
         GfsProduct("t2m_gfs", "2-m Temperature", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), ::kelvinToF, GfsMessage("TMP", "2 m above ground")),
+        GfsProduct("td2m_gfs", "2-m Dewpoint", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), ::kelvinToF, GfsMessage("DPT", "2 m above ground")),
         GfsProduct("pmsl_gfs", "Mean Sea-Level Pressure", SURFACE, Style(Kind.Blended, Palettes.rainbow(985.0, 1035.0), units = "hPa", digits = 0), { it / 100f }, GfsMessage("PRMSL", "mean sea level")),
         GfsProduct("pwat_gfs", "Precipitable Water", SURFACE, Style(Kind.Banded, Palettes.precipitableWater, hideBelow = 0.0, units = "in", digits = 2), { it / 25.4f }, GfsMessage("PWAT", "entire atmosphere (considered as a single layer)")),
         GfsProduct("cape_gfs", "Surface-Based CAPE", SURFACE, Style(Kind.Banded, Palettes.cape, hideBelow = 100.0, units = "J/kg", digits = 0), { it }, GfsMessage("CAPE", "surface")),
@@ -197,7 +198,8 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
 
     /** The messages a wind product needs, in the order [loadWind] reads them: height, u, v, and the color field unless it is the speed. */
     fun windMessages(level: Int, colorKey: String): List<GfsMessage> =
-        listOfNotNull(GfsMessage("HGT", "$level mb"), GfsMessage("UGRD", "$level mb"), GfsMessage("VGRD", "$level mb"), GfsCatalog.colorMessage(level, colorKey))
+        if (level == WindProducts.STACK) listOfNotNull(GfsMessage("HGT", "500 mb")) + WindProducts.stackLevels.flatMap { listOf(GfsMessage("UGRD", "$it mb"), GfsMessage("VGRD", "$it mb")) } + listOfNotNull(GfsCatalog.colorMessage(500, colorKey))
+        else listOfNotNull(GfsMessage("HGT", "$level mb"), GfsMessage("UGRD", "$level mb"), GfsMessage("VGRD", "$level mb"), GfsCatalog.colorMessage(level, colorKey))
 
     private val nomadsGate = kotlinx.coroutines.sync.Semaphore(2)     // NOMADS is asked politely: two requests at a time, a short rest after each
 
@@ -343,6 +345,16 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         fun field(m: GfsMessage) = fields.getValue("${m.variable}:${m.level}")
         val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
         val height = plane(field(wanted[0]), { it }, target)
+        if (level == WindProducts.STACK) {
+            val longitudes = core.gridLongitudes(target)
+            val winds = ArrayList<FloatArray>()
+            for (k in WindProducts.stackLevels.indices) {
+                val (su, sv) = GfsWinds.rotate(plane(field(wanted[1 + 2 * k]), knots, target), plane(field(wanted[2 + 2 * k]), knots, target), longitudes)
+                winds += su; winds += sv
+            }
+            val stackColor = wanted.getOrNull(7)?.let { plane(field(it), GfsCatalog.colorConvert(colorKey), target) }
+            return WindProducts.packStack(target.cells, height, winds, stackColor)
+        }
         val east = plane(field(wanted[1]), knots, target)
         val north = plane(field(wanted[2]), knots, target)
         val (u, v) = GfsWinds.rotate(east, north, core.gridLongitudes(target))
