@@ -110,8 +110,9 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
         val spacing = pictureWidth / (when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f })
-        val barbs = WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.85f)
-        val width = maxOf(1.5f, pictureWidth / 900f)
+        val barbs = WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.7f)
+        // SPC's mesoanalysis barbs measure about 0.8 of their spacing corner to corner and are drawn with thin lines: lighter than the contours' lines
+        val width = maxOf(1.2f, pictureWidth / 1300f)
         val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()
         val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
@@ -127,7 +128,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 i += 6
             }
         }
-        line.strokeWidth = width + 2.5f; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
+        line.strokeWidth = width + 2f; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
         line.strokeWidth = width; line.color = ink; canvas.drawPath(path, line)
         fill.color = ink; canvas.drawPath(flags, fill)
     }
