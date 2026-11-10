@@ -73,4 +73,31 @@ class ProbSevereTest {
         assertFailsWith<RefsException> { ProbSevereRepository(FakeHttp(503, "")) { "https://example.org/p" }.load() }
         assertTrue(ProbSevere.INFO_PAGE.startsWith("https://cimss.ssec.wisc.edu/probsevere"))
     }
+
+    @Test fun anHourOfLoopShowsEachSetOnlyAtItsOwnTimes() {
+        val text = """
+            TimeRange: 2026-11-10T00:00:00Z 2026-11-10T00:02:00Z
+            Color: 255 0 0
+            Line: 2, 0
+              35.0, -97.0
+              35.5, -97.0
+            End:
+            TimeRange: 2026-11-10T00:02:00Z 2026-11-10T00:04:00Z
+            Color: 0 255 0
+            Line: 2, 0
+              36.0, -97.0
+              36.5, -97.0
+            End:
+        """.trimIndent()
+        val shapes = parsePlacefileShapes(text)
+        assertEquals(2, shapes.size)
+        val t0 = isoToEpoch("2026-11-10T00:00:00Z")!!
+        assertEquals(listOf(0xFF0000), placeShapesAt(shapes, t0 + 30).map { it.color })
+        assertEquals(listOf(0x00FF00), placeShapesAt(shapes, t0 + 120).map { it.color })
+        assertEquals(0, placeShapesAt(shapes, t0 + 400).size)           // after the last range: nothing is valid
+        assertEquals(0, placeShapesAt(shapes, t0 - 60).size)            // before the first
+        assertEquals(listOf(0x00FF00), placeShapesAt(shapes, null).map { it.color })   // no time: the newest set
+        // a placefile without times always shows
+        assertEquals(4, placeShapesAt(parsePlacefileShapes(placefile), t0).size)
+    }
 }

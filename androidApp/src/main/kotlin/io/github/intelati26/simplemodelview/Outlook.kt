@@ -268,11 +268,11 @@ class ProbSevereModel(private val repo: simplemodelview.ProbSevereRepository, pr
     }
 }
 
-/** The ProbSevere outlines as lines in the pixels of the picture of [view], in the placefile's colors. */
-internal fun probSevereDraws(core: Core, state: ProbSevereState, view: View): List<AlertDraw> {
+/** The ProbSevere outlines valid at [at] (the radar frame's time) as lines in the pixels of the picture of [view], in the placefile's colors. */
+internal fun probSevereDraws(core: Core, state: ProbSevereState, view: View, at: Long?): List<AlertDraw> {
     if (!state.enabled) return emptyList()
     val pixels = view.scale.toFloat() / view.step
-    return state.shapes.map { shape ->
+    return simplemodelview.placeShapesAt(state.shapes, at).map { shape ->
         val p = shape.points
         val out = FloatArray(p.size)
         var i = 0

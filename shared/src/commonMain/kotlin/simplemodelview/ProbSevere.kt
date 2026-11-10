@@ -9,8 +9,25 @@ object ProbSevere {
     const val INFO_PAGE = "https://cimss.ssec.wisc.edu/probsevere/"
 }
 
-/** One outline of a placefile: its color (0xRRGGBB), its points as lat0, lon0, lat1, lon1, ..., and whether the last point joins the first. */
-class PlaceShape(val color: Int, val points: DoubleArray, val closed: Boolean)
+/**
+ * One outline of a placefile: its color (0xRRGGBB), its points as lat0, lon0, lat1, lon1, ..., and whether the last point joins the first. [start] and [end]
+ * (epoch seconds) are the `TimeRange:` it was under: ProbSevere's placefile holds an hour of loop, each set of storm objects valid for its own few minutes.
+ * Both are null for a placefile without times.
+ */
+class PlaceShape(val color: Int, val points: DoubleArray, val closed: Boolean, val start: Long? = null, val end: Long? = null)
+
+/**
+ * The outlines to draw for the time [at] (epoch seconds): those whose time range holds it, and those without a range. A time none of the ranges holds shows
+ * nothing, because the objects are only valid for their own minutes. With no time ([at] null) the newest set shows.
+ */
+fun placeShapesAt(shapes: List<PlaceShape>, at: Long?): List<PlaceShape> {
+    val newest = shapes.mapNotNull { it.start }.maxOrNull()
+    return shapes.filter { sh ->
+        val start = sh.start ?: return@filter true
+        if (at == null) start == newest
+        else at >= start && (sh.end?.let { at < it } ?: (start == newest))
+    }
+}
 
 /**
  * The outlines of a GRLevelX placefile: `Line:` blocks (their points, as they are) and `Polygon:` blocks (closed), each with the `Color: r g b` in force or a
@@ -24,9 +41,11 @@ fun parsePlacefileShapes(text: String): List<PlaceShape> {
     var depth = 0                         // nesting of skipped blocks (an Object holds its own Line / Polygon blocks)
     var points = ArrayList<Double>()
     var blockColor: Int? = null
+    var start: Long? = null
+    var end: Long? = null
     fun rgb(p: List<Int>) = ((p.getOrElse(0) { 0 } and 255) shl 16) or ((p.getOrElse(1) { 0 } and 255) shl 8) or (p.getOrElse(2) { 0 } and 255)
     fun finish() {
-        if (kind == 'L' || kind == 'P') if (points.size >= 4) shapes += PlaceShape(blockColor ?: color, points.toDoubleArray(), kind == 'P')
+        if (kind == 'L' || kind == 'P') if (points.size >= 4) shapes += PlaceShape(blockColor ?: color, points.toDoubleArray(), kind == 'P', start, end)
         points = ArrayList(); blockColor = null; kind = ' '
     }
     for (raw in text.lineSequence()) {
@@ -35,6 +54,11 @@ fun parsePlacefileShapes(text: String): List<PlaceShape> {
         val head = line.substringBefore(':').trim().lowercase()
         val isKeyword = ':' in line && head.all { it.isLetter() }
         when {
+            isKeyword && head == "timerange" -> {
+                val t = line.substringAfter(':').trim().split(' ', ',').filter { it.isNotEmpty() }
+                start = t.getOrNull(0)?.let { isoToEpoch(it) }
+                end = t.getOrNull(1)?.let { isoToEpoch(it) }
+            }
             isKeyword && head == "color" -> {
                 val p = line.substringAfter(':').trim().split(' ', ',').filter { it.isNotEmpty() }.map { it.toIntOrNull() ?: 0 }
                 if (kind == 'L' || kind == 'P') blockColor = rgb(p) else color = rgb(p)
