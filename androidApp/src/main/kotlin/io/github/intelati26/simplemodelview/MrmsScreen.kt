@@ -92,6 +92,9 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     val lightningState by AppContainer.lightning.state.collectAsStateWithLifecycle()
     var lightningLink by remember { mutableStateOf(false) }
+    var probSevereLink by remember { mutableStateOf(false) }
+    val probSevereState by AppContainer.probSevere.state.collectAsStateWithLifecycle()
+    if (probSevereLink) ProbSevereLinkDialog(AppContainer.probSevere.url, onSave = { AppContainer.probSevere.setUrl(it) }, onDismiss = { probSevereLink = false })
     if (lightningLink) LightningLinkDialog(AppContainer.lightning.url, onSave = { AppContainer.lightning.setUrl(it) }, onDismiss = { lightningLink = false })
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -100,7 +103,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
     }
-    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); AppContainer.lightning.refreshIfStale(); vm.setLive(true); onPauseOrDispose { vm.setLive(false) } }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); AppContainer.lightning.refreshIfStale(); AppContainer.probSevere.refreshIfStale(); vm.setLive(true); onPauseOrDispose { vm.setLive(false) } }
     val dark = isSystemInDarkTheme()
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
@@ -168,7 +171,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             val contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null
             // every overlay lives in one tree popup, so the strip under the map is a single line
             TextButton(onClick = { overlayTree = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
-                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable, probSevereState), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
@@ -268,6 +271,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         outlook = outlookState, valid = s.file?.validTime, onOutlook = { AppContainer.outlook.setType(it) },
         lightning = lightningState, onLightning = { on -> if (on && AppContainer.lightning.url == null) lightningLink = true else AppContainer.lightning.setEnabled(on) },
         onLightningLink = { lightningLink = true },
+        probSevere = probSevereState, onProbSevere = { on -> if (on && AppContainer.probSevere.url == null) probSevereLink = true else AppContainer.probSevere.setEnabled(on) },
+        onProbSevereLink = { probSevereLink = true },
         contours = s.settings.contours, contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null,
         onContours = { vm.setSettings(s.settings.copy(contours = it)) },
         onDismiss = { overlayTree = false },

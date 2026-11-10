@@ -210,6 +210,82 @@ class LightningCastModel(private val repo: simplemodelview.LightningCastReposito
     }
 }
 
+/** The ProbSevere overlay (MRMS storm objects with their chances of severe weather, from the placefile link the user pasted): on or off and the outlines. */
+data class ProbSevereState(
+    val enabled: Boolean = false,
+    val shapes: List<simplemodelview.PlaceShape> = emptyList(),
+    val asOf: Long? = null,
+    val note: String? = null,
+    val busy: Boolean = false,
+)
+
+/** Holds the ProbSevere overlay for the process (the MRMS page draws it; the on / off choice and the link are saved), read again when over two minutes old. */
+class ProbSevereModel(private val repo: simplemodelview.ProbSevereRepository, private val prefs: SharedPreferences) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val url: String? get() = prefs.getString("probsevere_url", null)?.takeIf { it.isNotBlank() }
+    private val _state = MutableStateFlow(ProbSevereState(enabled = prefs.getBoolean("probsevere", false) && url != null))
+    val state: StateFlow<ProbSevereState> = _state
+    private var job: Job? = null
+
+    init { if (_state.value.enabled) refresh() }
+
+    private fun now() = System.currentTimeMillis() / 1000
+
+    fun setUrl(text: String): Boolean {
+        val clean = simplemodelview.LightningCast.cleanUrl(text) ?: return false
+        prefs.edit().putString("probsevere_url", clean).apply()
+        setEnabled(true)
+        return true
+    }
+
+    fun setEnabled(on: Boolean) {
+        if (on && url == null) return
+        prefs.edit().putBoolean("probsevere", on).apply()
+        job?.cancel()
+        _state.value = ProbSevereState(enabled = on, busy = on)
+        if (on) refresh()
+    }
+
+    fun refresh() {
+        if (!_state.value.enabled) return
+        job?.cancel()
+        job = scope.launch {
+            _state.value = _state.value.copy(busy = true, note = null)
+            try {
+                val shapes = repo.load()
+                if (_state.value.enabled) _state.value = ProbSevereState(true, shapes, now(), note = if (shapes.isEmpty()) "No storm outlines in the placefile right now" else null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (_state.value.enabled) _state.value = _state.value.copy(busy = false, note = e.message ?: "ProbSevere could not be read")
+            }
+        }
+    }
+
+    fun refreshIfStale() {
+        val st = _state.value
+        if (st.enabled && !st.busy && (st.asOf == null || now() - st.asOf > 120)) refresh()
+    }
+}
+
+/** The ProbSevere outlines as lines in the pixels of the picture of [view], in the placefile's colors. */
+internal fun probSevereDraws(core: Core, state: ProbSevereState, view: View): List<AlertDraw> {
+    if (!state.enabled) return emptyList()
+    val pixels = view.scale.toFloat() / view.step
+    return state.shapes.map { shape ->
+        val p = shape.points
+        val out = FloatArray(p.size)
+        var i = 0
+        while (i + 1 < p.size) {
+            val g = core.latLonToGrid(view.grid, p[i], p[i + 1])
+            out[i] = ((g[0] + 0.5 - view.col0) * pixels).toFloat()
+            out[i + 1] = ((view.row0 + view.rows - 0.5 - g[1]) * pixels).toFloat()
+            i += 2
+        }
+        AlertDraw(listOf(out), shape.color, dashed = false, fill = false, open = !shape.closed)
+    }
+}
+
 /**
  * The contours of the scan for [at] (epoch seconds; null: the newest) as lines in the pixels of the picture of [view], lowest chance first, in the colors of the
  * placefile. On the MRMS page [at] is the radar frame's time; the other pages show the newest scan.
@@ -237,5 +313,7 @@ internal fun lightningDraws(core: Core, state: LightningState, view: View, at: L
  * emitted. [lightning]: LightningCast counts too (the MRMS page only: it is a now-and-next-hour product, so the model pages do not draw it).
  */
 internal fun overlayChanges(lightning: Boolean = true): kotlinx.coroutines.flow.Flow<List<Any?>> =
-    kotlinx.coroutines.flow.combine(AppContainer.outlook.state, AppContainer.lightning.state) { o, l -> if (lightning) listOf(o.type, o.version, l.enabled, l.asOf) else listOf(o.type, o.version) }
+    kotlinx.coroutines.flow.combine(AppContainer.outlook.state, AppContainer.lightning.state, AppContainer.probSevere.state) { o, l, ps ->
+        if (lightning) listOf(o.type, o.version, l.enabled, l.asOf, ps.enabled, ps.asOf) else listOf(o.type, o.version)
+    }
         .distinctUntilChanged().drop(1)
