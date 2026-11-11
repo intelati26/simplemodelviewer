@@ -231,7 +231,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), view, dark, contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
+            renderer.render(product, product.style, values, emptyList(), view, dark, contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity, barbZoom = barbZoom)
         }
         shown = Triple(product, values, view)
         update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null) }
@@ -239,6 +239,20 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- taps ----
+    private var barbZoom = 1f
+    private var zoomJob: kotlinx.coroutines.Job? = null
+
+    /** The UI reports which part of the picture is on screen: wind barbs are drawn again for the zoom (after a short rest) so they keep their size on screen. */
+    fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
+        if (_state.value.product != "hw") return
+        val zoom = 1f / maxOf(0.02f, right.coerceIn(0f, 1f) - left.coerceIn(0f, 1f))
+        val step = Math.round(Math.log(zoom.toDouble()) / Math.log(1.4)).toInt().coerceAtLeast(0)
+        val fraction = Math.pow(1.4, -step.toDouble()).toFloat()
+        if (fraction == barbZoom) return
+        zoomJob?.cancel()
+        zoomJob = viewModelScope.launch { kotlinx.coroutines.delay(300); barbZoom = fraction; showFrame() }
+    }
+
     fun onTap(fx: Float, fy: Float) {
         val (product, values, v) = shown ?: return
         if (fx !in 0f..1f || fy !in 0f..1f) { clearTap(); return }

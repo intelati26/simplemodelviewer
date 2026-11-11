@@ -365,7 +365,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             val g = product.grid
             val v = if (sector.name == "CONUS") View.whole(g).decimated(if (_state.value.settings.dataSaver && g == Grid.REFS) 2 else 1) else sector.view(core, g)
             val style = withAutoStops(product.style, data)
-            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity), style, v)
+            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, barbZoom = barbZoom), style, v)
         }
         view = v
         update { it.copy(map = bitmap, style = style, busy = false) }
@@ -674,7 +674,19 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** The UI reports which part of the picture is on screen (after pinch-zoom / pan). */
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        // wind barbs keep their size on screen when the picture is zoomed: the picture is drawn again (after a short rest) for the zoom, in steps of 1.4
+        val product = _state.value.product ?: return
+        if (!WindProducts.isWind(product.id) || _state.value.globe) return
+        val zoom = 1f / maxOf(0.02f, viewport[2] - viewport[0])
+        val step = Math.round(Math.log(zoom.toDouble()) / Math.log(1.4)).toInt().coerceAtLeast(0)
+        val fraction = Math.pow(1.4, -step.toDouble()).toFloat()
+        if (fraction == barbZoom) return
+        zoomJob?.cancel()
+        zoomJob = viewModelScope.launch { kotlinx.coroutines.delay(300); barbZoom = fraction; rerender() }
     }
+
+    private var barbZoom = 1f
+    private var zoomJob: kotlinx.coroutines.Job? = null
 
     /** The grid window an export covers, drawn at a resolution that suits its size (about 1800 px wide, at most 8 px per cell). */
     private fun resolveView(area: ShareArea): View = when (area) {

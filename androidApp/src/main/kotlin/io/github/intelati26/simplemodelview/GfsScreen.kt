@@ -88,7 +88,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Text(s.error!!, color = MaterialTheme.colorScheme.error)
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", onViewport = { _, _, _, _ -> }, onTap = vm::onTap)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", onViewport = vm::setViewport, onTap = vm::onTap)
                 else -> CircularProgressIndicator()
             }
         }

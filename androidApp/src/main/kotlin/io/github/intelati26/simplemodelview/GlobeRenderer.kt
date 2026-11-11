@@ -18,7 +18,6 @@ import simplemodelview.View
 import simplemodelview.WindBarbs
 import simplemodelview.WindProducts
 import simplemodelview.globeForward
-import simplemodelview.globeInverse
 
 /** Draws the globe picture: space, a shaded sphere, a graticule, the data wrapped onto it and the border lines. */
 class GlobeRenderer(private val core: Core, private val lines: MapLines) {
@@ -135,13 +134,16 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /**
-     * Wind barbs on a lattice of screen points about the same distance apart however far the globe is zoomed (zooming in shows the winds in finer steps). The wind
-     * of the cell under each point is turned to true east / north (from the grid's axes unless [trueFrame]) and then onto the screen at that spot.
+     * Wind barbs locked to places: the lattice is of latitudes and longitudes (multiples of a step, wider in longitude toward the poles), so a barb stays where
+     * it is as the globe turns and rides over the horizon with it. The barbs keep their size on screen at any zoom ([barbsAcross] to the picture's width); zooming
+     * only changes the step of the lattice, in whole stages, so the winds show in finer detail. The wind of the cell under each point is turned to true
+     * east / north (from the grid's axes unless [trueFrame]) and then onto the screen at that spot.
      */
     private fun drawBarbs(canvas: Canvas, grid: Grid, values: FloatArray, level: Int, cam: GlobeCamera, width: Int, height: Int, dark: Boolean, barbDensity: Int, trueFrame: Boolean) {
         val cells = grid.cells
         val stack = level == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
-        val spacing = (2 * cam.radius).toFloat() / (barbsAcross(barbDensity) * if (stack) 0.8f else 1f)
+        val spacing = width / (barbsAcross(barbDensity) * if (stack) 0.8f else 1f)      // screen pixels, whatever the zoom
+        val length = spacing * 0.7f
         val sets = if (stack) WindProducts.stackLevels.indices.map { k -> WindProducts.stackU(k) to WindProducts.stackV(k) } else listOf(WindProducts.U to WindProducts.V)
         val inks = if (stack) {
             if (dark) listOf(0xFF5EDC8A.toInt(), 0xFF6CB4FF.toInt(), 0xFFFF7A7A.toInt()) else listOf(0xFF157A3A.toInt(), 0xFF1F5FBF.toInt(), 0xFFC62828.toInt())
@@ -151,57 +153,61 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         val paths = sets.map { android.graphics.Path() to android.graphics.Path() }
-        val length = spacing * 0.7f
-        val centerX = width / 2f
-        val centerY = height / 2f
-        var py = centerY - cam.radius.toFloat() + spacing / 2
-        while (py < centerY + cam.radius) {
-            var px = centerX - cam.radius.toFloat() + spacing / 2
-            while (px < centerX + cam.radius) {
-                val ll = globeInverse(cam, width, height, px.toDouble(), py.toDouble())
-                if (ll != null) {
-                    val rc = core.latLonToGrid(grid, ll[0], ll[1])
+        // the lattice step: the degrees the spacing covers at the center of the sphere, rounded up to one of a few stages
+        val wanted = Math.toDegrees(spacing / cam.radius)
+        val stages = doubleArrayOf(0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0)
+        val delta = stages.firstOrNull { it >= wanted } ?: stages.last()
+        // how far from the camera's point the screen reaches, in degrees
+        val reach = Math.toDegrees(Math.asin(minOf(1.0, Math.hypot(width.toDouble(), height.toDouble()) / 2 / cam.radius)))
+        var lat = Math.ceil(maxOf(-85.0, cam.lat - reach) / delta) * delta
+        val latEnd = minOf(85.0, cam.lat + reach)
+        while (lat <= latEnd) {
+            val c = Math.cos(Math.toRadians(lat))
+            val lonStep = delta * maxOf(1.0, Math.round(1.0 / maxOf(c, 0.05)).toDouble())     // wider apart toward the poles, still multiples of the step
+            val lonReach = if (c < 0.2) 180.0 else minOf(180.0, reach / c)
+            var lon = Math.ceil((cam.lon - lonReach) / lonStep) * lonStep
+            while (lon <= cam.lon + lonReach) {
+                val lonNow = ((lon + 540.0) % 360.0 + 360.0) % 360.0 - 180.0
+                val here = globeForward(cam, width, height, lat, lonNow)
+                if (here != null && here[0] > -length && here[0] < width + length && here[1] > -length && here[1] < height + length) {
+                    val rc = core.latLonToGrid(grid, lat, lonNow)
                     val col = Math.round(rc[0]).toInt()
                     val row = Math.round(rc[1]).toInt()
-                    if (col in 0 until grid.columns && row in 0 until grid.rows) {
-                        // which way north points on the screen here
-                        val here = globeForward(cam, width, height, ll[0], ll[1])
-                        val up = globeForward(cam, width, height, ll[0] + 0.7, ll[1])
-                        if (here != null && up != null) {
-                            var nx = (up[0] - here[0]).toFloat(); var ny = (up[1] - here[1]).toFloat()
-                            val len = Math.hypot(nx.toDouble(), ny.toDouble()).toFloat()
-                            if (len > 1e-6f) {
-                                nx /= len; ny /= len
-                                val ex = -ny; val ey = nx           // east: north turned a quarter clockwise
-                                for ((k, uv) in sets.withIndex()) {
-                                    val gu = values[cells * uv.first + row * grid.columns + col]
-                                    val gv = values[cells * uv.second + row * grid.columns + col]
-                                    val speed = WindProducts.speed(gu, gv)
-                                    if (speed.isNaN() || speed < 2.5f) continue
-                                    var eu = gu; var nv = gv
-                                    if (!trueFrame) {
-                                        val bearing = Math.toRadians(WindProducts.compassDegrees(WindProducts.fromDegrees(gu, gv), ll[1]))
-                                        eu = (-speed * Math.sin(bearing)).toFloat(); nv = (-speed * Math.cos(bearing)).toFloat()
-                                    }
-                                    val wx = eu * ex + nv * nx
-                                    val wy = eu * ey + nv * ny
-                                    val glyph = WindBarbs.glyph(px, py, wx, -wy, speed, length)
-                                    val (path, flags) = paths[k]
-                                    var i = 0
-                                    while (i + 3 < glyph.lines.size) { path.moveTo(glyph.lines[i], glyph.lines[i + 1]); path.lineTo(glyph.lines[i + 2], glyph.lines[i + 3]); i += 4 }
-                                    i = 0
-                                    while (i + 5 < glyph.pennants.size) {
-                                        flags.moveTo(glyph.pennants[i], glyph.pennants[i + 1]); flags.lineTo(glyph.pennants[i + 2], glyph.pennants[i + 3]); flags.lineTo(glyph.pennants[i + 4], glyph.pennants[i + 5]); flags.close()
-                                        i += 6
-                                    }
+                    val up = globeForward(cam, width, height, lat + 0.7, lonNow)
+                    if (col in 0 until grid.columns && row in 0 until grid.rows && up != null) {
+                        var nx = (up[0] - here[0]).toFloat(); var ny = (up[1] - here[1]).toFloat()
+                        val len = Math.hypot(nx.toDouble(), ny.toDouble()).toFloat()
+                        if (len > 1e-6f) {
+                            nx /= len; ny /= len
+                            val ex = -ny; val ey = nx           // east: north turned a quarter clockwise
+                            for ((k, uv) in sets.withIndex()) {
+                                val gu = values[cells * uv.first + row * grid.columns + col]
+                                val gv = values[cells * uv.second + row * grid.columns + col]
+                                val speed = WindProducts.speed(gu, gv)
+                                if (speed.isNaN() || speed < 2.5f) continue
+                                var eu = gu; var nv = gv
+                                if (!trueFrame) {
+                                    val bearing = Math.toRadians(WindProducts.compassDegrees(WindProducts.fromDegrees(gu, gv), lonNow))
+                                    eu = (-speed * Math.sin(bearing)).toFloat(); nv = (-speed * Math.cos(bearing)).toFloat()
+                                }
+                                val wx = eu * ex + nv * nx
+                                val wy = eu * ey + nv * ny
+                                val glyph = WindBarbs.glyph(here[0].toFloat(), here[1].toFloat(), wx, -wy, speed, length)
+                                val (path, flags) = paths[k]
+                                var i = 0
+                                while (i + 3 < glyph.lines.size) { path.moveTo(glyph.lines[i], glyph.lines[i + 1]); path.lineTo(glyph.lines[i + 2], glyph.lines[i + 3]); i += 4 }
+                                i = 0
+                                while (i + 5 < glyph.pennants.size) {
+                                    flags.moveTo(glyph.pennants[i], glyph.pennants[i + 1]); flags.lineTo(glyph.pennants[i + 2], glyph.pennants[i + 3]); flags.lineTo(glyph.pennants[i + 4], glyph.pennants[i + 5]); flags.close()
+                                    i += 6
                                 }
                             }
                         }
                     }
                 }
-                px += spacing
+                lon += lonStep
             }
-            py += spacing
+            lat += delta
         }
         for ((k, pair) in paths.withIndex()) {
             val (path, flags) = pair

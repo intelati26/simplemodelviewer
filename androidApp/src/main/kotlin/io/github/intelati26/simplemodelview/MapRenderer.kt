@@ -41,7 +41,7 @@ internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 12
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f): Bitmap {
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
@@ -69,7 +69,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         lines.draw(canvas, view, dark, counties)
         if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContours(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
         WindProducts.planeLevel(product.id)?.let { level ->
-            if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity)
+            if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity, barbZoom)
         }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         return bitmap
@@ -105,7 +105,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
-    private fun drawWind(canvas: Canvas, product: Product, values: FloatArray, level: Int, view: View, dark: Boolean, pictureWidth: Int, contours: Boolean, barbDensity: Int) {
+    private fun drawWind(canvas: Canvas, product: Product, values: FloatArray, level: Int, view: View, dark: Boolean, pictureWidth: Int, contours: Boolean, barbDensity: Int, barbZoom: Float = 1f) {
         val cells = product.grid.cells
         val stack = level == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
         if (contours) Contours.specFor("z${if (level == WindProducts.STACK) 500 else level}", "m")?.let { spec ->
@@ -116,9 +116,10 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
         val across = barbsAcross(barbDensity)
         // the stack draws three sets from the same point (as stacked barbs are drawn), so its lattice is a little sparser
-        val spacing = pictureWidth / if (stack) across * 0.8f else across
+        // [barbZoom]: the fraction of the picture on screen (pinch-zoom): the barbs are laid out for what is shown, so they keep their size on screen as the picture is magnified
+        val spacing = pictureWidth * barbZoom / if (stack) across * 0.8f else across
         // SPC's mesoanalysis barbs measure about 0.8 of their spacing corner to corner and are drawn with thin lines: lighter than the contours' lines
-        val width = maxOf(1.2f, pictureWidth / 1300f)
+        val width = (maxOf(1.2f, pictureWidth / 1300f) * barbZoom).coerceAtLeast(0.6f)
         val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -135,7 +136,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                     i += 6
                 }
             }
-            line.strokeWidth = width + 2f; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
+            line.strokeWidth = width + 2f * barbZoom; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
             line.strokeWidth = width; line.color = ink; canvas.drawPath(path, line)
             fill.color = ink; canvas.drawPath(flags, fill)
         }
@@ -152,7 +153,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             drawSet(WindBarbs.glyphs(u, v, product.grid, view, spacing, spacing * 0.7f), inks[k], 0f)
         }
         // the key, in the picture so a shared picture has it too
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(14f, pictureWidth / 70f); isFakeBoldText = true }
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = (maxOf(14f, pictureWidth / 70f) * barbZoom).coerceAtLeast(8f); isFakeBoldText = true }
         var x = pictureWidth / 60f
         val y = view.pixelHeight - pictureWidth / 60f
         for (k in WindProducts.stackLevels.indices) {
