@@ -92,7 +92,8 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
             }
         }
         if (windLevel != null) {
-            val across = barbsAcross(barbDensity) * if (level(windLevel, values, cells)) STACK_DENSITY else 1f
+            // the globe is crowded sooner than a flat map (the barbs sit over the data and the lines, and thin out toward the limb): one density level down
+            val across = barbsAcross((barbDensity - 1).coerceAtLeast(1)) * if (level(windLevel, values, cells)) STACK_DENSITY else 1f
             drawWindBarbs(canvas, core, GlobeProjector(cam, width, height), grid, values, windLevel, dark, width / across, maxOf(1.2f, width / 1300f), 2f, trueFrame)
         }
     }
