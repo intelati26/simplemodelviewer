@@ -88,6 +88,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Text(s.error!!, color = MaterialTheme.colorScheme.error)
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
+                s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "GFS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", onViewport = vm::setViewport, onTap = vm::onTap)
                 else -> CircularProgressIndicator()
             }
@@ -136,8 +137,9 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     }
                     var sectorMenu by remember { mutableStateOf(false) }
                     Box {
-                        TextButton(onClick = { sectorMenu = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text(s.sector.name + " ▾", maxLines = 1) }
+                        TextButton(onClick = { sectorMenu = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text((if (s.globe) "Globe" else s.sector.name) + " ▾", maxLines = 1) }
                         DropdownMenu(expanded = sectorMenu, onDismissRequest = { sectorMenu = false }) {
+                            DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
                             for (sector in GFS_SECTORS) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; vm.pickSector(sector) })
                         }
                     }

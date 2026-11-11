@@ -335,6 +335,37 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return plane(field, product.convert, target)
     }
 
+    private fun converted(values: FloatArray, convert: (Float) -> Float): FloatArray = FloatArray(values.size) { convert(values[it]) }
+
+    /** A surface field for the globe: the whole message on GFS's own grid (nothing is cropped or reprojected). */
+    suspend fun loadFieldGlobal(file: NbmFile, product: GfsProduct, status: (String) -> Unit = {}): GfsGlobal {
+        val message = product.message ?: throw RefsException("not a single field")
+        val field = fields(file, listOf(message), null, false, status).getValue("${message.variable}:${message.level}")
+        return GfsGlobal(field.grid, converted(field.values, product.convert))
+    }
+
+    /**
+     * The planes of a wind product (see [WindProducts.pack], and [WindProducts.packStack] for the stack) for the globe: whole messages on GFS's own grid, the
+     * winds as they are (east and north, in knots, so no turning onto a map's axes).
+     */
+    suspend fun loadWindGlobal(file: NbmFile, level: Int, colorKey: String, status: (String) -> Unit = {}): GfsGlobal {
+        val wanted = windMessages(level, colorKey)
+        val fields = fields(file, wanted, null, false, status)
+        fun field(m: GfsMessage) = fields.getValue("${m.variable}:${m.level}")
+        val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
+        val grid = field(wanted[0]).grid
+        val height = field(wanted[0]).values.copyOf()
+        if (level == WindProducts.STACK) {
+            val winds = (1..6).map { converted(field(wanted[it]).values, knots) }
+            val color = wanted.getOrNull(7)?.let { converted(field(it).values, GfsCatalog.colorConvert(colorKey)) }
+            return GfsGlobal(grid, WindProducts.packStack(grid.cells, height, winds, color))
+        }
+        val u = converted(field(wanted[1]).values, knots)
+        val v = converted(field(wanted[2]).values, knots)
+        val color = wanted.getOrNull(3)?.let { converted(field(it).values, GfsCatalog.colorConvert(colorKey)) }
+        return GfsGlobal(grid, WindProducts.pack(grid.cells, height, u, v, color))
+    }
+
     /**
      * The four planes of a wind product (see [WindProducts.pack]) for [level] over [colorKey], on [target]: the color field (the speed when the color is
      * "speed"), the height, and the wind turned onto the grid's axes, in knots.
@@ -362,6 +393,9 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return WindProducts.pack(target.cells, height, u, v, colorPlane)
     }
 }
+
+/** A whole-globe field (or the planes of a wind product) on GFS's own latitude / longitude [grid], for the globe view. */
+class GfsGlobal(val grid: Grid, val values: FloatArray)
 
 /** The grid of the GFS 0.25 degree files: 1440 columns from -180 (as the core lays them out) and 721 rows from the north pole in the file. */
 object GfsGrid {

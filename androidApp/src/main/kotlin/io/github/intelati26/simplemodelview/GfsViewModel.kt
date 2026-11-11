@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import simplemodelview.BackupPlace
 import simplemodelview.GfsCatalog
+import simplemodelview.GfsGlobal
+import simplemodelview.GlobeCamera
 import simplemodelview.Grid
 import simplemodelview.NbmCycle
 import simplemodelview.NbmFile
@@ -24,6 +26,7 @@ import simplemodelview.Style
 import simplemodelview.View
 import simplemodelview.WindProducts
 import simplemodelview.formatUtc
+import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
 import simplemodelview.nbmDwellMillis
 import simplemodelview.nbmLoopWindow
@@ -65,6 +68,8 @@ data class GfsState(
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
     val loopSpanHours: Int = 0,
+    val globe: Boolean = false,
+    val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
 }
@@ -82,6 +87,14 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private var frameJob: Job? = null
     private var playJob: Job? = null
     private var shown: Triple<Product, FloatArray, View>? = null
+    private var globeShown: Pair<Product, FloatArray>? = null           // what the globe shows: the product and its values on GFS's own grid
+    private val globeRenderer = GlobeRenderer(core, AppContainer.lines)
+    private var globeW = 0
+    private var globeH = 0
+    // whole-globe frames are big (4 or 8 planes of a million cells): only a few are kept
+    private val globalComputed = object : LinkedHashMap<String, GfsGlobal>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, GfsGlobal>?) = size > 3
+    }
     private var lastLoad = 0L
     private var pickedCycle: NbmCycle? = null
     private val grids = HashMap<String, Grid>()
@@ -168,13 +181,13 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun pickSector(sector: Sector) {
         prefs.edit().putString("gfs_sector", sector.name).apply()
         stopPlaying()
-        update { it.copy(sector = sector, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(sector = sector, globe = false, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
 
     fun pickIndex(index: Int) { update { it.copy(index = index.coerceIn(0, maxOf(0, it.frames.size - 1))) }; showFrame() }
 
-    fun setDark(isDark: Boolean) { if (dark == isDark) return; dark = isDark; if (shown != null) showFrame() }
+    fun setDark(isDark: Boolean) { if (dark == isDark) return; dark = isDark; if (shown != null || globeShown != null) showFrame() }
 
     fun dismissNotice() = update { it.copy(notice = null) }
     fun reportNotice(text: String) = update { it.copy(notice = text) }
@@ -191,13 +204,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun showCurrent() {
-        val st = _state.value
-        val file = st.file ?: return
-        update { it.copy(busy = true, error = null) }
-        val target = gridFor(st.sector)
-        val surface = GfsCatalog.surfaceById(st.product)
-        val status: (String) -> Unit = { text ->
+    private fun statusHandler(): (String) -> Unit = { text ->
             when {
                 text.startsWith("Source: ") -> {
                     update { it.copy(source = text.removePrefix("Source: ")) }
@@ -211,23 +218,112 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 else -> update { it.copy(loadStatus = text) }
             }
         }
+
+    /** The product shown for the state's choice on [grid], and its title. */
+    private fun productFor(st: GfsState, surface: simplemodelview.GfsProduct?, grid: Grid): Pair<Product, String> {
+        if (surface != null) return Product(surface.id, surface.title, surface.group, surface.style, false, null, grid) to surface.title
+        val id = GfsCatalog.windId(st.level, st.color) ?: "wind${st.level}_mean"
+        val color = WindProducts.colors.firstOrNull { it.key == st.color }
+        val top = if (st.level == WindProducts.STACK) 500 else st.level
+        val title = (if (st.level == WindProducts.STACK) "500 mb Height with 850 / 700 / 500 mb Wind Barbs" else "${st.level} mb Height and Wind Barbs") + if (color == null || color.source == null) "" else " over ${if (color.key == "tlev" || color.key == "rhlev") color.title.replace("the level", "$top mb") else color.title}"
+        return Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color), false, null, grid) to title
+    }
+
+    /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
+    private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
+        val surface = GfsCatalog.surfaceById(st.product)
+        val status = statusHandler()
+        val key = "${file.url}|${st.product}|${st.level}|${st.color}"
+        val data = globalComputed[key] ?: withContext(Dispatchers.Default) {
+            if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status)
+        }.also { globalComputed[key] = it }
+        val (product, title) = productFor(st, surface, data.grid)
+        globeShown = product to data.values
+        update { it.copy(style = product.style, title = title, loadStatus = null) }
+        if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
+    }
+
+    // ---- the globe ----
+    fun onGlobeTap(px: Float, py: Float) {
+        val (product, values) = globeShown ?: return
+        val ll = globeInverse(_state.value.cam, globeW, globeH, px.toDouble(), py.toDouble())
+        if (ll == null) { clearTap(); return }
+        val grid = product.grid
+        val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
+        val column = Math.round(c).toInt().coerceIn(0, grid.columns - 1)
+        val row = Math.round(r).toInt().coerceIn(0, grid.rows - 1)
+        update { it.copy(readout = readout(core, product, values, emptyList(), column, row, trueFrameWinds = true), tapLatLon = ll[0] to ll[1]) }
+    }
+
+    fun setGlobe(on: Boolean) {
+        if (_state.value.globe == on) return
+        stopPlaying()
+        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        showFrame()
+    }
+
+    fun setGlobeSize(w: Int, h: Int) {
+        if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
+        val first = globeW == 0
+        globeW = w; globeH = h
+        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        if (_state.value.globe && globeShown != null) requestGlobe(coarse = false)
+    }
+
+    private var settleJob: Job? = null
+    private var globeBusy = false
+    private var globeDirty = false
+    private var globeCoarse = false
+
+    fun globeGesture(dx: Float, dy: Float, zoom: Float) {
+        val minR = 0.3 * minOf(globeW, globeH)
+        update { it.copy(cam = it.cam.dragged(dx.toDouble(), dy.toDouble()).zoomed(zoom.toDouble(), minR, minR * 60)) }
+        requestGlobe(coarse = true)
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
+    }
+
+    /** One render at a time; while one runs, further requests collapse into a single follow-up with the newest camera. */
+    private fun requestGlobe(coarse: Boolean) {
+        globeDirty = true
+        globeCoarse = coarse
+        if (globeBusy) return
+        globeBusy = true
+        viewModelScope.launch {
+            try {
+                while (globeDirty) {
+                    globeDirty = false
+                    renderGlobeNow(if (globeCoarse) 4 else 1)
+                }
+            } finally { globeBusy = false }
+        }
+    }
+
+    private suspend fun renderGlobeNow(stride: Int) {
+        val (product, values) = globeShown ?: return
+        if (globeW == 0 || values.size < product.grid.cells) return
+        val st = _state.value
+        val bitmap = withContext(Dispatchers.Default) {
+            // GFS's winds are east and north already (no map axes to turn from)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true)
+        }
+        update { it.copy(map = bitmap, busy = false) }
+    }
+
+    private suspend fun showCurrent() {
+        val st = _state.value
+        val file = st.file ?: return
+        update { it.copy(busy = true, error = null) }
+        if (st.globe) { showGlobeFrame(st, file); return }
+        val target = gridFor(st.sector)
+        val surface = GfsCatalog.surfaceById(st.product)
+        val status = statusHandler()
         val key = "${file.url}|${st.product}|${st.level}|${st.color}|${st.sector.name}"
         val region = regionFor(st)
         val values = computed[key] ?: withContext(Dispatchers.Default) {
             if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop)
         }.also { computed[key] = it }
-        val product: Product
-        val title: String
-        if (surface != null) {
-            title = surface.title
-            product = Product(surface.id, surface.title, surface.group, surface.style, false, null, target)
-        } else {
-            val id = GfsCatalog.windId(st.level, st.color) ?: "wind${st.level}_mean"
-            val color = WindProducts.colors.firstOrNull { it.key == st.color }
-            val top = if (st.level == WindProducts.STACK) 500 else st.level
-            title = (if (st.level == WindProducts.STACK) "500 mb Height with 850 / 700 / 500 mb Wind Barbs" else "${st.level} mb Height and Wind Barbs") + if (color == null || color.source == null) "" else " over ${if (color.key == "tlev" || color.key == "rhlev") color.title.replace("the level", "$top mb") else color.title}"
-            product = Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color), false, null, target)
-        }
+        val (product, title) = productFor(st, surface, target)
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
         val bitmap = withContext(Dispatchers.Default) {
@@ -244,7 +340,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The UI reports which part of the picture is on screen: wind barbs are drawn again for the zoom (after a short rest) so they keep their size on screen. */
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
-        if (_state.value.product != "hw") return
+        if (_state.value.product != "hw" || _state.value.globe) return
         val zoom = 1f / maxOf(0.02f, right.coerceIn(0f, 1f) - left.coerceIn(0f, 1f))
         val step = Math.round(Math.log(zoom.toDouble()) / Math.log(1.4)).toInt().coerceAtLeast(0)
         val fraction = Math.pow(1.4, -step.toDouble()).toFloat()
@@ -334,7 +430,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 val count = window.count()
                 var done = 0
                 for (i in window) {
-                    repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
+                    if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }
@@ -355,7 +451,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null
-        val (product, _, _) = shown ?: return@withContext null
+        val product = (if (st.globe) globeShown?.first else shown?.first) ?: return@withContext null
         val map = st.map ?: return@withContext null
         val c = simplemodelview.civilFromEpoch(file.valid)
         fun p(n: Int) = n.toString().padStart(2, '0')
