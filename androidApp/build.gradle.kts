@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.intelati26.simplemodelview"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.2.1"
+        versionCode = 7
+        versionName = "0.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_static") } }

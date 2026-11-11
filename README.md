@@ -1,7 +1,7 @@
 # simplemodelview (SPC REFS viewer)
 
 Minimalist Android / iOS viewer for model and radar data from NOAA, built around SPC's REFS ensemble products. Scope and decisions:
-[docs/outline.md](docs/outline.md) (source: `android-spc-refs-scope.md`). Current version: 0.2.1.
+[docs/outline.md](docs/outline.md) (source: `android-spc-refs-scope.md`). Current version: 0.2.2.
 
 **Four pages** (the page menu in the header), one renderer and one core behind all of them:
 
