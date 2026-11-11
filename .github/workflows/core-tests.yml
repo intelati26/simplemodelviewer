@@ -8,7 +8,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y libblosc-dev zlib1g-dev
+      # libblosc is optional: with it the tests also check the decoder against the reference library byte for byte (CMake skips that check when the
+      # library is missing). The runners' Ubuntu mirrors sometimes cannot be reached, which used to fail the whole job before a single test ran, so
+      # try three times and carry on without it (the warning says so).
+      - name: Install libblosc (optional) and zlib
+        continue-on-error: true
+        run: |
+          for attempt in 1 2 3; do
+            timeout 180 sudo apt-get update -o Acquire::Retries=3 && timeout 180 sudo apt-get install -y -o Acquire::Retries=3 libblosc-dev zlib1g-dev && exit 0
+            sleep 15
+          done
+          echo "::warning::libblosc-dev could not be installed: the byte-for-byte check against the reference library is skipped"
+          exit 1
       - run: cmake -S core -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build -j
       - run: ctest --test-dir build --output-on-failure
