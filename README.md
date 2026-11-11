@@ -12,7 +12,7 @@ Minimalist Android / iOS viewer for model and radar data from NOAA, built around
 | NBM | National Blend of Models to 11 days (GeoTIFF, with a GRIB fallback) | NBM page |
 | GFS | GFS upper air and surface fields to 16 days (GRIB2 byte ranges) | GFS page |
 
-All pages have sectors, tap read-out, a loop, share and the data cache; the SPC outlook overlay is on the REFS, MRMS and NBM pages (see below).
+All pages have sectors, tap read-out, a loop, share and the data cache; the model pages (REFS, NBM, GFS) also have a **Time** drop list beside the slider that lists every valid time of the run, grouped by day, to jump straight to one; the SPC outlook overlay is on the REFS, MRMS and NBM pages (see below).
 
 **Data:** NOAA/NWS Storm Prediction Center (experimental guidance, not a warning or decision-support tool).
 **iOS** is best effort and untested on a real device (no Apple Developer membership); CI builds unsigned simulator builds only.

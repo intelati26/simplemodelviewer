@@ -245,6 +245,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                     TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
                     TextButton(onClick = vm::goToNow, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Now") }
+                    TimeMenu(s.times, s.timeIndex, { i -> s.cycle?.let { c -> "${formatUtc(s.times[i])}  (f${((s.times[i] - c.epochSeconds) / 3600).toString().padStart(2, '0')})" } ?: formatUtc(s.times[i]) }, vm::pickTime)
                     Slider(
                         value = s.timeIndex.toFloat(), onValueChange = { vm.pickTime(it.toInt()) },
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
