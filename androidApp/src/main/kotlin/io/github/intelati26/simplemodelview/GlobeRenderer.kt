@@ -92,7 +92,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
             }
         }
         if (windLevel != null) {
-            val across = barbsAcross(barbDensity) * if (level(windLevel, values, cells)) 0.8f else 1f
+            val across = barbsAcross(barbDensity) * if (level(windLevel, values, cells)) STACK_DENSITY else 1f
             drawWindBarbs(canvas, core, GlobeProjector(cam, width, height), grid, values, windLevel, dark, width / across, maxOf(1.2f, width / 1300f), 2f, trueFrame)
         }
     }

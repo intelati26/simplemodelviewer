@@ -12,6 +12,9 @@ import simplemodelview.WindBarbs
 import simplemodelview.WindProducts
 import simplemodelview.globeForward
 
+/** The stack draws three barbs from each point, so it puts fewer points across a picture than a single level does. */
+internal const val STACK_DENSITY = 0.7f
+
 /**
  * What the flat map and the globe share when they draw lines and barbs over the data: the same painting code, over a [MapProjector] that says where a place is
  * on the picture. A new view (another projection) only needs a projector.
@@ -118,7 +121,7 @@ internal fun drawWindBarbs(
     val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     val paths = sets.map { Path() to Path() }
-    val stages = doubleArrayOf(0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0)
+    val stages = doubleArrayOf(0.25, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0)
     val wanted = spacing / proj.pixelsPerDegree
     val delta = stages.firstOrNull { it >= wanted } ?: stages.last()
     var lat = Math.ceil(proj.latRange.start / delta) * delta

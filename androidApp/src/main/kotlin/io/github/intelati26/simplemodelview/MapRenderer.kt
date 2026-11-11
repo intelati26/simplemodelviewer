@@ -34,8 +34,8 @@ class Overlay(
  */
 class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false, val shade: Boolean = false, val heavy: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
 
-/** How many barbs the density levels (1 to 5) put across a picture's width. */
-internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 12f; 2 -> 20f; 3 -> 30f; 4 -> 42f; else -> 56f }
+/** How many barbs the density levels (1 to 5) put across a picture's width: 10 (sparse) to 42, about what SPC's mesoanalysis charts draw across the country; the default is 24. */
+internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 10f; 2 -> 16f; 3 -> 24f; 4 -> 34f; else -> 42f }
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
@@ -113,7 +113,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart). [barbZoom]: the fraction of the picture on screen (pinch-zoom):
         // the barbs are laid out for what is shown, so they keep their size on screen as the picture is magnified. Drawn by the code the globe uses too.
-        val across = barbsAcross(barbDensity) * if (stack) 0.8f else 1f
+        val across = barbsAcross(barbDensity) * if (stack) STACK_DENSITY else 1f
         val spacing = pictureWidth * barbZoom / across
         val lineWidth = (maxOf(1.2f, pictureWidth / 1300f) * barbZoom).coerceAtLeast(0.6f)      // SPC's mesoanalysis barbs are drawn with thin lines
         drawWindBarbs(canvas, core, FlatProjector(core, view, view.pixelWidth, view.pixelHeight), product.grid, values, level, dark, spacing, lineWidth, 2f * barbZoom, trueFrame = false, keyScale = barbZoom)

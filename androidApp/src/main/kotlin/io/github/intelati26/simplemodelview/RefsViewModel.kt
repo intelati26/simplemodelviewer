@@ -66,7 +66,7 @@ data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = 
     fun displayDiffers(o: Settings) = barbDensity != o.barbDensity || counties != o.counties
 }
 
-const val DEFAULT_BARB_DENSITY = 4
+const val DEFAULT_BARB_DENSITY = 3
 
 fun Settings.withDisplayPrefs(prefs: android.content.SharedPreferences) =
     copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false), gfsCrop = prefs.getBoolean("gfs_crop", true))
