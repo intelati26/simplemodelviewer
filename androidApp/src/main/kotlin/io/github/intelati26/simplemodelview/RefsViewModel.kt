@@ -75,6 +75,7 @@ fun android.content.SharedPreferences.Editor.putDisplay(s: Settings): android.co
     putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport).putBoolean("gfs_crop", s.gfsCrop).putBoolean("show_timings", s.showTimings)
 
 data class UiState(
+    val detail: DetailLayer? = null,           // a finer picture of the zoomed-in part, drawn after the zoom settles
     val busy: Boolean = true,
     val error: String? = null,
     val cycles: List<Cycle> = emptyList(),
@@ -365,10 +366,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             val g = product.grid
             val v = if (sector.name == "CONUS") View.whole(g).decimated(if (_state.value.settings.dataSaver && g == Grid.REFS) 2 else 1) else sector.view(core, g)
             val style = withAutoStops(product.style, data)
-            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, barbZoom = barbZoom), style, v)
+            Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity), style, v)
         }
         view = v
-        update { it.copy(map = bitmap, style = style, busy = false) }
+        update { it.copy(map = bitmap, style = style, busy = false, detail = null) }
+        scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -671,22 +673,37 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         return cm.isActiveNetworkMetered
     }
 
-    /** The UI reports which part of the picture is on screen (after pinch-zoom / pan). */
+    /** The UI reports which part of the picture is on screen (after pinch-zoom / pan): a finer picture of it is drawn once the zoom settles. */
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
-        // wind barbs keep their size on screen when the picture is zoomed: the picture is drawn again (after a short rest) for the zoom, in steps of 1.4
-        val product = _state.value.product ?: return
-        if (!WindProducts.isWind(product.id) || _state.value.globe) return
-        val zoom = 1f / maxOf(0.02f, viewport[2] - viewport[0])
-        val step = Math.round(Math.log(zoom.toDouble()) / Math.log(1.4)).toInt().coerceAtLeast(0)
-        val fraction = Math.pow(1.4, -step.toDouble()).toFloat()
-        if (fraction == barbZoom) return
-        zoomJob?.cancel()
-        zoomJob = viewModelScope.launch { kotlinx.coroutines.delay(300); barbZoom = fraction; rerender() }
+        scheduleDetail()
     }
 
-    private var barbZoom = 1f
-    private var zoomJob: kotlinx.coroutines.Job? = null
+    private var detailJob: Job? = null
+
+    /** After the zoom has rested a moment, only the cells on screen are drawn again, finer (contours, barbs and lines at the finer scale too), over the overview. */
+    private fun scheduleDetail() {
+        detailJob?.cancel()
+        val st = _state.value
+        val product = st.product
+        val data = values
+        val v = view
+        val (l, t, r, b) = viewport.toList()
+        val window = if (product == null || data == null || st.globe || st.playing || data.size < product.grid.cells) null else detailWindow(v, l, t, r, b)
+        if (window == null) { if (st.detail != null) update { it.copy(detail = null) }; return }
+        detailJob = viewModelScope.launch {
+            delay(400)
+            try {
+                val valid = st.times.getOrNull(st.timeIndex)
+                val settings = _state.value.settings
+                val style = withAutoStops(product!!.style, data!!)
+                val bitmap = withContext(Dispatchers.Default) {
+                    renderer.render(product, style, data, st.members, window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                }
+                if (view === v && values === data && _state.value.product == product) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 3.0)) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
+    }
 
     /** The grid window an export covers, drawn at a resolution that suits its size (about 1800 px wide, at most 8 px per cell). */
     private fun resolveView(area: ShareArea): View = when (area) {

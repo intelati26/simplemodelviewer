@@ -68,6 +68,7 @@ data class GfsState(
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
     val loopSpanHours: Int = 0,
+    val detail: DetailLayer? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
 ) {
@@ -327,26 +328,33 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), view, dark, contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity, barbZoom = barbZoom)
+            renderer.render(product, product.style, values, emptyList(), view, dark, contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
         }
         shown = Triple(product, values, view)
-        update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null) }
+        update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null, detail = null) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
     // ---- taps ----
-    private var barbZoom = 1f
-    private var zoomJob: kotlinx.coroutines.Job? = null
+    private var detailJob: Job? = null
 
-    /** The UI reports which part of the picture is on screen: wind barbs are drawn again for the zoom (after a short rest) so they keep their size on screen. */
+    /** The UI reports which part of the picture is on screen: once the zoom has settled, only the cells on screen are drawn again, finer, over the overview. */
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
-        if (_state.value.product != "hw" || _state.value.globe) return
-        val zoom = 1f / maxOf(0.02f, right.coerceIn(0f, 1f) - left.coerceIn(0f, 1f))
-        val step = Math.round(Math.log(zoom.toDouble()) / Math.log(1.4)).toInt().coerceAtLeast(0)
-        val fraction = Math.pow(1.4, -step.toDouble()).toFloat()
-        if (fraction == barbZoom) return
-        zoomJob?.cancel()
-        zoomJob = viewModelScope.launch { kotlinx.coroutines.delay(300); barbZoom = fraction; showFrame() }
+        detailJob?.cancel()
+        val st = _state.value
+        val (product, values, base) = shown ?: return
+        val window = if (st.globe || st.playing) null else detailWindow(base, left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        if (window == null) { if (st.detail != null) update { it.copy(detail = null) }; return }
+        detailJob = viewModelScope.launch {
+            delay(400)
+            try {
+                val settings = _state.value.settings
+                val bitmap = withContext(Dispatchers.Default) {
+                    renderer.render(product, product.style, values, emptyList(), window.view, dark, contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                }
+                if (shown?.second === values) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 25.0)) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
     }
 
     fun onTap(fx: Float, fy: Float) {

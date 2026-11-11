@@ -50,6 +50,7 @@ import kotlin.math.floor
 
 /** The National Blend of Models page: a field, a run, a sector, the run's forecast frames and the one being shown. */
 data class NbmState(
+    val detail: DetailLayer? = null,           // a finer picture of the zoomed-in part, drawn after the zoom settles
     val busy: Boolean = true,
     val loadStatus: String? = null,                   // what a slow load (a GRIB frame) is doing: reading the index, downloading, decoding
     val error: String? = null,
@@ -332,7 +333,8 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         }
         view = v
         shown = product to field.values
-        update { it.copy(map = bitmap, style = product.style, busy = false) }
+        update { it.copy(map = bitmap, style = product.style, busy = false, detail = null) }
+        scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -420,6 +422,31 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        scheduleDetail()
+    }
+
+    private var detailJob: Job? = null
+
+    /** After the zoom has rested a moment, only the cells on screen are drawn again, finer, over the overview. */
+    private fun scheduleDetail() {
+        detailJob?.cancel()
+        val st = _state.value
+        val (product, values) = shown ?: return
+        val base = view
+        val (l, t, r, b) = viewport.toList()
+        val window = if (base == null || st.globe || st.playing) null else detailWindow(base, l, t, r, b)
+        if (window == null) { if (st.detail != null) update { it.copy(detail = null) }; return }
+        detailJob = viewModelScope.launch {
+            delay(400)
+            try {
+                val valid = st.file?.valid
+                val settings = _state.value.settings
+                val bitmap = withContext(Dispatchers.Default) {
+                    renderer.render(product, product.style, values, emptyList(), window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                }
+                if (view === base && shown?.second === values) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 2.5)) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
     }
 
     // ---- places (bookmarks) ----

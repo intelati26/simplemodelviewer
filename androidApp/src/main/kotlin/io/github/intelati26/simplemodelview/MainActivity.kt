@@ -356,7 +356,7 @@ private fun GlobeView(s: UiState, vm: RefsViewModel) {
 @Composable
 private fun MapView(s: UiState, vm: RefsViewModel) {
     val bitmap = s.map ?: return
-    ZoomableMap(bitmap, s.crosshair, "SPC REFS map", onViewport = vm::setViewport, onTap = vm::onTap)
+    ZoomableMap(bitmap, s.crosshair, "SPC REFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
 }
 
 @Composable
