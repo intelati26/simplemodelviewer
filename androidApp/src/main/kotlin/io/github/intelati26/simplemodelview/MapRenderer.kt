@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import simplemodelview.BarbGlyph
 import simplemodelview.ContourLine
 import simplemodelview.ContourSpec
 import simplemodelview.Contours
@@ -16,7 +15,6 @@ import simplemodelview.Product
 import simplemodelview.Stop
 import simplemodelview.Style
 import simplemodelview.View
-import simplemodelview.WindBarbs
 import simplemodelview.WindProducts
 import simplemodelview.fixed
 
@@ -67,7 +65,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
             }
         }
         lines.draw(canvas, view, dark, counties)
-        if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContours(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
+        if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContourLines(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
         WindProducts.planeLevel(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity, barbZoom)
         }
@@ -110,84 +108,15 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val stack = level == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
         if (contours) Contours.specFor("z${if (level == WindProducts.STACK) 500 else level}", "m")?.let { spec ->
             val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
-            drawContours(canvas, lines, spec.color, dark, pictureWidth)
+            drawContourLines(canvas, lines, spec.color, dark, pictureWidth)
         }
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
-        // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart)
-        val across = barbsAcross(barbDensity)
-        // the stack draws three sets from the same point (as stacked barbs are drawn), so its lattice is a little sparser
-        // [barbZoom]: the fraction of the picture on screen (pinch-zoom): the barbs are laid out for what is shown, so they keep their size on screen as the picture is magnified
-        val spacing = pictureWidth * barbZoom / if (stack) across * 0.8f else across
-        // SPC's mesoanalysis barbs measure about 0.8 of their spacing corner to corner and are drawn with thin lines: lighter than the contours' lines
-        val width = (maxOf(1.2f, pictureWidth / 1300f) * barbZoom).coerceAtLeast(0.6f)
-        val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
-        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        /** One set of barbs in [ink], moved [dx] pixels sideways. */
-        fun drawSet(barbs: List<BarbGlyph>, ink: Int, dx: Float) {
-            val path = android.graphics.Path()
-            val flags = android.graphics.Path()
-            for (b in barbs) {
-                var i = 0
-                while (i + 3 < b.lines.size) { path.moveTo(b.lines[i] + dx, b.lines[i + 1]); path.lineTo(b.lines[i + 2] + dx, b.lines[i + 3]); i += 4 }
-                i = 0
-                while (i + 5 < b.pennants.size) {
-                    flags.moveTo(b.pennants[i] + dx, b.pennants[i + 1]); flags.lineTo(b.pennants[i + 2] + dx, b.pennants[i + 3]); flags.lineTo(b.pennants[i + 4] + dx, b.pennants[i + 5]); flags.close()
-                    i += 6
-                }
-            }
-            line.strokeWidth = width + 2f * barbZoom; line.color = halo; canvas.drawPath(path, line); canvas.drawPath(flags, line)
-            line.strokeWidth = width; line.color = ink; canvas.drawPath(path, line)
-            fill.color = ink; canvas.drawPath(flags, fill)
-        }
-        if (!stack) {
-            val ink = if (dark) 0xFFF4F4F4.toInt() else 0xFF101010.toInt()
-            drawSet(WindBarbs.glyphs(WindProducts.plane(values, cells, WindProducts.U), WindProducts.plane(values, cells, WindProducts.V), product.grid, view, spacing, spacing * 0.7f), ink, 0f)
-            return
-        }
-        // 850 mb green, 700 mb blue, 500 mb red (lighter on a dark map), all from the grid point; the lower levels are drawn first so the 500 mb barb is on top
-        val inks = if (dark) listOf(0xFF5EDC8A.toInt(), 0xFF6CB4FF.toInt(), 0xFFFF7A7A.toInt()) else listOf(0xFF157A3A.toInt(), 0xFF1F5FBF.toInt(), 0xFFC62828.toInt())
-        for (k in WindProducts.stackLevels.indices) {
-            val u = WindProducts.plane(values, cells, WindProducts.stackU(k))
-            val v = WindProducts.plane(values, cells, WindProducts.stackV(k))
-            drawSet(WindBarbs.glyphs(u, v, product.grid, view, spacing, spacing * 0.7f), inks[k], 0f)
-        }
-        // the key, in the picture so a shared picture has it too
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = (maxOf(14f, pictureWidth / 70f) * barbZoom).coerceAtLeast(8f); isFakeBoldText = true }
-        var x = pictureWidth / 60f
-        val y = view.pixelHeight - pictureWidth / 60f
-        for (k in WindProducts.stackLevels.indices) {
-            val label = "${WindProducts.stackLevels[k]} mb"
-            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(label, x, y, text)
-            text.style = Paint.Style.FILL; text.color = inks[k]; canvas.drawText(label, x, y, text)
-            x += text.measureText("$label   ")
-        }
-    }
-
-    /** Contour lines over the data and the map lines: a halo under each line so it reads on any color, heavier for the bold levels, one label per level. */
-    private fun drawContours(canvas: Canvas, contours: List<ContourLine>, color: Int, dark: Boolean, pictureWidth: Int) {
-        val width = maxOf(1.5f, pictureWidth / 900f)
-        val ink = if (dark) 0xFFF0F0F0.toInt() else 0xFF000000.toInt() or color
-        val halo = if (dark) 0xAA000000.toInt() else 0xCCFFFFFF.toInt()
-        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
-        val labels = ArrayList<ContourLine>()
-        for (c in contours) {
-            val path = android.graphics.Path()
-            path.moveTo(c.points[0], c.points[1])
-            var i = 2
-            while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
-            val w = if (c.bold) width * 1.8f else width * 0.8f       // the ordinary levels are the quiet ones
-            line.strokeWidth = w + 2f; line.color = if (c.bold) halo else (halo and 0x00FFFFFF) or 0x70000000; canvas.drawPath(path, line)
-            line.strokeWidth = w; line.color = if (c.bold) ink else (ink and 0x00FFFFFF) or 0xB0000000.toInt(); canvas.drawPath(path, line)
-            if (c.labelAt >= 0) labels.add(c)
-        }
-        for (c in labels) {
-            val x = c.points[c.labelAt]; val y = c.points[c.labelAt + 1]
-            if (x < 0 || y < 0 || x > pictureWidth) continue
-            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(c.label, x, y + text.textSize / 3, text)
-            text.style = Paint.Style.FILL; text.color = ink; canvas.drawText(c.label, x, y + text.textSize / 3, text)
-        }
+        // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart). [barbZoom]: the fraction of the picture on screen (pinch-zoom):
+        // the barbs are laid out for what is shown, so they keep their size on screen as the picture is magnified. Drawn by the code the globe uses too.
+        val across = barbsAcross(barbDensity) * if (stack) 0.8f else 1f
+        val spacing = pictureWidth * barbZoom / across
+        val lineWidth = (maxOf(1.2f, pictureWidth / 1300f) * barbZoom).coerceAtLeast(0.6f)      // SPC's mesoanalysis barbs are drawn with thin lines
+        drawWindBarbs(canvas, core, FlatProjector(core, view, view.pixelWidth, view.pixelHeight), product.grid, values, level, dark, spacing, lineWidth, 2f * barbZoom, trueFrame = false, keyScale = barbZoom)
     }
 
     /** Diagonal lines inside [path] instead of a solid fill, so what is underneath stays readable. */
