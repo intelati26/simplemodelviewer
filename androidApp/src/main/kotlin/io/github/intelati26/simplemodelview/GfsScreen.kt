@@ -158,6 +158,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+            TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

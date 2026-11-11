@@ -239,6 +239,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
         }
         val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             OutlookRow(outlookState, s.times.getOrNull(s.timeIndex), onClick = { outlookDialog = true })
+            TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, s.members, withMembers = s.product?.id?.let(simplemodelview.PaintballLines::isPaintballLines) == true) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -605,6 +606,9 @@ internal fun SettingsDialog(
                         for ((mode, name) in listOf(0 to "Auto", 1 to "Always", 2 to "Never")) FilterChip(settings.counties == mode, { onChange(settings.copy(counties = mode)) }, label = { Text(name) })
                     }
                     Text("Auto draws them when the map is zoomed to a sector.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                SwitchRow("Show timings", "A small line under the map with how long the last picture took, stage by stage: data, raster, lines, contours, barbs.", settings.showTimings) {
+                    onChange(settings.copy(showTimings = it))
                 }
                 SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
                     onChange(settings.copy(optionsInExport = it))

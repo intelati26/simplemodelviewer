@@ -40,13 +40,14 @@ internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 10
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
     fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f): Bitmap {
+        val pictureStart = System.nanoTime()
         val w = view.pixelWidth
         val h = view.pixelHeight
         val argb = IntArray(w * h)
         val memberRgb = IntArray(10) { Palettes.memberColors[memberNames.getOrNull(it)] ?: 0x808080 }
         val paintLines = PaintballLines.isPaintballLines(product.id)
         // the probability contours lie over the model's own paintball (each member's cells over the threshold in its color): the mask is the same
-        core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb)
+        Timings.timed("raster") { core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb) }
         if (halo) outline(argb, w, h, edgeFor(w))
         val picture = argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -64,12 +65,13 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 canvas.drawBitmap(overlay.bitmap, null, r, paint)
             }
         }
-        lines.draw(canvas, view, dark, counties)
-        if (contours) Contours.specFor(product.id, style.units)?.let { spec -> drawContourLines(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) }
+        Timings.timed("lines") { lines.draw(canvas, view, dark, counties) }
+        if (contours) Contours.specFor(product.id, style.units)?.let { spec -> Timings.timed("contours") { drawContourLines(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) } }
         WindProducts.planeLevel(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity, barbZoom)
         }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
+        Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
         return bitmap
     }
 
@@ -107,8 +109,10 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val cells = product.grid.cells
         val stack = level == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
         if (contours) Contours.specFor("z${if (level == WindProducts.STACK) 500 else level}", "m")?.let { spec ->
-            val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
-            drawContourLines(canvas, lines, spec.color, dark, pictureWidth)
+            Timings.timed("contours") {
+                val lines = Contours.lines(WindProducts.plane(values, cells, WindProducts.HEIGHT), product.grid, view, Style(), spec)
+                drawContourLines(canvas, lines, spec.color, dark, pictureWidth)
+            }
         }
         // barbs across the picture's width, whatever area it shows (a sector gets as many as the whole country): 12 (sparse) to 56 (dense); 42 is about what SPC's
         // mesoanalysis charts draw across the country (one barb per 24 pixels of a 1000 pixel chart). [barbZoom]: the fraction of the picture on screen (pinch-zoom):
@@ -116,7 +120,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val across = barbsAcross(barbDensity) * if (stack) STACK_DENSITY else 1f
         val spacing = pictureWidth * barbZoom / across
         val lineWidth = (maxOf(1.2f, pictureWidth / 1300f) * barbZoom).coerceAtLeast(0.6f)      // SPC's mesoanalysis barbs are drawn with thin lines
-        drawWindBarbs(canvas, core, FlatProjector(core, view, view.pixelWidth, view.pixelHeight), product.grid, values, level, dark, spacing, lineWidth, 2f * barbZoom, trueFrame = false, keyScale = barbZoom)
+        Timings.timed("barbs") { drawWindBarbs(canvas, core, FlatProjector(core, view, view.pixelWidth, view.pixelHeight), product.grid, values, level, dark, spacing, lineWidth, 2f * barbZoom, trueFrame = false, keyScale = barbZoom) }
     }
 
     /** Diagonal lines inside [path] instead of a solid fill, so what is underneath stays readable. */

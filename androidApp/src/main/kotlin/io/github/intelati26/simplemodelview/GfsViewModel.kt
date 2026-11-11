@@ -235,7 +235,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val status = statusHandler()
         val key = "${file.url}|${st.product}|${st.level}|${st.color}"
         val data = globalComputed[key] ?: withContext(Dispatchers.Default) {
-            if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status)
+            Timings.timed("data") { if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status) }
         }.also { globalComputed[key] = it }
         val (product, title) = productFor(st, surface, data.grid)
         globeShown = product to data.values
@@ -321,7 +321,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val key = "${file.url}|${st.product}|${st.level}|${st.color}|${st.sector.name}"
         val region = regionFor(st)
         val values = computed[key] ?: withContext(Dispatchers.Default) {
-            if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop)
+            Timings.timed("data") { if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop) }
         }.also { computed[key] = it }
         val (product, title) = productFor(st, surface, target)
         val scale = (1400 / target.columns).coerceIn(2, 8)

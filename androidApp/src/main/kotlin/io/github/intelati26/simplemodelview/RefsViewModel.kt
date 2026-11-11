@@ -60,7 +60,7 @@ sealed class ShareArea {
 }
 
 data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150, val contactEmail: String = "", val contours: Boolean = true, val minimalUi: Boolean = false,
-    val barbDensity: Int = DEFAULT_BARB_DENSITY, val counties: Int = 0, val optionsInExport: Boolean = false, val gfsCrop: Boolean = true) {
+    val barbDensity: Int = DEFAULT_BARB_DENSITY, val counties: Int = 0, val optionsInExport: Boolean = false, val gfsCrop: Boolean = true, val showTimings: Boolean = false) {
     /** What an export is drawn with: the screen's wind barb spacing and county lines only when [optionsInExport] is on, else the defaults. */
     fun forExport(): Settings = if (optionsInExport) this else copy(barbDensity = DEFAULT_BARB_DENSITY, counties = 0)
     fun displayDiffers(o: Settings) = barbDensity != o.barbDensity || counties != o.counties
@@ -69,10 +69,10 @@ data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = 
 const val DEFAULT_BARB_DENSITY = 3
 
 fun Settings.withDisplayPrefs(prefs: android.content.SharedPreferences) =
-    copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false), gfsCrop = prefs.getBoolean("gfs_crop", true))
+    copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false), gfsCrop = prefs.getBoolean("gfs_crop", true), showTimings = prefs.getBoolean("show_timings", false))
 
 fun android.content.SharedPreferences.Editor.putDisplay(s: Settings): android.content.SharedPreferences.Editor =
-    putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport).putBoolean("gfs_crop", s.gfsCrop)
+    putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport).putBoolean("gfs_crop", s.gfsCrop).putBoolean("show_timings", s.showTimings)
 
 data class UiState(
     val busy: Boolean = true,
@@ -346,7 +346,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return
         update { it.copy(busy = true, error = null) }
-        val frame = repo.readFrameTimed(s, product, st.timeIndex, st.member)
+        val frame = Timings.timed("data") { repo.readFrameTimed(s, product, st.timeIndex, st.member) }
         values = frame.values
         update { it.copy(fileTime = frame.fileTime, runComplete = s.metadataTime) }
         rerender()

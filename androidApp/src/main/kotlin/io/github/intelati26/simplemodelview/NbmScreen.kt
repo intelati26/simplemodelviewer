@@ -170,6 +170,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
         }
         val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
+            TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

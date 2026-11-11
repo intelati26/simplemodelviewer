@@ -573,7 +573,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     ): MrmsFrame {
         val key = "${file.key}|$label|$step"
         if (cache) decoded[key]?.let { return it }
-        val f = withMemory { withContext(Dispatchers.Default) { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) } }
+        val f = withMemory { withContext(Dispatchers.Default) { Timings.timed("data") { repo.loadFrame(product, file, box[0], box[1], box[2], box[3], step, target) } } }
         if (cache) { decoded[key] = f; trimCache() }
         return f
     }

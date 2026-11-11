@@ -285,7 +285,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** The decoded field of [file]: cached for a few frames, decoded again (a few tens of milliseconds) otherwise. */
     private suspend fun decode(file: NbmFile, cache: Boolean = true): GridField {
         if (cache) decoded[file.cacheKey]?.let { return it }
-        val field = withContext(Dispatchers.Default) { repo.loadFrame(file) { text -> if (file.grib) update { it.copy(loadStatus = text) } } }
+        val field = withContext(Dispatchers.Default) { Timings.timed("data") { repo.loadFrame(file) { text -> if (file.grib) update { it.copy(loadStatus = text) } } } }
         if (cache) { decoded[file.cacheKey] = field; trimCache() }
         if (file.grib) update { it.copy(loadStatus = null) }
         return field

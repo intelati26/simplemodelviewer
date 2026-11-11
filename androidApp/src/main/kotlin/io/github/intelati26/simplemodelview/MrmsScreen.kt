@@ -177,6 +177,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
                 s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             } }
+            TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

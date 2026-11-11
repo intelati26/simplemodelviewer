@@ -36,6 +36,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
         product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false,
     ): Bitmap {
+        val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF070B14.toInt() else 0xFFE8EDF3.toInt())
@@ -57,11 +58,12 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
-        core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
+        Timings.timed("raster") { core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer) }
         canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)
 
-        lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1)
+        Timings.timed("lines") { lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
         if (product != null) decorate(canvas, grid, values, style, product, cam, width, height, dark, contours, barbDensity, windInTrueFrame)
+        Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 
         canvas.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.style = Paint.Style.STROKE; strokeWidth = 1.5f; color = if (dark) 0x66FFFFFF else 0x66000000
@@ -85,7 +87,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
                     val cstyle = if (windLevel != null) Style() else style
                     // the lines are traced on the whole grid (pixels of a one-pixel-per-cell view), then every vertex becomes a latitude / longitude
                     val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
-                    geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) }
+                    Timings.timed("contours") { geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) } }
                     geoKey = key
                 }
                 drawContourLines(canvas, projectedContours(cam, width, height), spec.color, dark, width)
@@ -94,7 +96,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         if (windLevel != null) {
             // the globe is crowded sooner than a flat map (the barbs sit over the data and the lines, and thin out toward the limb): one density level down
             val across = barbsAcross((barbDensity - 1).coerceAtLeast(1)) * if (level(windLevel, values, cells)) STACK_DENSITY else 1f
-            drawWindBarbs(canvas, core, GlobeProjector(cam, width, height), grid, values, windLevel, dark, width / across, maxOf(1.2f, width / 1300f), 2f, trueFrame)
+            Timings.timed("barbs") { drawWindBarbs(canvas, core, GlobeProjector(cam, width, height), grid, values, windLevel, dark, width / across, maxOf(1.2f, width / 1300f), 2f, trueFrame) }
         }
     }
 
