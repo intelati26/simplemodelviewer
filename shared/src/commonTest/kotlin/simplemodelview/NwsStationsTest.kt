@@ -7,7 +7,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class NwsStationsTest {
-    private val point = """{"properties":{"gridId":"OUN","gridX":100,"gridY":83,"observationStations":"https://api.weather.gov/gridpoints/OUN/100,83/stations","forecastGridData":"https://api.weather.gov/gridpoints/OUN/100,83",
+    private val point = """{"properties":{"gridId":"OUN","gridX":100,"gridY":83,"observationStations":"https://api.weather.gov/gridpoints/OUN/100,83/stations","forecastGridData":"https://api.weather.gov/gridpoints/OUN/100,83","timeZone":"America/Chicago",
         "relativeLocation":{"properties":{"city":"Norman","state":"OK"}}}}"""
     private val stations = """{"features":[
         {"geometry":{"type":"Point","coordinates":[-97.4708,35.2435]},"properties":{"stationIdentifier":"KOUN","name":"Norman / Max Westheimer"}},
@@ -28,6 +28,7 @@ class NwsStationsTest {
         assertEquals(100, p.gridX)
         assertEquals("https://api.weather.gov/gridpoints/OUN/100,83/stations", p.stationsUrl)
         assertEquals("Norman, OK", p.place)
+        assertEquals("America/Chicago", p.timeZone)
         assertEquals("https://api.weather.gov/gridpoints/OUN/100,83", p.gridUrl)
         assertNull(parseNwsPoint("{}"))
         assertNull(parseNwsPoint("not json"))

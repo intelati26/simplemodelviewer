@@ -57,22 +57,22 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** The device's time zone: the "Local" row and the pick bar show a column's time in it beside the bulletins' UTC (the bulletins' days and hours are UTC). */
-private fun localZone(): ZoneId = ZoneId.systemDefault()
+/** The place's own time zone (from api.weather.gov): the "Local" row and the pick bar show a column's time there beside the bulletins' UTC. The device's zone when it is not known. */
+private fun placeZone(id: String?): ZoneId = try { if (id.isNullOrBlank()) ZoneId.systemDefault() else ZoneId.of(id) } catch (_: Exception) { ZoneId.systemDefault() }
 
-/** "7p", "12a": the hour in the device's zone, short enough for a column. */
-private fun localHour(valid: Long): String {
-    val t = ZonedDateTime.ofInstant(Instant.ofEpochSecond(valid), localZone())
+/** "7p", "12a": the hour in the place's zone, short enough for a column. */
+private fun localHour(zone: ZoneId, valid: Long): String {
+    val t = ZonedDateTime.ofInstant(Instant.ofEpochSecond(valid), zone)
     val h = t.hour % 12
     return (if (h == 0) 12 else h).toString() + (if (t.hour < 12) "a" else "p")
 }
 
 /** "Thu 7:00 PM CST" for the pick bar. */
-private fun localFull(valid: Long): String =
-    DateTimeFormatter.ofPattern("EEE h:mm a zzz", Locale.US).format(ZonedDateTime.ofInstant(Instant.ofEpochSecond(valid), localZone()))
+private fun localFull(zone: ZoneId, valid: Long): String =
+    DateTimeFormatter.ofPattern("EEE h:mm a zzz", Locale.US).format(ZonedDateTime.ofInstant(Instant.ofEpochSecond(valid), zone))
 
 /** The zone's short name now ("CST"): the label of the Local row. */
-private fun localName(): String = DateTimeFormatter.ofPattern("zzz", Locale.US).format(ZonedDateTime.now(localZone()))
+private fun localName(zone: ZoneId): String = DateTimeFormatter.ofPattern("zzz", Locale.US).format(ZonedDateTime.now(zone))
 
 private val COLUMN_WIDTH = 46.dp
 private val LABEL_WIDTH = 62.dp
@@ -124,8 +124,8 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
             table == null -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             else -> {
                 s.error?.let { Text(it, Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                PointBody(table, s.selected, vm::select, Modifier.weight(1f))
-                s.selected?.let { i -> table.columns.getOrNull(i)?.let { column -> SynopticBar(column, s.checking) { vm.openSynoptic(column.valid) { cycle -> onSynoptic(column.valid, cycle) } } } }
+                PointBody(table, placeZone(s.zone), s.selected, vm::select, Modifier.weight(1f))
+                s.selected?.let { i -> table.columns.getOrNull(i)?.let { column -> SynopticBar(column, placeZone(s.zone), s.checking) { vm.openSynoptic(column.valid) { cycle -> onSynoptic(column.valid, cycle) } } } }
             }
         }
     }
@@ -145,7 +145,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
 }
 
 @Composable
-private fun PointBody(table: PointTable, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier) {
+private fun PointBody(table: PointTable, zone: ZoneId, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier) {
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
@@ -169,7 +169,7 @@ private fun PointBody(table: PointTable, selected: Int?, onSelect: (Int) -> Unit
         Row { table.columns.indices.forEach { i -> Box(Modifier.width(COLUMN_WIDTH).height(22.dp)) { days.firstOrNull { it.first == i }?.let { Text(it.second, Modifier.wrapContentWidth(unbounded = true, align = Alignment.Start).padding(start = 3.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) } } } }
     }
     rows += RowDef("UTC", 22.dp) { valueRow(text = { pointHourLabel(it) }, color = { if (it.source == "API") apiColor else Color.Unspecified }) }
-    rows += RowDef(localName(), 22.dp) { valueRow(text = { localHour(it.valid) }, color = { Color.Gray }) }
+    rows += RowDef(localName(zone), 22.dp) { valueRow(text = { localHour(zone, it.valid) }, color = { Color.Gray }) }
     rows += RowDef("°F", 140.dp) { TemperatureChart(table, COLUMN_WIDTH, 140.dp, selected, onSelect) }
     rows += RowDef("Temp", 22.dp) { valueRow(text = { it.value(NbmTextElements.TEMP)?.toString() }, color = { Color(0xFFD84315) }) }
     rows += RowDef("± spread", 22.dp) { valueRow(text = { it.value(NbmTextElements.TEMP_SPREAD)?.let { v -> "±$v" } }) }
@@ -204,11 +204,11 @@ private fun PointBody(table: PointTable, selected: Int?, onSelect: (Int) -> Unit
 
 /** The column picked: its time, and the button that opens the heights and winds for it: on a REFS run that has the time, else on GFS (the page asks the runs when it is pressed). */
 @Composable
-private fun SynopticBar(column: PointColumn, checking: Boolean, onOpen: () -> Unit) {
+private fun SynopticBar(column: PointColumn, zone: ZoneId, checking: Boolean, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(formatUtc(column.valid), fontWeight = FontWeight.Bold)
-            Text(localFull(column.valid), style = MaterialTheme.typography.bodySmall)
+            Text(localFull(zone, column.valid), style = MaterialTheme.typography.bodySmall)
         }
         Button(onClick = onOpen, enabled = !checking) { Text(if (checking) "Looking for a REFS run…" else "Heights & winds (REFS, else GFS)") }
     }

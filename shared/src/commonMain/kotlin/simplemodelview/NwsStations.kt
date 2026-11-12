@@ -11,7 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 data class NwsStation(val id: String, val name: String, val lat: Double, val lon: Double)
 
 /** Where api.weather.gov puts a point: the forecast office's grid and the link to the stations nearest it. */
-class NwsPoint(val office: String, val gridX: Int, val gridY: Int, val stationsUrl: String, val gridUrl: String, val place: String)
+class NwsPoint(val office: String, val gridX: Int, val gridY: Int, val stationsUrl: String, val gridUrl: String, val place: String, val timeZone: String = "")
 
 /** The reply of `/points/<lat>,<lon>`, or null when it is not one. */
 fun parseNwsPoint(text: String): NwsPoint? = try {
@@ -21,6 +21,7 @@ fun parseNwsPoint(text: String): NwsPoint? = try {
     NwsPoint(
         p["gridId"]!!.jsonPrimitive.content, p["gridX"]!!.jsonPrimitive.content.toInt(), p["gridY"]!!.jsonPrimitive.content.toInt(),
         p["observationStations"]!!.jsonPrimitive.content, p["forecastGridData"]?.jsonPrimitive?.content.orEmpty(), place,
+        p["timeZone"]?.jsonPrimitive?.content.orEmpty(),
     )
 } catch (e: Exception) { null }
 

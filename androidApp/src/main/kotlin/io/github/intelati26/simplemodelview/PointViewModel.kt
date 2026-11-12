@@ -30,6 +30,7 @@ data class PointState(
     val error: String? = null,
     val station: String? = null,
     val stationName: String? = null,
+    val zone: String? = null,                 // the place's time zone ("America/Chicago"), from api.weather.gov
     val table: PointTable? = null,
     val sources: String = "",                 // which files the columns came from, for the line under the header
     val selected: Int? = null,                // the column picked (an index into the table's columns)
@@ -126,18 +127,20 @@ class PointViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (files.values.all { it == null }) throw IllegalStateException("No NBM bulletins were found on the server.")
                 val key = "point_station_${place.lat}_${place.lon}"
-                var saved = prefs.getString(key, null)?.split("|")?.takeIf { it.size == 3 }       // id | name | grid link
+                var saved = prefs.getString(key, null)?.split("|")?.takeIf { it.size == 4 }       // id | name | grid link | time zone
                 if (saved == null) {
+                    // (a place saved by an earlier version has no time zone: the point is asked once more, and the station kept)
+                    val old = prefs.getString(key, null)?.split("|")?.takeIf { it.size == 3 }
                     update { it.copy(status = "Finding the bulletin station for ${place.name}") }
                     val point = nws.point(place.lat, place.lon) ?: throw IllegalStateException("The NWS does not have a forecast point for ${place.name} (is it in the US?).")
                     val probe = files["NBX"] ?: files["NBE"] ?: files["NBS"]!!
-                    val station = nws.station(point) { id -> bulletins.station(probe, id) != null }
+                    val station = if (old != null) null else nws.station(point) { id -> bulletins.station(probe, id) != null }
                         ?: throw IllegalStateException("No bulletin station was found near ${place.name}.")
-                    saved = listOf(station.id, station.name.replace('|', '/'), point.gridUrl)
+                    saved = listOf(old?.get(0) ?: station!!.id, old?.get(1) ?: station!!.name.replace('|', '/'), old?.get(2) ?: point.gridUrl, point.timeZone)
                     prefs.edit().putString(key, saved.joinToString("|")).apply()
                 }
-                val (id, name, gridUrl) = saved
-                update { it.copy(station = id, stationName = name, status = "Reading the bulletins for $id") }
+                val (id, name, gridUrl, zone) = saved
+                update { it.copy(station = id, stationName = name, zone = zone.takeIf { z -> z.isNotBlank() }, status = "Reading the bulletins for $id") }
                 val tables: Map<String, NbmTextTable?> = coroutineScope {
                     files.map { (kind, file) -> async { kind to file?.let { f -> try { bulletins.station(f, id) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } } } }
                         .map { it.await() }.toMap()
