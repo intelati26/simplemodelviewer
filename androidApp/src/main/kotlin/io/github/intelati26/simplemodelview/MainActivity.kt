@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
     private val mrmsViewModel: MrmsViewModel by viewModels()
     private val nbmViewModel: NbmViewModel by viewModels()
     private val gfsViewModel: GfsViewModel by viewModels()
+    private val pointViewModel: PointViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,7 +120,7 @@ class MainActivity : ComponentActivity() {
         val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs").firstOrNull { it == start } ?: "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point").firstOrNull { it == start } ?: "spc") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -129,7 +130,12 @@ class MainActivity : ComponentActivity() {
                         open(p)
                         when (p) { "spc" -> viewModel.reloadFromPrefs(); "mrms" -> mrmsViewModel.reloadFromPrefs(); "nbm" -> nbmViewModel.reloadFromPrefs() }
                     }
-                    if (page == "gfs") GfsScreen(gfsViewModel, go)
+                    // the extended point view opens the synoptic set up of a time on the REFS page, or on the GFS page beyond its range
+                    val toSynoptic: (Long, Boolean) -> Unit = { valid, refs ->
+                        if (refs) { viewModel.showValid(valid); go("spc") } else { gfsViewModel.showValid(valid); go("gfs") }
+                    }
+                    if (page == "point") PointScreen(pointViewModel, go, toSynoptic)
+                    else if (page == "gfs") GfsScreen(gfsViewModel, go)
                     else if (page == "nbm") NbmScreen(nbmViewModel, go)
                     else if (page == "mrms") MrmsScreen(mrmsViewModel, go)
                     else {

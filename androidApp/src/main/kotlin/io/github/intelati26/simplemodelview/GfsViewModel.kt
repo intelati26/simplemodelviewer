@@ -136,7 +136,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                     val picked = chosen ?: throw IllegalStateException("No recent GFS data.")
                     if (picked.second.isEmpty()) throw IllegalStateException("The newest GFS run has no files yet.")
                     lastLoad = System.currentTimeMillis()
-                    val keep = _state.value.file?.valid
+                    val keep = wantedValid?.also { wantedValid = null } ?: _state.value.file?.valid
                     val frames = picked.second
                     val index = keep?.let { v -> frames.indices.minByOrNull { kotlin.math.abs(frames[it].valid - v) } } ?: frames.indexOfFirst { it.valid >= now - 1800 }.let { if (it < 0) frames.size - 1 else it }
                     update { it.copy(cycles = cycles, cycle = picked.first, following = hand == null, frames = frames, index = index, notice = note ?: it.notice) }
@@ -158,6 +158,22 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun pickCycle(cycle: NbmCycle?) { pickedCycle = cycle; load() }
+
+    // the extended point view asks for the synoptic set up at a valid time: Heights & Winds at 500 mb at the frame nearest it
+    private var wantedValid: Long? = null
+
+    /** Shows heights and winds at 500 mb at the frame nearest [valid] (epoch seconds); done when the run's frames are listed, otherwise as soon as they are. */
+    fun showValid(valid: Long) {
+        wantedValid = valid
+        stopPlaying()
+        prefs.edit().putString("gfs_product", "hw").putInt("gfs_level", 500).apply()
+        update { it.copy(product = "hw", level = 500, crosshair = null, readout = null) }
+        val frames = _state.value.frames
+        if (frames.isEmpty()) return
+        wantedValid = null
+        update { it.copy(index = frames.indices.minByOrNull { i -> kotlin.math.abs(frames[i].valid - valid) } ?: 0) }
+        showFrame()
+    }
 
     // ---- what is shown ----
     fun pickHeightsAndWinds() { prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw", crosshair = null, readout = null) }; showFrame() }

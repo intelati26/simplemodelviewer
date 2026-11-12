@@ -113,6 +113,9 @@ data class UiState(
         get() = cycle?.let { c -> times.getOrNull(timeIndex)?.let { ((it - c.epochSeconds) / 3600).toInt() } }
 }
 
+/** The level of the synoptic set up the extended point view opens. */
+private const val WIND_LEVEL_FOR_SETUP = 500
+
 /** The member the member viewer opens on: the RRFS control member (shown as "RRFS Ctl"). */
 private const val DEFAULT_MEMBER = "RRFS"
 
@@ -159,6 +162,18 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val outlook = AppContainer.outlook
 
+    // the extended point view asks for the synoptic set up at a valid time: Heights & Winds (500 mb) at the time step nearest it
+    private var wantedValid: Long? = null
+    private var wantWind = false
+
+    /** Shows Heights & Winds at 500 mb at the time step nearest [valid] (epoch seconds); done when the run is open, otherwise as soon as it is. */
+    fun showValid(valid: Long) {
+        wantedValid = valid
+        wantWind = true
+        stopPlaying()
+        if (store != null && _state.value.products.isNotEmpty()) pickWindLevel(WIND_LEVEL_FOR_SETUP)
+    }
+
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
@@ -202,7 +217,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val opened = repo.open(cycle)
         store = opened
         val last = prefs.getString("product", null)
-        val product = opened.products.firstOrNull { it.id == last }
+        val wind = if (!wantWind) null else {
+            val color = WindProducts.colors.firstOrNull { it.key == _state.value.windColor } ?: WindProducts.colors.first()
+            (opened.products.firstOrNull { it.id == WindProducts.id(WIND_LEVEL_FOR_SETUP, color) } ?: opened.products.firstOrNull { it.id == WindProducts.id(WIND_LEVEL_FOR_SETUP) }).also { if (it != null) wantWind = false }
+        }
+        val product = wind ?: opened.products.firstOrNull { it.id == last }
             ?: opened.products.firstOrNull { it.id == "cref" } ?: opened.products.firstOrNull { it.id == "cref_max" } ?: opened.products.first()   // (starts at F000 / F001, unlike the 4-h products)
         val members = repo.members(opened)
         // a (new) run always opens at its earliest time step: F000 / F001, not wherever the previous run's slider was
@@ -267,7 +286,20 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val times = repo.validTimes(s, product)
         val before = _state.value
         val hour = if (keepHour) before.forecastHour else null
-        val index = if (hour == null) 0 else times.indexOfFirst { (it - s.cycle.epochSeconds) / 3600 == hour.toLong() }.coerceAtLeast(0)
+        val wanted = wantedValid
+        // a run that is still being written has not reached the time asked for: the run before it (and so on back) is the one that shows it
+        if (wanted != null && times.isNotEmpty() && times.last() < wanted - 3599) {
+            val older = _state.value.cycles.dropWhile { it != s.cycle }.drop(1).firstOrNull()
+            if (older != null) {
+                wantWind = true
+                openCycle(older)
+                return
+            }
+        }
+        val index = if (wanted != null && times.isNotEmpty()) {
+            wantedValid = null
+            times.indices.minByOrNull { kotlin.math.abs(times[it] - wanted) } ?: 0
+        } else if (hour == null) 0 else times.indexOfFirst { (it - s.cycle.epochSeconds) / 3600 == hour.toLong() }.coerceAtLeast(0)
         update { it.copy(product = product, times = times, timeIndex = index) }
         loadFrame()
     }

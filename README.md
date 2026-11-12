@@ -3,7 +3,7 @@
 Minimalist Android / iOS viewer for model and radar data from NOAA, built around SPC's REFS ensemble products. Scope and decisions:
 [docs/outline.md](docs/outline.md) (source: `android-spc-refs-scope.md`). Current version: 0.2.2.
 
-**Four pages** (the page menu in the header), one renderer and one core behind all of them:
+**Five pages** (the page menu in the header), one renderer and one core behind all of them:
 
 | Page | Data | Section below |
 |---|---|---|
@@ -11,6 +11,7 @@ Minimalist Android / iOS viewer for model and radar data from NOAA, built around
 | MRMS | NOAA's MRMS radar and derived products (GRIB2) | MRMS page, Overlay, Alerts |
 | NBM | National Blend of Models to 11 days (GeoTIFF, with a GRIB fallback) | NBM page |
 | GFS | GFS upper air and surface fields to 16 days (GRIB2 byte ranges) | GFS page |
+| Extended | A saved place's forecast for the next 11 days: graphs and a table from the NBM text bulletins | Extended page |
 
 All pages have sectors, tap read-out, a loop, share and the data cache; the model pages (REFS, NBM, GFS) also have a **Time** drop list beside the slider that lists every valid time of the run, grouped by day, to jump straight to one; the SPC outlook overlay is on the REFS, MRMS and NBM pages (see below).
 
@@ -62,6 +63,15 @@ fields wanted are fetched (about 0.5 to 0.8 MB each). **Cropping:** for a sector
 if NOMADS does not answer it falls back to AWS byte ranges, then to a truncated download of the top rows of each message (the core decodes a message's first rows), and whole
 fields are the last resort. A Settings switch controls the NOMADS crop and the header line says where the data came from. It has runs, loop, sectors, tap read-out and share like
 the others. Its first commit calls the page a sketch.
+
+## Extended page
+A saved place's forecast for the next 11 days in one view, from the NBM's text bulletins for the place's nearest station: **NBS** (every 3 hours to 72 h), **NBE** (every 12 hours to 192 h) and **NBX** (to 264 h), with the NWS gridded forecast (`api.weather.gov`) in front of them for the hours before the first NBS column (every 3 hours, temperature, dewpoint, sky, wind and gust only). The page menu's "Extended" opens it; a drop list at the top picks the place from the saved places.
+
+- **Graphs and table:** temperature and dewpoint with a band of one standard deviation (it widens with the lead time: the point of an extended view), the 32 F line, wind speed, gust and direction arrows, a bar for the chance of precipitation (the short-range bulletin's 6-hour chances lighter, the 12-hour ones darker), and rows under them for the values, the day's high and low, sky cover, rain, snow and ice amounts and the thunderstorm chance where the bulletins have them. The columns are of equal width, so the spacing of the times changes where the sources change. Units are the bulletins' own: F, knots, inches, snow level in thousands of feet.
+- **Pick a time:** tap a column (a graph or the table). A bar shows its time and a button: **Heights & winds on REFS** for times within about 54 hours of now, otherwise **on GFS**. It opens that page on the 500 mb heights and winds at the frame nearest the time. If the newest REFS run is still being written and has not reached the time, the run before it is used.
+- **How one station is read:** the bulletin files hold all 9,589 stations (NBX 10.6 MB, NBE 20.9 MB), so one station is found with small byte-range reads: a coarse index of 32 windows over the file (the file is several sorted runs one after another, not one), then a bisection where the sampled ids ascend through the station and a read-through where a break lies inside. On the real files every station was found, in about 7 to 10 reads once the file was indexed (`NbmText.kt`).
+- **Privacy:** the first time a place is picked, its coordinates are sent to `api.weather.gov` to find the nearest bulletin station (the first of the nearest observing stations that the blend carries) and the grid link; the answer is kept on the device and the coordinates are not sent again for that place.
+- **Not done:** wind in mph, a map thumbnail of the synoptic set up on the page itself, precipitation type, sectors other than CONUS for the hand-off.
 
 ## Wind barbs
 The REFS page's **Heights & Winds** product has a level (500 / 700 / 850 mb) and a color (wind speed, 2 m temperature, level temperature, 2 m dewpoint, 2 m relative humidity)

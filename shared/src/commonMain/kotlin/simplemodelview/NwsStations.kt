@@ -61,9 +61,12 @@ class NwsPointClient(private val http: Http) {
     }
 
     /** The gridded forecast of the point, or null when it cannot be had. */
-    suspend fun grid(point: NwsPoint): NwsGridData? {
-        if (point.gridUrl.isEmpty()) return null
-        val reply = http.get(point.gridUrl)
+    suspend fun grid(point: NwsPoint): NwsGridData? = grid(point.gridUrl)
+
+    /** The gridded forecast at a link kept from an earlier [point] call (a place's grid does not move). */
+    suspend fun grid(gridUrl: String): NwsGridData? {
+        if (gridUrl.isEmpty()) return null
+        val reply = http.get(gridUrl)
         return if (reply.status == 200) parseNwsGrid(reply.body.decodeToString()) else null
     }
 }

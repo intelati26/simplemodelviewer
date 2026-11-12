@@ -9,6 +9,8 @@ import simplemodelview.LightningCastRepository
 import simplemodelview.ProbSevereRepository
 import simplemodelview.MrmsRepository
 import simplemodelview.NbmRepository
+import simplemodelview.NbmTextRepository
+import simplemodelview.NwsPointClient
 import simplemodelview.OutlookRepository
 import simplemodelview.RefsRepository
 
@@ -47,6 +49,8 @@ object AppContainer {
     val gribStore by lazy { DiskGribStore(app, File(app.cacheDir, "grib"), capBytes = { prefs.getInt("cache_mb", 150).toLong() * 1024 * 1024 }) }
     val nbm by lazy { NbmRepository(http, core, gribStore) }
     val gfs by lazy { GfsRepository(http, core, gribStore) }
+    val nbmText by lazy { NbmTextRepository(http) }
+    val nws by lazy { NwsPointClient(http) }
     val outlook by lazy { OutlookModel(OutlookRepository(http), prefs) }
     val probSevere by lazy { ProbSevereModel(ProbSevereRepository(http) { prefs.getString("probsevere_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }

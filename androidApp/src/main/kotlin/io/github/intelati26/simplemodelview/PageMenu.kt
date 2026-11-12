@@ -16,7 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /** The pages of the app: the id saved as the page last used, and the name on the page menu. */
-internal val APP_PAGES = listOf("spc" to "REFS", "mrms" to "MRMS", "nbm" to "NBM", "gfs" to "GFS")
+internal val APP_PAGES = listOf("spc" to "REFS", "mrms" to "MRMS", "nbm" to "NBM", "gfs" to "GFS", "point" to "Extended")
 
 /** One button with the name of the page on show; it opens a list of the pages (all of them, the current one marked). */
 @Composable
