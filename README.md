@@ -105,6 +105,7 @@ On the SPC REFS page, heights (500 / 700 / 850 mb), mean sea-level pressure and 
 | `docs/nbm-products.md` | the NBM page: products, runs, the GRIB fallback |
 | `docs/spc-colormaps.md`, `docs/spc-outlooks.md` | SPC's color tables; the outlook overlay and the comparison with wxqt's MRMS overlays |
 | `docs/android-auto.md` | the car app |
+| `docs/extended-point-view.md` | the Extended page, written up so it can be re-implemented (for wxqt-grib): data formats, the one-station fetch, the merge, the hand-off |
 | `docs/loop-video-size.md` | why a loop video is several MB and what shrinks it |
 | `docs/separating-spc.md`, `docs/grib-companion-scope.md`, `docs/nomads-spc-post.md` | suggestions and research, **not built** |
 
