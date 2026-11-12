@@ -1,5 +1,6 @@
 package io.github.intelati26.simplemodelview
 
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -124,7 +125,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
             table == null -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             else -> {
                 s.error?.let { Text(it, Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                PointBody(table, placeZone(s.zone), s.selected, vm::select, Modifier.weight(1f))
+                PointBody(table, s.upper, placeZone(s.zone), s.selected, vm::select, Modifier.weight(1f))
                 s.selected?.let { i -> table.columns.getOrNull(i)?.let { column -> SynopticBar(column, placeZone(s.zone), s.checking) { vm.openSynoptic(column.valid) { cycle -> onSynoptic(column.valid, cycle) } } } }
             }
         }
@@ -145,7 +146,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
 }
 
 @Composable
-private fun PointBody(table: PointTable, zone: ZoneId, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier) {
+private fun PointBody(table: PointTable, upper: Map<Long, UpperAir>, zone: ZoneId, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier) {
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
@@ -188,6 +189,13 @@ private fun PointBody(table: PointTable, zone: ZoneId, selected: Int?, onSelect:
     if (table.hasAny(NbmTextElements.ICE12)) rows += RowDef("Ice in", 22.dp) { valueRow(text = { c -> inches(c.value(NbmTextElements.ICE12)) }, color = { Color(0xFF6A1B9A) }) }
     if (table.hasAny(NbmTextElements.THUNDER12) || table.hasAny("T06")) rows += RowDef("T-storm %", 22.dp) { valueRow(text = { c -> (c.value(NbmTextElements.THUNDER12) ?: c.value("T06"))?.takeIf { it > 0 }?.toString() }) }
     if (table.hasAny(NbmTextElements.SNOW_LEVEL)) rows += RowDef("Snow kft", 22.dp) { valueRow(text = { c -> c.value(NbmTextElements.SNOW_LEVEL)?.let { (it / 10.0).toString() } }) }       // (hundreds of feet in the bulletin)
+
+    if (upper.isNotEmpty()) {
+        // (GFS at the place; NBM columns at hours the GFS has no frame for stay empty)
+        rows += RowDef("MSLP hPa", 22.dp) { valueRow(text = { upper[it.valid]?.mslp?.let { v -> v.roundToInt().toString() } }, color = { Color(0xFF5E35B1) }) }
+        rows += RowDef("500 dam", 22.dp) { valueRow(text = { upper[it.valid]?.height500?.let { v -> v.roundToInt().toString() } }, color = { Color(0xFF00838F) }) }
+        rows += RowDef("850 °C", 22.dp) { valueRow(text = { upper[it.valid]?.temp850?.let { v -> v.roundToInt().toString() } }, color = { Color(0xFFD84315) }) }
+    }
 
     Row(modifier.fillMaxWidth().verticalScroll(vertical)) {
         Column(Modifier.width(LABEL_WIDTH).background(MaterialTheme.colorScheme.background)) {

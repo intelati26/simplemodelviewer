@@ -10,6 +10,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import simplemodelview.GfsMessage
 import simplemodelview.NbmTextTable
 import simplemodelview.Cycle
 import simplemodelview.NwsGridData
@@ -34,8 +35,12 @@ data class PointState(
     val table: PointTable? = null,
     val sources: String = "",                 // which files the columns came from, for the line under the header
     val selected: Int? = null,                // the column picked (an index into the table's columns)
+    val upper: Map<Long, UpperAir> = emptyMap(),   // GFS at the place by valid time: pressure, 500 mb height, 850 mb temperature (filled in after the table shows)
     val checking: Boolean = false,            // looking for a REFS run that has the time picked
 )
+
+/** The GFS's upper-air and pressure values at the place: sea-level pressure (hPa), 500 mb height (dam), 850 mb temperature (C). */
+data class UpperAir(val mslp: Float?, val height500: Float?, val temp850: Float?)
 
 /**
  * The extended point view: the NBM's forecast for the nearest bulletin station of a saved place, hours 0 to 264 in one table. The hours before the
@@ -47,6 +52,8 @@ class PointViewModel(app: Application) : AndroidViewModel(app) {
     private val bulletins = AppContainer.nbmText
     private val nws = AppContainer.nws
     private val refs = AppContainer.repo
+    private val gfs = AppContainer.gfs
+    private var upperJob: Job? = null
     private var job: Job? = null
     private var lastLoad = 0L
     private var loadedFor: Place? = null
@@ -156,12 +163,41 @@ class PointViewModel(app: Application) : AndroidViewModel(app) {
                 ).joinToString(" · ")
                 lastLoad = System.currentTimeMillis()
                 loadedFor = place
-                update { it.copy(busy = false, status = null, table = table, sources = sources, selected = null) }
+                update { it.copy(busy = false, status = null, table = table, sources = sources, selected = null, upper = emptyMap()) }
+                loadUpper(place, table)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 update { it.copy(busy = false, status = null, error = e.message ?: e.toString()) }
             }
+        }
+    }
+
+    /** The GFS's sea-level pressure, 500 mb height and 850 mb temperature at the place for each column, from the newest run: the columns fill in as frames arrive. */
+    private fun loadUpper(place: Place, table: PointTable) {
+        upperJob?.cancel()
+        upperJob = viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis() / 1000
+                // the newest run may still be writing its first files: the newest one with its frames up to the far hours is used (else the fullest of the two newest)
+                val runs = gfs.listCycles(now).take(2).map { it to gfs.listFrames(it, "gfs") }
+                val frames = (runs.firstOrNull { it.second.size >= 100 } ?: runs.maxByOrNull { it.second.size })?.second.orEmpty()
+                if (frames.isEmpty()) return@launch
+                val wanted = listOf(GfsMessage("PRMSL", "mean sea level"), GfsMessage("HGT", "500 mb"), GfsMessage("TMP", "850 mb"))
+                val done = java.util.concurrent.ConcurrentHashMap<Long, UpperAir>()
+                coroutineScope {
+                    for (column in table.columns) {
+                        val frame = frames.minByOrNull { kotlin.math.abs(it.valid - column.valid) }?.takeIf { kotlin.math.abs(it.valid - column.valid) <= 5400 } ?: continue
+                        launch {
+                            val v = try { gfs.pointValues(frame, wanted, place.lat, place.lon) } catch (e: CancellationException) { throw e } catch (_: Exception) { return@launch }
+                            done[column.valid] = UpperAir(v["PRMSL:mean sea level"]?.let { it / 100f }, v["HGT:500 mb"]?.let { it / 10f }, v["TMP:850 mb"]?.let { it - 273.15f })
+                            update { it.copy(upper = done.toMap()) }
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) { /* the rows are simply not shown */ }
         }
     }
 }

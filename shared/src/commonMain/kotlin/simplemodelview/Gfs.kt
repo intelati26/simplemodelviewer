@@ -322,6 +322,27 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return out
     }
 
+    /**
+     * The values of [wanted] at one point of a GFS frame (keys "VARIABLE:level", unconverted; bilinear between the four nearest cells), from a NOMADS box of
+     * about a degree around it (a few kilobytes). NOMADS only: a whole-field fallback for a hundred frames would be far too much to download.
+     */
+    suspend fun pointValues(file: NbmFile, wanted: List<GfsMessage>, lat: Double, lon: Double): Map<String, Float> {
+        val box = doubleArrayOf(lon - 0.6, lat - 0.6, lon + 0.6, lat + 0.6)
+        val got = fields(file, wanted, box, true) { }
+        val out = HashMap<String, Float>()
+        for ((name, f) in got) {
+            val (c, r) = core.latLonToGrid(f.grid, lat, lon)
+            val c0 = kotlin.math.floor(c).toInt().coerceIn(0, f.grid.columns - 2)
+            val r0 = kotlin.math.floor(r).toInt().coerceIn(0, f.grid.rows - 2)
+            val fc = (c - c0).coerceIn(0.0, 1.0).toFloat()
+            val fr = (r - r0).coerceIn(0.0, 1.0).toFloat()
+            fun at(cc: Int, rr: Int) = f.values[rr * f.grid.columns + cc]
+            val v = (at(c0, r0) * (1 - fc) + at(c0 + 1, r0) * fc) * (1 - fr) + (at(c0, r0 + 1) * (1 - fc) + at(c0 + 1, r0 + 1) * fc) * fr
+            if (!v.isNaN()) out[name] = v
+        }
+        return out
+    }
+
     private fun plane(field: GridField, convert: (Float) -> Float, target: Grid): FloatArray {
         val v = field.values
         for (i in v.indices) v[i] = convert(v[i])
