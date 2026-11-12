@@ -51,6 +51,28 @@ import simplemodelview.PointTable
 import simplemodelview.formatUtc
 import simplemodelview.pointDays
 import simplemodelview.pointHourLabel
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+/** The device's time zone: the "Local" row and the pick bar show a column's time in it beside the bulletins' UTC (the bulletins' days and hours are UTC). */
+private fun localZone(): ZoneId = ZoneId.systemDefault()
+
+/** "7p", "12a": the hour in the device's zone, short enough for a column. */
+private fun localHour(valid: Long): String {
+    val t = ZonedDateTime.ofInstant(Instant.ofEpochSecond(valid), localZone())
+    val h = t.hour % 12
+    return (if (h == 0) 12 else h).toString() + (if (t.hour < 12) "a" else "p")
+}
+
+/** "Thu 7:00 PM CST" for the pick bar. */
+private fun localFull(valid: Long): String =
+    DateTimeFormatter.ofPattern("EEE h:mm a zzz", Locale.US).format(ZonedDateTime.ofInstant(Instant.ofEpochSecond(valid), localZone()))
+
+/** The zone's short name now ("CST"): the label of the Local row. */
+private fun localName(): String = DateTimeFormatter.ofPattern("zzz", Locale.US).format(ZonedDateTime.now(localZone()))
 
 private val COLUMN_WIDTH = 46.dp
 private val LABEL_WIDTH = 62.dp
@@ -147,6 +169,7 @@ private fun PointBody(table: PointTable, selected: Int?, onSelect: (Int) -> Unit
         Row { table.columns.indices.forEach { i -> Box(Modifier.width(COLUMN_WIDTH).height(22.dp)) { days.firstOrNull { it.first == i }?.let { Text(it.second, Modifier.wrapContentWidth(unbounded = true, align = Alignment.Start).padding(start = 3.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) } } } }
     }
     rows += RowDef("UTC", 22.dp) { valueRow(text = { pointHourLabel(it) }, color = { if (it.source == "API") apiColor else Color.Unspecified }) }
+    rows += RowDef(localName(), 22.dp) { valueRow(text = { localHour(it.valid) }, color = { Color.Gray }) }
     rows += RowDef("°F", 140.dp) { TemperatureChart(table, COLUMN_WIDTH, 140.dp, selected, onSelect) }
     rows += RowDef("Temp", 22.dp) { valueRow(text = { it.value(NbmTextElements.TEMP)?.toString() }, color = { Color(0xFFD84315) }) }
     rows += RowDef("± spread", 22.dp) { valueRow(text = { it.value(NbmTextElements.TEMP_SPREAD)?.let { v -> "±$v" } }) }
@@ -183,7 +206,10 @@ private fun PointBody(table: PointTable, selected: Int?, onSelect: (Int) -> Unit
 @Composable
 private fun SynopticBar(column: PointColumn, checking: Boolean, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(formatUtc(column.valid), Modifier.weight(1f), fontWeight = FontWeight.Bold)
+        Column(Modifier.weight(1f)) {
+            Text(formatUtc(column.valid), fontWeight = FontWeight.Bold)
+            Text(localFull(column.valid), style = MaterialTheme.typography.bodySmall)
+        }
         Button(onClick = onOpen, enabled = !checking) { Text(if (checking) "Looking for a REFS run…" else "Heights & winds (REFS, else GFS)") }
     }
 }
