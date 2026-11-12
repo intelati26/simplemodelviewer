@@ -165,12 +165,24 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     // the extended point view asks for the synoptic set up at a valid time: Heights & Winds (500 mb) at the time step nearest it
     private var wantedValid: Long? = null
     private var wantWind = false
+    private var wantedCycle: Cycle? = null
 
-    /** Shows Heights & Winds at 500 mb at the time step nearest [valid] (epoch seconds); done when the run is open, otherwise as soon as it is. */
-    fun showValid(valid: Long) {
+    /**
+     * Shows Heights & Winds at 500 mb at the time step nearest [valid] (epoch seconds), from [run] when it is given (the one the extended view found to have the time);
+     * done when the run is open, otherwise as soon as it is.
+     */
+    fun showValid(valid: Long, run: Cycle? = null) {
         wantedValid = valid
         wantWind = true
         stopPlaying()
+        if (run != null && run != _state.value.cycle) {
+            wantedCycle = run
+            if (store != null) viewModelScope.launch {
+                update { it.copy(busy = true, error = null) }
+                try { wantedCycle = null; openCycle(run) } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(busy = false, error = e.message) } }
+            }
+            return
+        }
         if (store != null && _state.value.products.isNotEmpty()) pickWindLevel(WIND_LEVEL_FOR_SETUP)
     }
 
@@ -190,7 +202,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
                     val cycles = repo.findCycles(System.currentTimeMillis() / 1000)
                     if (cycles.isEmpty()) throw RefsException("Could not reach SPC's REFS data. Check the connection and try again.")
                     update { it.copy(cycles = cycles) }
-                    openCycle(cycles.first())
+                    openCycle(wantedCycle?.takeIf { it in cycles }?.also { wantedCycle = null } ?: cycles.first())
                     return@launch
                 } catch (e: CancellationException) {
                     throw e

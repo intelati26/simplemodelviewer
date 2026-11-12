@@ -131,8 +131,8 @@ class MainActivity : ComponentActivity() {
                         when (p) { "spc" -> viewModel.reloadFromPrefs(); "mrms" -> mrmsViewModel.reloadFromPrefs(); "nbm" -> nbmViewModel.reloadFromPrefs() }
                     }
                     // the extended point view opens the synoptic set up of a time on the REFS page, or on the GFS page beyond its range
-                    val toSynoptic: (Long, Boolean) -> Unit = { valid, refs ->
-                        if (refs) { viewModel.showValid(valid); go("spc") } else { gfsViewModel.showValid(valid); go("gfs") }
+                    val toSynoptic: (Long, Cycle?) -> Unit = { valid, run ->
+                        if (run != null) { viewModel.showValid(valid, run); go("spc") } else { gfsViewModel.showValid(valid); go("gfs") }
                     }
                     if (page == "point") PointScreen(pointViewModel, go, toSynoptic)
                     else if (page == "gfs") GfsScreen(gfsViewModel, go)

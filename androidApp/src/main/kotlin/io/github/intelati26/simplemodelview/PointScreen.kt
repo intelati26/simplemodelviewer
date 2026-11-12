@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import simplemodelview.Cycle
 import simplemodelview.NbmTextElements
 import simplemodelview.PointColumn
 import simplemodelview.PointTable
@@ -55,15 +56,12 @@ private val COLUMN_WIDTH = 46.dp
 private val LABEL_WIDTH = 62.dp
 private const val POINT_DISCLAIMER = "Data: NOAA / NWS National Blend of Models bulletins (and the NWS gridded forecast for the first hours). Experimental viewer, not a warning or decision-support tool."
 
-/** How far ahead the REFS run reaches, for choosing the page that shows the synoptic set up of a column (hours from now; the newest run is a few hours old). */
-private const val REFS_REACH_HOURS = 54
-
 /**
  * The fifth page: a saved place's forecast for the next 11 days as graphs and a table of the NBM bulletins' columns, with one column picked to open the
  * synoptic set up (heights and winds) for its time on the REFS page, or on the GFS page beyond REFS's range.
  */
 @Composable
-internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynoptic: (valid: Long, refs: Boolean) -> Unit) {
+internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynoptic: (valid: Long, refs: Cycle?) -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     var about by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) { vm.reloadFromPrefs(); vm.refreshIfStale(); onPauseOrDispose { } }
@@ -105,7 +103,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
             else -> {
                 s.error?.let { Text(it, Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 PointBody(table, s.selected, vm::select, Modifier.weight(1f))
-                s.selected?.let { i -> table.columns.getOrNull(i)?.let { column -> SynopticBar(column, onSynoptic) } }
+                s.selected?.let { i -> table.columns.getOrNull(i)?.let { column -> SynopticBar(column, s.checking) { vm.openSynoptic(column.valid) { cycle -> onSynoptic(column.valid, cycle) } } } }
             }
         }
     }
@@ -118,7 +116,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
                 "The NBM's text bulletins (NBS to 72 h every 3 hours, NBE to 192 h and NBX to 264 h every 12 hours) for the nearest station of the place, in front of them the NWS's " +
                     "gridded forecast for the first hours. Each time has a temperature spread: it grows with the lead time and shows how far to trust the later days. The first time you " +
                     "pick a place, its coordinates are sent to api.weather.gov to find the station and the grid; the answer is kept on this device.\n\nTap a time to pick it, then open " +
-                    "the heights and winds for that time on the REFS page (up to about 2 days ahead) or the GFS page.\n\n$POINT_DISCLAIMER",
+                    "the heights and winds for that time on the REFS page when a REFS run has that time (up to about 2 days ahead), otherwise the GFS page at the nearest frame.\n\n$POINT_DISCLAIMER",
             )
         },
     )
@@ -181,13 +179,11 @@ private fun PointBody(table: PointTable, selected: Int?, onSelect: (Int) -> Unit
     }
 }
 
-/** The column picked: its time, and the button that opens the heights and winds for it on the page that covers it. */
+/** The column picked: its time, and the button that opens the heights and winds for it: on a REFS run that has the time, else on GFS (the page asks the runs when it is pressed). */
 @Composable
-private fun SynopticBar(column: PointColumn, onSynoptic: (valid: Long, refs: Boolean) -> Unit) {
-    val now = System.currentTimeMillis() / 1000
-    val refs = column.valid <= now + REFS_REACH_HOURS * 3600L
+private fun SynopticBar(column: PointColumn, checking: Boolean, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(formatUtc(column.valid), Modifier.weight(1f), fontWeight = FontWeight.Bold)
-        Button(onClick = { onSynoptic(column.valid, refs) }) { Text("Heights & winds on ${if (refs) "REFS" else "GFS"}") }
+        Button(onClick = onOpen, enabled = !checking) { Text(if (checking) "Looking for a REFS run…" else "Heights & winds (REFS, else GFS)") }
     }
 }
