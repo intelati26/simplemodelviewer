@@ -7,7 +7,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class NwsStationsTest {
-    private val point = """{"properties":{"gridId":"OUN","gridX":100,"gridY":83,"observationStations":"https://api.weather.gov/gridpoints/OUN/100,83/stations",
+    private val point = """{"properties":{"gridId":"OUN","gridX":100,"gridY":83,"observationStations":"https://api.weather.gov/gridpoints/OUN/100,83/stations","forecastGridData":"https://api.weather.gov/gridpoints/OUN/100,83",
         "relativeLocation":{"properties":{"city":"Norman","state":"OK"}}}}"""
     private val stations = """{"features":[
         {"geometry":{"type":"Point","coordinates":[-97.4708,35.2435]},"properties":{"stationIdentifier":"KOUN","name":"Norman / Max Westheimer"}},
@@ -28,6 +28,7 @@ class NwsStationsTest {
         assertEquals(100, p.gridX)
         assertEquals("https://api.weather.gov/gridpoints/OUN/100,83/stations", p.stationsUrl)
         assertEquals("Norman, OK", p.place)
+        assertEquals("https://api.weather.gov/gridpoints/OUN/100,83", p.gridUrl)
         assertNull(parseNwsPoint("{}"))
         assertNull(parseNwsPoint("not json"))
     }
@@ -42,12 +43,12 @@ class NwsStationsTest {
 
     @Test fun theNearestStationTheBlendCarriesIsTheOne() = runTest {
         val http = Fake(mapOf("https://api.weather.gov/points/35.2220,-97.4395" to point, "https://api.weather.gov/gridpoints/OUN/100,83/stations" to stations))
-        val found = NwsStationFinder(http).find(35.22204, -97.43951) { it == "KOKC" }   // KOUN and KTIK are not in the blend
+        val found = NwsPointClient(http).let { c -> c.point(35.22204, -97.43951)?.let { c.station(it) { id -> id == "KOKC" } } }   // KOUN and KTIK are not in the blend
         assertNotNull(found)
         assertEquals("KOKC", found.id)
         // the coordinates are cut (not rounded) to four decimals, as the API asks
         assertEquals("https://api.weather.gov/points/35.2220,-97.4395", http.asked.first())
-        assertNull(NwsStationFinder(http).find(35.2220, -97.4395) { false })
-        assertNull(NwsStationFinder(Fake(emptyMap())).find(10.0, 10.0) { true })
+        assertNull(NwsPointClient(http).let { c -> c.point(35.2220, -97.4395)?.let { c.station(it) { false } } })
+        assertNull(NwsPointClient(Fake(emptyMap())).point(10.0, 10.0))
     }
 }
