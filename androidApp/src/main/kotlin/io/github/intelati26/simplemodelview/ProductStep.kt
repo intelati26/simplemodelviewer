@@ -1,6 +1,8 @@
 package io.github.intelati26.simplemodelview
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Text
@@ -20,4 +22,24 @@ internal fun ProductStepButton(next: Boolean, enabled: Boolean, onClick: () -> U
         modifier = Modifier.height(32.dp).widthIn(min = 32.dp).semantics { contentDescription = if (next) "Next product" else "Previous product" },
         contentPadding = PaddingValues(horizontal = 6.dp),
     ) { Text(if (next) "›" else "‹", fontSize = 24.sp) }
+}
+
+/** A line under the timeline: back and forward one time step (‹ ›) with the place in the list ("12 / 48"). Used by the model pages and MRMS. */
+@Composable
+internal fun TimeStepRow(index: Int, count: Int, onPick: (Int) -> Unit) {
+    androidx.compose.foundation.layout.Row(
+        androidx.compose.ui.Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        TextButton(
+            onClick = { onPick(index - 1) }, enabled = index > 0,
+            modifier = Modifier.height(32.dp).widthIn(min = 48.dp).semantics { contentDescription = "Previous time" }, contentPadding = PaddingValues(horizontal = 12.dp),
+        ) { Text("‹", fontSize = 24.sp) }
+        Text("${index + 1} / $count", Modifier.padding(horizontal = 12.dp), style = androidx.compose.material3.MaterialTheme.typography.labelMedium)
+        TextButton(
+            onClick = { onPick(index + 1) }, enabled = index < count - 1,
+            modifier = Modifier.height(32.dp).widthIn(min = 48.dp).semantics { contentDescription = "Next time" }, contentPadding = PaddingValues(horizontal = 12.dp),
+        ) { Text("›", fontSize = 24.sp) }
+    }
 }

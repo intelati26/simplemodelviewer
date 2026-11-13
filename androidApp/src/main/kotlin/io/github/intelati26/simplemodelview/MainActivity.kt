@@ -257,6 +257,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
+                TimeStepRow(s.timeIndex, s.times.size, vm::pickTime)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
