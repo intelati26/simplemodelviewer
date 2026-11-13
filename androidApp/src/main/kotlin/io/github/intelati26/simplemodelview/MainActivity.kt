@@ -248,7 +248,6 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             s.style?.let { Legend(it, s.members, withMembers = s.product?.id?.let(simplemodelview.PaintballLines::isPaintballLines) == true) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
                     TextButton(onClick = vm::goToNow, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Now") }
                     TimeMenu(s.times, s.timeIndex, { i -> s.cycle?.let { c -> "${formatUtc(s.times[i])}  (f${((s.times[i] - c.epochSeconds) / 3600).toString().padStart(2, '0')})" } ?: formatUtc(s.times[i]) }, vm::pickTime)
@@ -257,7 +256,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
-                TimeStepRow(s.timeIndex, s.times.size, vm::pickTime)
+                TimeStepRow(s.timeIndex, s.times.size, s.playing, vm::togglePlay, vm::pickTime)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }

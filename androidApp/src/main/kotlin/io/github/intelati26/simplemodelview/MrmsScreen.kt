@@ -180,14 +180,13 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             s.style?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     LoopLengthMenu(s.loopLength, s.files.size, vm::setLoopLength)
                     Slider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.files.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
-                TimeStepRow(s.index, s.files.size, vm::pickIndex)
+                TimeStepRow(s.index, s.files.size, s.playing, vm::togglePlay, vm::pickIndex)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
