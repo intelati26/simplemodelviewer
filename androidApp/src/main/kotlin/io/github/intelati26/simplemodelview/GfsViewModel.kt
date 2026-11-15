@@ -72,6 +72,8 @@ data class GfsState(
     val detail: DetailLayer? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val history: Boolean = false,             // the frames are the analyses (hour 0) of the runs of the past days, not one run's forecast hours
+    val historyDays: Int = 5,
     val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
@@ -114,6 +116,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             sector = GFS_SECTORS.firstOrNull { it.name == prefs.getString("gfs_sector", null) } ?: GFS_SECTORS[0],
             settings = readSettings(),
             loopSpanHours = prefs.getInt("gfs_loop_hours", 0),
+            historyDays = prefs.getInt("gfs_history_days", 5),
         )
     )
     val state: StateFlow<GfsState> = _state
@@ -136,6 +139,16 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             for (attempt in 0..3) {
                 try {
                     val now = System.currentTimeMillis() / 1000
+                    if (_state.value.history) {
+                        val frames = repo.listHistory(now, _state.value.historyDays, "gfs")
+                        if (frames.isEmpty()) throw IllegalStateException("No GFS analyses found for those days.")
+                        lastLoad = System.currentTimeMillis()
+                        val keep = _state.value.file?.valid
+                        val index = keep?.let { v -> frames.indices.minByOrNull { kotlin.math.abs(frames[it].valid - v) } } ?: frames.lastIndex
+                        update { it.copy(frames = frames, index = index, cycle = null, following = true) }
+                        showCurrent()
+                        return@launch
+                    }
                     val cycles = repo.listCycles(now)
                     if (cycles.isEmpty()) throw IllegalStateException("No recent GFS runs on the server.")
                     val hand = pickedCycle?.takeIf { it in cycles }
@@ -173,7 +186,15 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         load()
     }
 
-    fun pickCycle(cycle: NbmCycle?) { pickedCycle = cycle; load() }
+    fun pickCycle(cycle: NbmCycle?) { pickedCycle = cycle; update { it.copy(history = false) }; load() }
+
+    /** The analyses of the past [days] days (a frame per run) in place of one run's forecast hours: play it, or save it as a loop video. 0 leaves history. */
+    fun setHistory(days: Int) {
+        if (days > 0) prefs.edit().putInt("gfs_history_days", days).apply()
+        stopPlaying()
+        update { it.copy(history = days > 0, historyDays = if (days > 0) days else it.historyDays, frames = if (days > 0) emptyList() else it.frames, index = 0) }
+        load()
+    }
 
     // the extended point view asks for the synoptic set up at a valid time: Heights & Winds at 500 mb at the frame nearest it
     private var wantedValid: Long? = null
@@ -471,7 +492,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startPlaying() {
         val st = _state.value
-        val window = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+        val window = loopWindow(st)
         if (window.count() < 2) return
         frameJob?.cancel()
         update { it.copy(playing = true) }
@@ -490,12 +511,54 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                     for (i in window) {
                         update { it.copy(index = i) }
                         showCurrent()
-                        delay(maxOf(nbmDwellMillis(_state.value.frames, i, 150L), if (i == window.last) 1200L else 0L))
+                        delay(maxOf(if (st.history) 450L else nbmDwellMillis(_state.value.frames, i, 150L), if (i == window.last) 1200L else 0L))
                     }
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }
+        }
+    }
+
+    private fun loopWindow(st: GfsState): IntRange =
+        if (st.history) st.frames.indices else nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+
+    var videoSize: simplemodelview.VideoSize
+        get() = simplemodelview.VideoSize.byName(prefs.getString("video_size", null))
+        set(value) { prefs.edit().putString("video_size", value.name).apply() }
+
+    /** The loop (all the analyses in history, else the loop span) drawn as the page shows it now, as an MP4. [onProgress] gets (done, total). */
+    suspend fun buildLoopFile(onProgress: (Int, Int) -> Unit): File? {
+        stopPlaying()
+        val st = _state.value
+        val window = loopWindow(st)
+        val n = window.count()
+        if (n < 2) return null
+        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+        val out = File(dir, "gfs_loop_${st.product}_${st.frames[window.last].valid}.mp4")
+        var exporter: LoopExporter? = null
+        try {
+            for ((k, i) in window.withIndex()) {
+                update { it.copy(index = i) }
+                showCurrent()                         // draws the frame (and downloads what it needs)
+                val now = _state.value
+                val file = now.file ?: continue
+                val product = (if (now.globe) globeShown?.first else shown?.first) ?: continue
+                val map = now.map ?: continue
+                val header = "Valid ${formatUtc(file.valid)} " + (if (now.history) "(analysis)" else "(+${file.leadHours} h)   Run ${now.cycle?.label ?: ""}") + "   Data: NOAA/NWS Global Forecast System (experimental viewer)"
+                val size = videoSize
+                var picture = withContext(Dispatchers.Default) { renderer.shareImage(map, product, product.style, header, emptyList()) }
+                val (sw, sh) = size.scaled(picture.width, picture.height)
+                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
+                if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
+                exporter.add(picture, last = k == n - 1)
+                onProgress(k + 1, n)
+            }
+            exporter?.finish()
+            return if (exporter != null) out else null
+        } catch (e: Exception) {
+            exporter?.abort()
+            throw e
         }
     }
 

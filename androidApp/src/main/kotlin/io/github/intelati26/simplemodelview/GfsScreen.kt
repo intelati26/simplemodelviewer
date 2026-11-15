@@ -64,6 +64,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var settings by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
     }
@@ -109,6 +110,17 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Box {
                         TextButton(onClick = { more = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
                         DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                            if (s.frames.size > 1) DropdownMenuItem(text = { Text(if (s.history) "Save the history loop (video)" else "Save the loop (video)") }, onClick = {
+                                more = false
+                                scope.launch {
+                                    try {
+                                        loopProgress = 0 to s.frames.size
+                                        val file = vm.buildLoopFile { done, total -> loopProgress = done to total }
+                                        loopProgress = null
+                                        if (file != null) shareFile(context, file, "video/mp4", "Share loop")
+                                    } catch (e: Exception) { loopProgress = null; vm.reportNotice("Could not make the video: ${e.message}") }
+                                }
+                            })
                             DropdownMenuItem(text = { Text("Settings") }, onClick = { more = false; settings = true })
                             DropdownMenuItem(text = { Text("About") }, onClick = { more = false; about = true })
                         }
@@ -129,10 +141,12 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
                     var runMenu by remember { mutableStateOf(false) }
                     Box {
-                        AssistChip(onClick = { runMenu = true }, label = { Text(s.cycle?.let { "Run " + it.shortLabel + if (s.following) "" else " · set" } ?: "Run") }, modifier = Modifier.height(32.dp))
+                        AssistChip(onClick = { runMenu = true }, label = { Text(if (s.history) "History ${s.historyDays} d" else s.cycle?.let { "Run " + it.shortLabel + if (s.following) "" else " · set" } ?: "Run") }, modifier = Modifier.height(32.dp))
                         DropdownMenu(expanded = runMenu, onDismissRequest = { runMenu = false }) {
                             DropdownMenuItem(text = { Text("Newest run") }, onClick = { runMenu = false; vm.pickCycle(null) })
                             for (c in s.cycles) DropdownMenuItem(text = { Text(c.label) }, onClick = { runMenu = false; vm.pickCycle(c) })
+                            androidx.compose.material3.HorizontalDivider()
+                            for (d in listOf(2, 5, 10)) DropdownMenuItem(text = { Text("History: the analyses of the past $d days") }, onClick = { runMenu = false; vm.setHistory(d) })
                         }
                     }
                     var sectorMenu by remember { mutableStateOf(false) }
@@ -190,6 +204,13 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
+    }
+
+    loopProgress?.let { (done, total) ->
+        AlertDialog(
+            onDismissRequest = {}, confirmButton = {}, title = { Text("Making the loop video") },
+            text = { Column { Text("Frame $done of $total"); LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) } },
+        )
     }
 
     if (s.contactPrompt) ContactDialog(

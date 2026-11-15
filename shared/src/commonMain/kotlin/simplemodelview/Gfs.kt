@@ -174,6 +174,21 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return parseGfsListing(result.body.decodeToString(), cycle, fieldId)
     }
 
+    /**
+     * The analysis (forecast hour 0) of every run of the past [days] days, oldest first: what the atmosphere did, a frame every six hours, to play as a loop.
+     * One small listing per run (the f000 file only); a run with no f000 yet is left out.
+     */
+    suspend fun listHistory(nowEpochSeconds: Long, days: Int, fieldId: String): List<NbmFile> {
+        val out = ArrayList<NbmFile>()
+        for (cycle in listCycles(nowEpochSeconds, days * 24).sortedBy { it.epoch }) {
+            val prefix = cycle.prefix + "gfs.t${cycle.hour.toString().padStart(2, '0')}z.pgrb2.0p25.f000"
+            val result = http.get("${GfsBucket.URL}/?list-type=2&max-keys=10&prefix=$prefix")
+            if (result.status != 200) throw RefsException("could not list the GFS files (HTTP ${result.status})")
+            parseGfsListing(result.body.decodeToString(), cycle, fieldId).firstOrNull { it.leadHours == 0 }?.let { out += it }
+        }
+        return out
+    }
+
     private val indexes = LinkedHashMap<String, List<GribIndexEntry>>(8, 0.75f, true)
 
     private suspend fun index(file: NbmFile): List<GribIndexEntry> = indexes[file.url] ?: run {

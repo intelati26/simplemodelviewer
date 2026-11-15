@@ -197,4 +197,30 @@ class GfsCropStoreTest {
         assertEquals(3, http.calls)
         assertEquals(2, store.kept.keys.map { it.first }.distinct().size)
     }
+
+    @Test fun historyIsTheAnalysisOfEveryRunOldestFirst() = runTest {
+        val now = NbmCycle(2026, 11, 6, 13).epoch
+        val requested = ArrayList<String>()
+        val http = object : Http {
+            override suspend fun get(url: String): HttpResult {
+                requested += url
+                val prefix = url.substringAfter("prefix=")
+                val body = if (prefix.endsWith("/")) {
+                    // the day listing: runs 00, 06, 12 and 18 (the 18Z one is in the future for today)
+                    "<ListBucketResult>" + listOf("00", "06", "12", "18").joinToString("") { "<CommonPrefixes><Prefix>${prefix}$it/</Prefix></CommonPrefixes>" } + "</ListBucketResult>"
+                } else {
+                    val key = "$prefix"
+                    "<ListBucketResult><Contents><Key>$key</Key><LastModified>2026-11-06T05:00:00.000Z</LastModified><Size>500</Size></Contents>" +
+                        "<Contents><Key>$key.idx</Key><LastModified>2026-11-06T05:00:00.000Z</LastModified><Size>5</Size></Contents></ListBucketResult>"
+                }
+                return HttpResult(200, body.encodeToByteArray())
+            }
+        }
+        val repo = GfsRepository(http, StubCore)
+        val history = repo.listHistory(now, 1, "gfs")
+        assertTrue(history.size >= 4, "got ${history.size}")
+        assertTrue(history.zipWithNext().all { (a, b) -> a.valid < b.valid }, "oldest first")
+        assertTrue(history.all { it.leadHours == 0 && it.key.endsWith(".f000") })
+        assertEquals(now - 1 * 3600L, history.last().valid)
+    }
 }
