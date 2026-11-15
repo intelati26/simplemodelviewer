@@ -16,7 +16,6 @@ import simplemodelview.BackupPlace
 import simplemodelview.GfsCatalog
 import simplemodelview.GfsGlobal
 import simplemodelview.GlobeCamera
-import simplemodelview.GfsGlobal
 import simplemodelview.GfsHistory
 import simplemodelview.PolarCamera
 import simplemodelview.Grid
