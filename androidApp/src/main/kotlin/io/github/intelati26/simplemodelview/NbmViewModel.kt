@@ -496,12 +496,12 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun backup(): SettingsBackup {
         val st = _state.value
-        return SettingsBackup(
+        return SettingsTransfer.withPrefs(SettingsBackup(
             wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
             contactEmail = st.settings.contactEmail, favorites = st.favorites.sorted(),
             places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
             product = prefs.getString("product", null), sector = prefs.getString("sector", null),
-        )
+        ), prefs)
     }
 
     suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
@@ -512,18 +512,21 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(notice = if (ok) "Settings exported: ${backup().favorites.size} favorites, ${backup().places.size} places." else "Could not write the settings file.") }
     }
 
-    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+    /** True when display or source choices were imported: the app restarts to take them up. */
+    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
         val text = withContext(Dispatchers.IO) {
             try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null }
         }
         val b = text?.let { SettingsBackup.decode(it) }
-        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
+        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
-        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places.") }
+        val extras = SettingsTransfer.apply(prefs, b)
+        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places" + (if (extras > 0) ", $extras display and source choices" else "") + ".") }
+        return extras > 0
     }
 
     private var lastContactPrompt = 0L

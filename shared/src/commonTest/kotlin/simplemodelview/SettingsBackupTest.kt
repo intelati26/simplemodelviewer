@@ -15,7 +15,7 @@ class SettingsBackupTest {
 
     @Test fun roundTrip() {
         val text = SettingsBackup.encode(full)
-        assertTrue("\"app\": \"simplemodelview\"" in text && "\"format\": 1" in text)
+        assertTrue("\"app\": \"simplemodelview\"" in text && "\"format\": 2" in text)
         assertEquals(full, SettingsBackup.decode(text))
     }
 
@@ -24,7 +24,7 @@ class SettingsBackupTest {
     @Test fun notABackupIsRefused() {
         assertNull(SettingsBackup.decode("not json"))
         assertNull(SettingsBackup.decode("{}".replace("{}", "{\"app\":\"other\",\"format\":1}")))
-        assertNull(SettingsBackup.decode("{\"app\":\"simplemodelview\",\"format\":2}"))      // from a newer version
+        assertNull(SettingsBackup.decode("{\"app\":\"simplemodelview\",\"format\":3}"))      // from a newer version
         assertNull(SettingsBackup.decode("{\"app\":\"simplemodelview\",\"format\":0}"))
     }
 
@@ -54,5 +54,17 @@ class SettingsBackupTest {
         val old = """{"app":"simplemodelview","format":1,"favourites":["cref","qpf_06h_acc_mean"]}"""
         assertEquals(listOf("cref", "qpf_06h_acc_mean"), SettingsBackup.decode(old)!!.favorites)
         assertTrue("\"favorites\"" in SettingsBackup.encode(SettingsBackup(favorites = listOf("x"))))   // new files use the new spelling
+    }
+
+    @Test fun uiAndSourcesAreKeptWhenValidAndDroppedWhenNot() {
+        val text = """{"app":"simplemodelview","format":2,
+            "ui":{"barb_density":24,"contours":false,"counties":9,"gfs_sector":"CONUS","unknown":1,"minimal_ui":"yes","video_size":"LARGE"},
+            "sources":{"lightningcast_url":"https://example.org/x.txt","probsevere_url":"http://insecure","lightningcast":true,"gfs_crop":false,"extra":true}}"""
+        val b = assertNotNull(SettingsBackup.decode(text))
+        assertEquals(setOf("barb_density", "contours", "gfs_sector", "video_size"), b.ui.keys)             // counties out of range, minimal_ui not a boolean, unknown key
+        assertEquals(setOf("lightningcast_url", "lightningcast", "gfs_crop"), b.sources.keys)               // the http link is refused
+        assertEquals(b, SettingsBackup.decode(SettingsBackup.encode(b)))
+        // a format 1 file has none of them
+        assertTrue(assertNotNull(SettingsBackup.decode("""{"app":"simplemodelview","format":1}""")).ui.isEmpty())
     }
 }

@@ -482,11 +482,11 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun reloadFromPrefs() = update { it.copy(settings = readSettings()) }
 
-    private fun backup() = SettingsBackup(
+    private fun backup() = SettingsTransfer.withPrefs(SettingsBackup(
         wifiOnlyLoop = _state.value.settings.wifiOnlyLoop, dataSaver = _state.value.settings.dataSaver, cacheMegabytes = _state.value.settings.cacheMegabytes,
         contactEmail = _state.value.settings.contactEmail, favorites = prefs.getStringSet("favorites", emptySet()).orEmpty().sorted(), places = emptyList(),
         product = prefs.getString("product", null), sector = prefs.getString("sector", null),
-    )
+    ), prefs)
 
     suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
         val text = SettingsBackup.encode(backup())
@@ -494,13 +494,16 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(notice = if (ok) "Settings exported." else "Could not write the settings file.") }
     }
 
-    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+    /** True when display or source choices were imported: the app restarts to take them up. */
+    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
         val text = withContext(Dispatchers.IO) { try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null } }
         val b = text?.let { SettingsBackup.decode(it) }
-        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
+        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
-        update { it.copy(notice = "Settings imported.") }
+        val extras = SettingsTransfer.apply(prefs, b)
+        update { it.copy(notice = "Settings imported" + (if (extras > 0) " ($extras display and source choices)" else "") + ".") }
+        return extras > 0
     }
 
     private var lastContactPrompt = 0L
