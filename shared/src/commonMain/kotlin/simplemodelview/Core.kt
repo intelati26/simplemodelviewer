@@ -98,6 +98,15 @@ interface Core {
         grid: Grid, values: FloatArray, width: Int, height: Int, radius: Double, centerLat: Double, centerLon: Double, stride: Int,
         domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray,
     )
+
+    /**
+     * A polar stereographic map of one hemisphere (see [Polar]) into [argb] (width x height): the pole at the center, the circle of [radius] pixels reaching to
+     * [edgeLat], [centerLon] at the bottom (the top for the south pole). Where the core has none it says so, and the globe stays the only view.
+     */
+    fun renderPolar(
+        grid: Grid, values: FloatArray, width: Int, height: Int, radius: Double, centerLon: Double, edgeLat: Double, north: Boolean, stride: Int,
+        domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray,
+    ) { throw UnsupportedOperationException("this core has no polar map") }
 }
 
 /** A latitude / longitude box (west-negative longitudes). */

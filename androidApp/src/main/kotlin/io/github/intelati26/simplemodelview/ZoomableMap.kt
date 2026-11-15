@@ -120,16 +120,17 @@ internal fun ZoomableMap(
 internal fun GlobeSurface(
     bitmap: android.graphics.Bitmap?, cam: GlobeCamera, tapLatLon: Pair<Double, Double>?, description: String,
     onSize: (Int, Int) -> Unit, onGesture: (Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
+    polar: simplemodelview.PolarCamera? = null, onPolarGesture: ((Float, Float, Float, Float, Float) -> Unit)? = null,
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
     Box(
         Modifier.fillMaxSize().onSizeChanged { size = it; onSize(it.width, it.height) }
-            .pointerInput(Unit) { detectTransformGestures { _, pan, zoom, _ -> onGesture(pan.x, pan.y, zoom) } }
+            .pointerInput(Unit) { detectTransformGestures { centroid, pan, zoom, _ -> if (polar != null && onPolarGesture != null) onPolarGesture(pan.x, pan.y, zoom, centroid.x, centroid.y) else onGesture(pan.x, pan.y, zoom) } }
             .pointerInput(Unit) { detectTapGestures { p -> onTap(p.x, p.y) } },
     ) {
         bitmap?.let { Image(it.asImageBitmap(), contentDescription = description, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
         tapLatLon?.let { (lat, lon) ->
-            val p = globeForward(cam, size.width, size.height, lat, lon)
+            val p = if (polar != null) polar.project(size.width, size.height, lat, lon) else globeForward(cam, size.width, size.height, lat, lon)
             if (p != null) Canvas(Modifier.fillMaxSize()) {
                 val x = p[0].toFloat(); val y = p[1].toFloat(); val r = 10.dp.toPx(); val w = 1.5.dp.toPx()
                 drawLine(Color.Black, Offset(x - r, y), Offset(x + r, y), w * 2.4f); drawLine(Color.Black, Offset(x, y - r), Offset(x, y + r), w * 2.4f)

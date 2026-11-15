@@ -12,6 +12,7 @@ import simplemodelview.Core
 import simplemodelview.GlobeCamera
 import simplemodelview.Grid
 import simplemodelview.Palettes
+import simplemodelview.PolarCamera
 import simplemodelview.Product
 import simplemodelview.Style
 import simplemodelview.View
@@ -34,7 +35,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     @Synchronized
     fun render(
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
-        product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false,
+        product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null,
     ): Bitmap {
         val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -42,7 +43,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         canvas.drawColor(if (dark) 0xFF070B14.toInt() else 0xFFE8EDF3.toInt())
         val cx = width / 2f
         val cy = height / 2f
-        val r = cam.radius.toFloat()
+        val r = (polar?.radius ?: cam.radius).toFloat()
 
         // the sphere, lit from the upper left
         val ocean = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -52,17 +53,20 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         }
         canvas.drawCircle(cx, cy, r, ocean)
 
-        drawGraticule(canvas, cam, width, height, dark)
+        if (polar != null) drawPolarGraticule(canvas, polar, width, height, dark) else drawGraticule(canvas, cam, width, height, dark)
 
         // data
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
-        Timings.timed("raster") { core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer) }
+        Timings.timed("raster") {
+            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, domain, style, memberRgb, buffer)
+            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
+        }
         canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)
 
-        Timings.timed("lines") { lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
-        if (product != null) decorate(canvas, grid, values, style, product, cam, width, height, dark, contours, barbDensity, windInTrueFrame)
+        Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
+        if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame)
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 
         canvas.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -73,7 +77,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     /** The contour lines and the barbs of [product] on the sphere, drawn by the code the flat map uses. */
     private fun decorate(
-        canvas: Canvas, grid: Grid, values: FloatArray, style: Style, product: Product, cam: GlobeCamera, width: Int, height: Int, dark: Boolean,
+        canvas: Canvas, grid: Grid, values: FloatArray, style: Style, product: Product, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean,
         contours: Boolean, barbDensity: Int, trueFrame: Boolean,
     ) {
         val cells = grid.cells
@@ -90,13 +94,13 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
                     Timings.timed("contours") { geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) } }
                     geoKey = key
                 }
-                drawContourLines(canvas, projectedContours(cam, width, height), spec.color, dark, width)
+                drawContourLines(canvas, projectedContours { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
             }
         }
         if (windLevel != null) {
             // the globe is crowded sooner than a flat map (the barbs sit over the data and the lines, and thin out toward the limb): one density level down
             val across = barbsAcross((barbDensity - 1).coerceAtLeast(1)) * if (level(windLevel, values, cells)) STACK_DENSITY else 1f
-            Timings.timed("barbs") { drawWindBarbs(canvas, core, GlobeProjector(cam, width, height), grid, values, windLevel, dark, width / across, maxOf(1.2f, width / 1300f), 2f, trueFrame) }
+            Timings.timed("barbs") { drawWindBarbs(canvas, core, if (polar != null) PolarProjector(polar, width, height) else GlobeProjector(cam, width, height), grid, values, windLevel, dark, width / across, maxOf(1.2f, width / 1300f), 2f, trueFrame) }
         }
     }
 
@@ -117,14 +121,14 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon, a label on the longest piece of each level. */
-    private fun projectedContours(cam: GlobeCamera, width: Int, height: Int): List<ContourLine> {
+    private fun projectedContours(project: (Double, Double) -> DoubleArray?): List<ContourLine> {
         val out = ArrayList<ContourLine>()
         for (line in geoLines) {
             val pieces = ArrayList<FloatArray>()
             var current = ArrayList<Float>()
             var i = 0
             while (i + 1 < line.points.size) {
-                val p = globeForward(cam, width, height, line.points[i], line.points[i + 1])
+                val p = project(line.points[i], line.points[i + 1])
                 if (p == null) { if (current.size >= 4) pieces += current.toFloatArray(); current = ArrayList() }
                 else { current.add(p[0].toFloat()); current.add(p[1].toFloat()) }
                 i += 2
@@ -153,5 +157,22 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         }
         for (lat in -60..60 step 20) polyline((-180..180 step 3).asSequence().map { lat.toDouble() to it.toDouble() })
         for (lon in -180 until 180 step 20) polyline((-85..85 step 3).asSequence().map { it.toDouble() to lon.toDouble() })
+    }
+
+    private fun drawPolarGraticule(canvas: Canvas, cam: PolarCamera, width: Int, height: Int, dark: Boolean) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1f; color = if (dark) 0x33FFFFFF else 0x33000000
+        }
+        fun polyline(points: Sequence<Pair<Double, Double>>) {
+            var prev: DoubleArray? = null
+            for ((lat, lon) in points) {
+                val p = cam.project(width, height, lat, lon)
+                if (p != null && prev != null) canvas.drawLine(prev[0].toFloat(), prev[1].toFloat(), p[0].toFloat(), p[1].toFloat(), paint)
+                prev = p
+            }
+        }
+        val sign = if (cam.north) 1 else -1
+        for (lat in 30..80 step 10) polyline((-180..180 step 3).asSequence().map { (sign * lat).toDouble() to it.toDouble() })
+        for (lon in -180 until 180 step 30) polyline(sequenceOf((sign * 89.9) to lon.toDouble(), (sign * cam.edgeLat) to lon.toDouble()))
     }
 }

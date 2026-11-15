@@ -11,7 +11,8 @@ import kotlin.math.roundToInt
  * `values.size >= cells` check see.
  */
 object WindProducts {
-    val levels = listOf(250, 300, 500, 700, 850)
+    /** The pressure levels (mb) of the height-and-wind products: 10 to 200 only on the GFS page (the REFS store has no such arrays and skips them). */
+    val levels = listOf(10, 30, 50, 100, 200, 250, 300, 500, 700, 850)
 
     /**
      * The stack: the height of 500 mb and the winds of 850, 700 and 500 mb drawn together, a barb set per level in its own color. It is a pseudo level of the

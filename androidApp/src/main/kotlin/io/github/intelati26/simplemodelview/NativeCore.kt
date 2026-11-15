@@ -117,6 +117,23 @@ class NativeCore : Core {
         )
     }
 
+    private external fun renderPolar(
+        grid: Int, values: FloatArray, width: Int, height: Int, radius: Double, centerLon: Double, edgeLat: Double, north: Int, stride: Int, domainArgb: Int,
+        kind: Int, stopValues: DoubleArray, stopRgb: IntArray, factor: Double, offset: Double, hideBelow: Double, hideAbove: Double, opacity: Double,
+        memberRgb: IntArray, argb: IntArray,
+    )
+
+    override fun renderPolar(
+        grid: Grid, values: FloatArray, width: Int, height: Int, radius: Double, centerLon: Double, edgeLat: Double, north: Boolean, stride: Int,
+        domainArgb: Int, style: Style, memberRgb: IntArray, argb: IntArray,
+    ) {
+        val stops = CoreStops(style)
+        renderPolar(
+            grid.id, values, width, height, radius, centerLon, edgeLat, if (north) 1 else 0, stride, domainArgb, style.kind.ordinal,
+            stops.values, stops.rgb, style.factor, style.offset, style.hideBelow, stops.hideAbove, style.opacity, memberRgb, argb,
+        )
+    }
+
     companion object {
         init { System.loadLibrary("simplemodelview_jni") }
     }

@@ -3,6 +3,7 @@ package simplemodelview
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -73,5 +74,30 @@ class GfsTest {
         assertTrue(GfsCatalog.levels.all { it in WindProducts.levels })
         assertEquals(32f, GfsCatalog.colorConvert("t2m")(273.15f), 1e-3f)
         assertEquals(0f, GfsCatalog.colorConvert("tlev")(273.15f), 1e-3f)
+    }
+
+    @Test fun accumulationsAreFoundByTheirTimeText() {
+        val idx = parseGribIndex(
+            "1:0:d=2026111412:APCP:surface:18-24 hour acc fcst:\n2:100:d=2026111412:APCP:surface:0-1 day acc fcst:\n3:200:d=2026111412:APCP:surface:120-123 hour acc fcst:\n" +
+                "4:300:d=2026111412:APCP:surface:0-123 hour acc fcst:\n5:400:d=2026111412:SNOD:surface:24 hour fcst:\n6:500:d=2026111412:TMP:2 m above ground:24 hour fcst:\n",
+        )
+        fun product(id: String) = GfsCatalog.surface.first { it.id == id }.message!!
+        assertEquals(0L to 99L, findGfsMessage(idx, product("apcp6_gfs"), 24))                // the last 6 h
+        assertEquals(100L to 199L, findGfsMessage(idx, product("apcptot_gfs"), 24))           // the run's total, a whole number of days named in days
+        assertEquals(200L to 299L, findGfsMessage(idx, product("apcp6_gfs"), 123))            // 3 h buckets in the 3-hourly files
+        assertEquals(300L to 399L, findGfsMessage(idx, product("apcptot_gfs"), 123))
+        assertEquals(400L to 499L, findGfsMessage(idx, product("snod_gfs"), 24))
+        assertNull(findGfsMessage(idx, product("apcp6_gfs"), 25))
+        // the two APCP messages of a file are kept apart by their key
+        assertTrue(product("apcp6_gfs").key != product("apcptot_gfs").key)
+    }
+
+    @Test fun theStratosphereAndItsContourSpecsAreThere() {
+        assertTrue(listOf(10, 30, 50, 100, 200).all { it in GfsCatalog.levels })
+        for (l in listOf(10, 30, 50, 100, 200, 250, 300, 500, 700, 850)) assertNotNull(Contours.specFor("z$l", "m"), "z$l")
+        assertEquals(200.0, Contours.specFor("z10", "m")!!.interval)                   // not the 120 m of 100 mb
+        assertEquals(120.0, Contours.specFor("z100", "m")!!.interval)
+        assertEquals(60.0, Contours.specFor("z500", "m")!!.interval)
+        assertEquals(120.0, Contours.specFor("z300", "m")!!.interval)                  // not the stratospheric 30
     }
 }

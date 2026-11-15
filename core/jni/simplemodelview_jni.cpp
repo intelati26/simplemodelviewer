@@ -229,6 +229,40 @@ JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_rend
     env->ReleaseFloatArrayElements(values, v, JNI_ABORT);
 }
 
+JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_renderPolar(JNIEnv * env, jobject, jint grid, jfloatArray values, jint width, jint height,
+                                                                   jdouble radius, jdouble centerLon, jdouble edgeLat, jint north, jint stride,
+                                                                   jint domainArgb, jint kind, jdoubleArray stopValues, jintArray stopRgb,
+                                                                   jdouble factor, jdouble offset, jdouble hideBelow, jdouble hideAbove, jdouble opacity, jintArray memberRgb,
+                                                                   jintArray argb) {
+    if (env->GetArrayLength(values) < spc_grid_columns(grid) * spc_grid_rows(grid) || env->GetArrayLength(argb) < width * height) {
+        throwRuntime(env, "polar buffers are too small");
+        return;
+    }
+    jfloat * v = env->GetFloatArrayElements(values, nullptr);
+    const jsize stopCount = env->GetArrayLength(stopValues);
+    jdouble * sv = env->GetDoubleArrayElements(stopValues, nullptr);
+    jint * sc = env->GetIntArrayElements(stopRgb, nullptr);
+    std::vector<spc_stop> stops(static_cast<size_t>(stopCount));
+    for (jsize i = 0; i < stopCount; i += 1) {
+        stops[static_cast<size_t>(i)] = {sv[i], static_cast<uint8_t>(sc[i] >> 16), static_cast<uint8_t>(sc[i] >> 8), static_cast<uint8_t>(sc[i])};
+    }
+    const jsize memberCount = env->GetArrayLength(memberRgb);
+    jint * mr = env->GetIntArrayElements(memberRgb, nullptr);
+    std::vector<uint32_t> members(static_cast<size_t>(memberCount));
+    for (jsize i = 0; i < memberCount; i += 1) {
+        members[static_cast<size_t>(i)] = static_cast<uint32_t>(mr[i]);
+    }
+    const spc_polar polar{grid, width, height, radius, centerLon, edgeLat, north, stride, static_cast<uint32_t>(domainArgb)};
+    const spc_style style{kind, stops.data(), static_cast<int>(stops.size()), factor, offset, hideBelow, members.data(), static_cast<int>(members.size()), hideAbove, opacity};
+    jint * out = env->GetIntArrayElements(argb, nullptr);
+    spc_render_polar(v, &polar, &style, reinterpret_cast<uint32_t *>(out));
+    env->ReleaseIntArrayElements(argb, out, 0);
+    env->ReleaseIntArrayElements(memberRgb, mr, JNI_ABORT);
+    env->ReleaseIntArrayElements(stopRgb, sc, JNI_ABORT);
+    env->ReleaseDoubleArrayElements(stopValues, sv, JNI_ABORT);
+    env->ReleaseFloatArrayElements(values, v, JNI_ABORT);
+}
+
 JNIEXPORT void JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_render(JNIEnv * env, jobject, jint grid, jfloatArray values, jint col0, jint row0, jint cols,
                                                               jint rows, jint scale, jint step, jint kind, jdoubleArray stopValues, jintArray stopRgb,
                                                               jdouble factor, jdouble offset, jdouble hideBelow, jdouble hideAbove, jdouble opacity, jintArray memberRgb,

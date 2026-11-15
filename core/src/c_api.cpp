@@ -204,6 +204,14 @@ int spc_grib_decode_prefix(const uint8_t * data, size_t size, float ** out, spc_
 
 void spc_free(void * pointer) { std::free(pointer); }
 
+void spc_render_polar(const float * values, const spc_polar * polar, const spc_style * style, uint32_t * argb) {
+    Raster::renderPolar(values, *polar, *style, argb);
+}
+
+int spc_polar_to_latlon(int north, double center_lon, double edge_lat, double x, double y, double * lat, double * lon) {
+    return Raster::polarToLatLon(north != 0, center_lon, edge_lat, x, y, *lat, *lon) ? 1 : 0;
+}
+
 void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb) {
     Raster::renderGlobe(values, *globe, *style, argb);
 }

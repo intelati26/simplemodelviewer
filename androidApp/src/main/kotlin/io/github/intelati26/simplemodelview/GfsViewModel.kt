@@ -16,6 +16,7 @@ import simplemodelview.BackupPlace
 import simplemodelview.GfsCatalog
 import simplemodelview.GfsGlobal
 import simplemodelview.GlobeCamera
+import simplemodelview.PolarCamera
 import simplemodelview.Grid
 import simplemodelview.NbmCycle
 import simplemodelview.NbmFile
@@ -71,6 +72,7 @@ data class GfsState(
     val detail: DetailLayer? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
 }
@@ -198,7 +200,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun pickSector(sector: Sector) {
         prefs.edit().putString("gfs_sector", sector.name).apply()
         stopPlaying()
-        update { it.copy(sector = sector, globe = false, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(sector = sector, globe = false, polar = null, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
 
@@ -243,7 +245,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val color = WindProducts.colors.firstOrNull { it.key == st.color }
         val top = if (st.level == WindProducts.STACK) 500 else st.level
         val title = (if (st.level == WindProducts.STACK) "500 mb Height with 850 / 700 / 500 mb Wind Barbs" else "${st.level} mb Height and Wind Barbs") + if (color == null || color.source == null) "" else " over ${if (color.key == "tlev" || color.key == "rhlev") color.title.replace("the level", "$top mb") else color.title}"
-        return Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color), false, null, grid) to title
+        return Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color, top), false, null, grid) to title
     }
 
     /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
@@ -263,7 +265,8 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- the globe ----
     fun onGlobeTap(px: Float, py: Float) {
         val (product, values) = globeShown ?: return
-        val ll = globeInverse(_state.value.cam, globeW, globeH, px.toDouble(), py.toDouble())
+        val st = _state.value
+        val ll = if (st.polar != null) st.polar.inverse(globeW, globeH, px.toDouble(), py.toDouble()) else globeInverse(st.cam, globeW, globeH, px.toDouble(), py.toDouble())
         if (ll == null) { clearTap(); return }
         val grid = product.grid
         val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
@@ -273,17 +276,42 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setGlobe(on: Boolean) {
-        if (_state.value.globe == on) return
+        if (_state.value.globe == on && _state.value.polar == null) return
         stopPlaying()
-        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(globe = on, polar = null, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
+    }
+
+    /** The globe turned to look straight down on a pole. */
+    fun setGlobePole(north: Boolean) {
+        stopPlaying()
+        val wasGlobe = _state.value.globe && _state.value.polar == null
+        update { it.copy(globe = true, polar = null, cam = it.cam.copy(lat = if (north) 90.0 else -90.0, lon = if (north) -100.0 else 80.0), crosshair = null, readout = null, tapLatLon = null) }
+        if (wasGlobe && globeShown != null) requestGlobe(coarse = false) else showFrame()
+    }
+
+    /** The polar stereographic map of one hemisphere (the pole in the middle, out to 20 degrees). */
+    fun setPolar(north: Boolean) {
+        stopPlaying()
+        val wasGlobe = _state.value.globe
+        val radius = if (globeW > 0) 0.48 * minOf(globeW, globeH) else 300.0
+        update { it.copy(globe = true, polar = PolarCamera(north, if (north) -100.0 else 80.0, radius), crosshair = null, readout = null, tapLatLon = null) }
+        if (wasGlobe && globeShown != null) requestGlobe(coarse = false) else showFrame()
+    }
+
+    fun polarGesture(dx: Float, dy: Float, zoom: Float, cx: Float, cy: Float) {
+        val minR = 0.3 * minOf(globeW, globeH)
+        update { st -> st.polar?.let { st.copy(polar = it.turned(dx.toDouble(), dy.toDouble(), cx.toDouble(), cy.toDouble(), globeW, globeH).zoomed(zoom.toDouble(), minR, minR * 30)) } ?: st }
+        requestGlobe(coarse = true)
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
     }
 
     fun setGlobeSize(w: Int, h: Int) {
         if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
         val first = globeW == 0
         globeW = w; globeH = h
-        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h)), polar = it.polar?.copy(radius = 0.48 * minOf(w, h))) }
         if (_state.value.globe && globeShown != null) requestGlobe(coarse = false)
     }
 
@@ -322,7 +350,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val bitmap = withContext(Dispatchers.Default) {
             // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
