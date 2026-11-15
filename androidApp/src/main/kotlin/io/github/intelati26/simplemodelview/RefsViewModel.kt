@@ -21,6 +21,7 @@ import simplemodelview.Cycle
 import simplemodelview.CycleStore
 import simplemodelview.GlobeCamera
 import simplemodelview.Grid
+import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.BackupPlace
 import simplemodelview.Place
@@ -190,7 +191,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges(lightning = false).collect { if (values != null && !_state.value.globe) rerender() } }
+        viewModelScope.launch { overlayChanges(lightning = false).collect { if (values != null) rerender() } }
     }
 
     fun load() {
@@ -487,9 +488,12 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val data = values ?: return
         if (globeW == 0 || data.size < product.grid.cells) return
         val st = _state.value
+        val valid = st.times.getOrNull(st.timeIndex)
+        outlook.want(valid)
         val (bitmap, style) = withContext(Dispatchers.Default) {
             val style = withAutoStops(product.style, data)
-            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity) to style
+            val alerts = outlookDrawsOn(outlook, valid) { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
+            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts) to style
         }
         update { it.copy(map = bitmap, style = style, busy = false) }
     }

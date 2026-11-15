@@ -35,6 +35,7 @@ import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
+import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
@@ -128,7 +129,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges(lightning = false).collect { if (shown != null && !_state.value.playing && !_state.value.globe) showFrame() } }
+        viewModelScope.launch { overlayChanges(lightning = false).collect { if (shown != null && !_state.value.playing) { if (_state.value.globe) requestGlobe(coarse = false) else showFrame() } } }
     }
 
     /** The other pages may have changed favorites, places or settings while this page was away. */
@@ -414,8 +415,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val (product, values) = shown ?: return
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
+        val valid = st.file?.valid
+        outlook.want(valid)
         val bitmap = withContext(Dispatchers.Default) {
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity)
+            val alerts = outlookDrawsOn(outlook, valid) { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
         }
         update { it.copy(map = bitmap, busy = false) }
     }

@@ -317,3 +317,57 @@ internal fun overlayChanges(lightning: Boolean = true): kotlinx.coroutines.flow.
         if (lightning) listOf(o.type, o.version, l.enabled, l.asOf, ps.enabled, ps.asOf) else listOf(o.type, o.version)
     }
         .distinctUntilChanged().drop(1)
+
+
+/** A place (latitude, longitude) as pixels (x, y) of a picture, or null where the picture does not show it (the far side of a globe). */
+internal typealias PlaceProjection = (Double, Double) -> DoubleArray?
+
+/** [ring] (latitude, longitude pairs) in picture pixels: the pieces between hidden points, and whether nothing was hidden (then it is one piece, closed if the ring was). */
+internal fun projectRing(ring: DoubleArray, project: PlaceProjection): Pair<List<FloatArray>, Boolean> {
+    val pieces = ArrayList<FloatArray>()
+    var cur = ArrayList<Float>()
+    var whole = true
+    var i = 0
+    while (i + 1 < ring.size) {
+        val p = project(ring[i], ring[i + 1])
+        if (p == null) { whole = false; if (cur.size >= 4) pieces += cur.toFloatArray(); cur = ArrayList() }
+        else { cur.add(p[0].toFloat()); cur.add(p[1].toFloat()) }
+        i += 2
+    }
+    if (cur.size >= 4) pieces += cur.toFloatArray()
+    return pieces to whole
+}
+
+/** [outlookDraws] on any picture (a globe's): an area that goes over the horizon is drawn as lines in the pieces that show, not as a filled shape. */
+internal fun outlookDrawsOn(model: OutlookModel, valid: Long?, project: PlaceProjection): List<AlertDraw> {
+    val choice = model.choiceFor(valid) ?: return emptyList()
+    val data = model.state.value.loaded[choice.id]?.data ?: return emptyList()
+    return data.shapes.flatMap { shape ->
+        shape.polygons.mapNotNull { polygon ->
+            val parts = polygon.map { projectRing(it, project) }
+            val pieces = parts.flatMap { it.first }
+            if (pieces.isEmpty()) null
+            else if (parts.all { it.second }) AlertDraw(pieces, shape.color, dashed = shape.hatched, fill = shape.hatched, combined = true, hatch = if (shape.hatched) shape.intensity else 1, strong = shape.hatched, heavy = !shape.hatched)
+            else AlertDraw(pieces, shape.color, dashed = false, fill = false, open = true, heavy = !shape.hatched)
+        }
+    }
+}
+
+/** [probSevereDraws] on any picture. */
+internal fun probSevereDrawsOn(state: ProbSevereState, at: Long?, project: PlaceProjection): List<AlertDraw> {
+    if (!state.enabled) return emptyList()
+    return simplemodelview.placeShapesAt(state.shapes, at).mapNotNull { shape ->
+        val (pieces, whole) = projectRing(shape.points, project)
+        if (pieces.isEmpty()) null else AlertDraw(pieces, shape.color, dashed = false, fill = false, open = !shape.closed || !whole)
+    }
+}
+
+/** [lightningDraws] on any picture. */
+internal fun lightningDrawsOn(state: LightningState, at: Long?, project: PlaceProjection): List<AlertDraw> {
+    if (!state.enabled) return emptyList()
+    val frame = simplemodelview.lightningFrameFor(state.frames, at) ?: return emptyList()
+    return frame.contours.sortedBy { it.percent }.mapNotNull { contour ->
+        val (pieces, _) = projectRing(contour.points, project)
+        if (pieces.isEmpty()) null else AlertDraw(pieces, contour.color, dashed = false, fill = false, open = true)
+    }
+}

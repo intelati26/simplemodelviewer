@@ -22,6 +22,7 @@ import simplemodelview.globeForward
 /** Draws the globe picture: space, a shaded sphere, a graticule, the data wrapped onto it and the border lines. */
 class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private var buffer = IntArray(0)
+    private val alertPainter = MapRenderer(core, lines)
 
     /** A contour line in latitude / longitude (lat0, lon0, lat1, lon1, ...), so any camera can project it. */
     private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: DoubleArray)
@@ -35,7 +36,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     @Synchronized
     fun render(
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
-        product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null,
+        product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null, alerts: List<AlertDraw> = emptyList(),
     ): Bitmap {
         val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -67,6 +68,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
         Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
         if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame)
+        if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 
         canvas.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {

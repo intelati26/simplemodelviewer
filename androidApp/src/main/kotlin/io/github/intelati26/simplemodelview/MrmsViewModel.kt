@@ -63,6 +63,7 @@ import simplemodelview.defaultOverlayThresholdIndex
 import simplemodelview.shownValue
 import simplemodelview.fixed
 import simplemodelview.nextPlayable
+import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
 import simplemodelview.mrmsHasHalo
@@ -189,7 +190,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(overlays = layersFrom(decodeOverlays(prefs.getString("mrms_overlays", null))), alertKinds = savedAlertKinds()) }
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing && !_state.value.globe) showFrame() } }
+        viewModelScope.launch { overlayChanges().collect { if (shown != null && !_state.value.playing) { if (_state.value.globe) requestGlobe(coarse = false) else showFrame() } } }
         if (_state.value.alertKinds.isNotEmpty()) viewModelScope.launch { refreshAlerts(force = true); showFrameIfNewest() }
     }
 
@@ -351,30 +352,31 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The outlines to draw on the picture [base]: only on the newest frame (they are of now, not of an older scan). */
     private fun alertDraws(base: View): List<AlertDraw> {
+        val s = base.scale.toFloat()
+        return alertDrawsWith { lat, lon ->
+            val g = core.latLonToGrid(base.grid, lat, lon)
+            doubleArrayOf((g[0] + 0.5) * s, (base.rows - 0.5 - g[1]) * s)
+        }
+    }
+
+    /** The same outlines for any picture ([project] puts a place on it; an outline that goes over a globe's horizon is drawn as lines). */
+    private fun alertDrawsWith(project: PlaceProjection): List<AlertDraw> {
         val st = _state.value
         if (st.alertKinds.isEmpty() || st.files.isEmpty() || st.index != st.files.lastIndex) return emptyList()
-        val s = base.scale.toFloat()
         val drawn = st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
-            val rings = shape.rings.map { ring ->
-                val out = FloatArray(ring.size)
-                var i = 0
-                while (i + 1 < ring.size) {
-                    val g = core.latLonToGrid(base.grid, ring[i], ring[i + 1])
-                    out[i] = ((g[0] + 0.5) * s).toFloat()
-                    out[i + 1] = ((base.rows - 0.5 - g[1]) * s).toFloat()
-                    i += 2
-                }
-                out
-            }
-            shape to AlertDraw(rings, shape.color, shape.dashed, fill = shape.kind == AlertKind.Watch, shade = shape.kind == AlertKind.Watch, heavy = shape.kind == AlertKind.Warning)   // watches: shaded and hatched; warnings and discussions: outlines
+            val parts = shape.rings.map { projectRing(it, project) }
+            val rings = parts.flatMap { it.first }
+            val watch = shape.kind == AlertKind.Watch
+            shape to (if (parts.all { it.second }) AlertDraw(rings, shape.color, shape.dashed, fill = watch, shade = watch, heavy = shape.kind == AlertKind.Warning)   // watches: shaded and hatched; warnings and discussions: outlines
+                else AlertDraw(rings, shape.color, shape.dashed, fill = false, open = true, heavy = shape.kind == AlertKind.Warning))
         }
         // a watch comes county by county: the counties of one watch are one area, so only its outer edge gets an outline
-        val (watches, others) = drawn.partition { it.first.kind == AlertKind.Watch }
+        val (watches, others) = drawn.partition { it.first.kind == AlertKind.Watch && !it.second.open }
         val merged = watches.groupBy { (shape, _) -> shape.detailUrl ?: "${shape.title}|${shape.issued}|${shape.expires}" }.values.map { group ->
             val first = group.first().second
             AlertDraw(group.flatMap { it.second.rings }, first.color, first.dashed, fill = true, shade = true)
         }
-        return merged + others.map { it.second }
+        return merged + others.filter { it.second.rings.isNotEmpty() }.map { it.second }
     }
 
     // ---- overlay: other products over the first ----
@@ -596,6 +598,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val product = st.product
         update { it.copy(busy = true, error = null) }
         if (st.globe) {
+            outlook.want(file.validTime)
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             shownGrid = frame.window.grid
             shown = synthetic(product, frame.window.grid) to frame.window.values
@@ -806,8 +809,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val (product, values) = shown ?: return
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
+        val file = st.file
+        val project: PlaceProjection = { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
         val bitmap = withContext(Dispatchers.Default) {
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity)
+            val alerts = if (file == null) emptyList() else alertDrawsWith(project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
