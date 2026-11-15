@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UI smoke test, driven like a person with adb: launch, wait for the live map, open the product picker, switch to the globe,
-# open the share dialog and menus, then the MRMS page (composite reflectivity, rotation track, 24 h rainfall, a meso sector). Saves a screenshot per step into $1 (default: screenshots/) and fails on a crash, an ANR or
+# open the share dialog and menus, then the MRMS page (composite reflectivity, rotation track, 24 h rainfall, a meso sector), then the GFS globe (flat map, globe, read-out, drag, the 850/700/500 stack). Saves a screenshot per step into $1 (default: screenshots/) and fails on a crash, an ANR or
 # a screen whose middle part is empty. The app reads SPC's live data, so a slow or unreachable server shows up as a missing map.
 set -u
 OUT=${1:-screenshots}
@@ -84,6 +84,20 @@ emu_tap_text "Composite Reflectivity"; sleep 3; shot mrms-product-picker; adb sh
 emu_tap_text "Share"; sleep 3; shot mrms-share-dialog; adb shell input keyevent 4; sleep 2
 emu_tap_text "South Central ▾"; sleep 2; emu_tap_text "Globe"
 wait_for_picture mrms-globe 120 || { echo "FAIL: the MRMS globe never appeared"; fail=1; }
+
+# the GFS page and its globe (whole-globe fields from NOAA's AWS bucket): the flat map, then the sector menu's Globe, a tap for a read-out, a drag to turn it,
+# and the 850/700/500 mb stack (contours and barbs over the sphere)
+adb shell input keyevent 4; sleep 2
+emu_tap_text "MRMS ▾"; sleep 1; emu_tap_text "GFS"
+wait_for_picture gfs-map 300 || { echo "FAIL: the GFS map never appeared"; fail=1; }
+emu_tap_text "CONUS ▾"; sleep 2; emu_tap_text "Globe"
+wait_for_picture gfs-globe 300 || { echo "FAIL: the GFS globe never appeared"; fail=1; }
+tap 50 48; sleep 3; shot gfs-globe-readout
+adb shell input swipe "$(( W * 30 / 100 ))" "$(( H * 48 / 100 ))" "$(( W * 70 / 100 ))" "$(( H * 48 / 100 ))" 500; sleep 3
+wait_for_picture gfs-globe-turned 120 || { echo "FAIL: the GFS globe was empty after a drag"; fail=1; }
+emu_tap_text "500 mb ▾"; sleep 2; emu_tap_text "500 mb height, 850/700/500 winds"
+wait_for_picture gfs-globe-stack 300 || { echo "FAIL: the GFS globe stack never appeared"; fail=1; }
+tap 50 48; sleep 3; shot gfs-globe-stack-readout
 
 # only crashes of this app count (the emulator image's own apps, e.g. Gmail, may crash too)
 if adb logcat -d -s AndroidRuntime:E | grep -A2 "FATAL EXCEPTION" | grep -q "Process: $PKG"; then
