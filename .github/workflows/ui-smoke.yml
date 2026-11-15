@@ -1,0 +1,37 @@
+name: simplemodelview / ui-smoke
+# Drives the debug app on an emulator like a person (scripts/ui_smoke.sh: the REFS page and globe, MRMS, then the GFS globe), with live NOAA data, and keeps a
+# screenshot per step. Run by hand (it takes a while and depends on the data servers).
+on:
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Debug APK
+        run: ./gradlew :androidApp:assembleDebug --stacktrace
+      - name: KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Pillow (the script counts the colors of the middle of each screenshot)
+        run: sudo apt-get install -y python3-pil
+      - name: Smoke test on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash scripts/ui_smoke.sh screenshots
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ui-smoke-screenshots
+          path: screenshots
