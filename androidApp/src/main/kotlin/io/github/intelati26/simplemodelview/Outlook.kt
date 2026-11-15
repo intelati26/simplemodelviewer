@@ -15,6 +15,7 @@ import simplemodelview.Core
 import simplemodelview.OutlookChoice
 import simplemodelview.OutlookData
 import simplemodelview.OutlookType
+import simplemodelview.outlookArchiveFor
 import simplemodelview.outlookChoiceFor
 import simplemodelview.OutlookRepository
 import simplemodelview.View
@@ -57,15 +58,19 @@ class OutlookModel(private val repo: OutlookRepository, private val prefs: Share
     }
 
     /** The outlook for a frame valid at [valid] (null: now), or null when none is chosen or none covers the time. */
-    fun choiceFor(valid: Long?): OutlookChoice? {
+    fun choiceFor(valid: Long?, asOf: Long? = null): OutlookChoice? {
         val type = _state.value.type ?: return null
         val at = now()
-        return outlookChoiceFor(type, valid ?: at, at)
+        val v = valid ?: at
+        // [asOf] is the start of the model run the frame belongs to (the outlook as it stood when the run was made); without it the frame's own time is the one
+        val anchor = asOf ?: v
+        val current = anchor > at - (if (asOf == null) 3600L else 8 * 3600L)       // a recent time or run: SPC's current files; an older one: the archive's outlook of that time
+        return if (current) outlookChoiceFor(type, v, at) else outlookArchiveFor(type, v, anchor)
     }
 
     /** Makes sure the outlook for a frame valid at [valid] is read (or being read); the page redraws when it arrives. */
-    fun want(valid: Long?) {
-        val choice = choiceFor(valid) ?: return
+    fun want(valid: Long?, asOf: Long? = null) {
+        val choice = choiceFor(valid, asOf) ?: return
         load(choice)
     }
 
@@ -74,10 +79,17 @@ class OutlookModel(private val repo: OutlookRepository, private val prefs: Share
         for (choice in valids.mapNotNull { choiceFor(it) }.toSet()) load(choice)
     }
 
+    /** [wantAll] for frames that each belong to a run: (valid time, run start). */
+    fun wantAllAs(frames: Collection<Pair<Long, Long?>>) {
+        for (choice in frames.mapNotNull { (valid, run) -> choiceFor(valid, run) }.toSet()) load(choice)
+    }
+
     private fun load(choice: OutlookChoice, force: Boolean = false) {
         val id = choice.id
         val st = _state.value
         if (id in st.reading) return
+        // an archived outlook never changes: once read (or found missing) it is not asked for again
+        if (choice.archive.isNotEmpty() && (id in st.loaded || id in st.notes)) return
         if (!force && st.loaded[id]?.let { now() - it.asOf < 15 * 60 } == true) return
         change { it.copy(reading = it.reading + id, notes = it.notes - id) }
         scope.launch { fetch(choice) }
@@ -99,8 +111,9 @@ class OutlookModel(private val repo: OutlookRepository, private val prefs: Share
     }
 
     /** Reads the outlook for a frame valid at [valid] now and waits for it (an export needs every frame's outlook in hand); a failure is a note, not an exception. */
-    suspend fun ensure(valid: Long?) {
-        val choice = choiceFor(valid) ?: return
+    suspend fun ensure(valid: Long?, asOf: Long? = null) {
+        val choice = choiceFor(valid, asOf) ?: return
+        if (choice.archive.isNotEmpty() && (choice.id in _state.value.loaded || choice.id in _state.value.notes)) return
         if (_state.value.loaded[choice.id]?.let { now() - it.asOf < 15 * 60 } == true) return
         change { it.copy(reading = it.reading + choice.id, notes = it.notes - choice.id) }
         fetch(choice)
@@ -114,8 +127,8 @@ class OutlookModel(private val repo: OutlookRepository, private val prefs: Share
     }
 
     /** What the outlook that covers [valid] says at a point, for the tap read-out; null when none is shown. */
-    fun readoutAt(lat: Double, lon: Double, valid: Long?): String? {
-        val choice = choiceFor(valid) ?: return null
+    fun readoutAt(lat: Double, lon: Double, valid: Long?, asOf: Long? = null): String? {
+        val choice = choiceFor(valid, asOf) ?: return null
         val loaded = _state.value.loaded[choice.id] ?: return null
         return outlookReadout(choice, outlookAt(loaded.data.shapes, lat, lon))
     }
@@ -125,8 +138,8 @@ class OutlookModel(private val repo: OutlookRepository, private val prefs: Share
  * The areas of the outlook that covers a frame valid at [valid] as outlines in the pixels of the picture of [view] (a window of its grid at `scale / step`
  * pixels per cell); lowest level first, so the higher ones lie on top. Empty until that outlook has been read.
  */
-internal fun outlookDraws(core: Core, model: OutlookModel, view: View, valid: Long?): List<AlertDraw> {
-    val choice = model.choiceFor(valid) ?: return emptyList()
+internal fun outlookDraws(core: Core, model: OutlookModel, view: View, valid: Long?, asOf: Long? = null): List<AlertDraw> {
+    val choice = model.choiceFor(valid, asOf) ?: return emptyList()
     val data = model.state.value.loaded[choice.id]?.data ?: return emptyList()
     val pixels = view.scale.toFloat() / view.step
     return data.shapes.flatMap { shape ->
@@ -317,3 +330,60 @@ internal fun overlayChanges(lightning: Boolean = true): kotlinx.coroutines.flow.
         if (lightning) listOf(o.type, o.version, l.enabled, l.asOf, ps.enabled, ps.asOf) else listOf(o.type, o.version)
     }
         .distinctUntilChanged().drop(1)
+
+
+/** A place (latitude, longitude) as pixels (x, y) of a picture, or null where the picture does not show it (the far side of a globe). */
+internal typealias PlaceProjection = (Double, Double) -> DoubleArray?
+
+/** [ring] (latitude, longitude pairs) in picture pixels: the pieces between hidden points, and whether nothing was hidden (then it is one piece, closed if the ring was). */
+internal fun projectRing(ring: DoubleArray, project: PlaceProjection): Pair<List<FloatArray>, Boolean> {
+    val pieces = ArrayList<FloatArray>()
+    var cur = ArrayList<Float>()
+    var whole = true
+    var i = 0
+    while (i + 1 < ring.size) {
+        val p = project(ring[i], ring[i + 1])
+        if (p == null) { whole = false; if (cur.size >= 4) pieces += cur.toFloatArray(); cur = ArrayList() }
+        else { cur.add(p[0].toFloat()); cur.add(p[1].toFloat()) }
+        i += 2
+    }
+    if (cur.size >= 4) pieces += cur.toFloatArray()
+    return pieces to whole
+}
+
+/** [outlookDraws] on any picture (a globe's): an area that goes over the horizon is drawn as lines in the pieces that show, not as a filled shape. */
+internal fun outlookDrawsOn(model: OutlookModel, valid: Long?, project: PlaceProjection): List<AlertDraw> = outlookDrawsOn(model, valid, null, project)
+
+/** [outlookDrawsOn] for a frame of a run that started at [asOf]. */
+internal fun outlookDrawsOn(model: OutlookModel, valid: Long?, asOf: Long?, project: PlaceProjection): List<AlertDraw> {
+    val choice = model.choiceFor(valid, asOf) ?: return emptyList()
+    val data = model.state.value.loaded[choice.id]?.data ?: return emptyList()
+    return data.shapes.flatMap { shape ->
+        shape.polygons.mapNotNull { polygon ->
+            val parts = polygon.map { projectRing(it, project) }
+            val pieces = parts.flatMap { it.first }
+            if (pieces.isEmpty()) null
+            else if (parts.all { it.second }) AlertDraw(pieces, shape.color, dashed = shape.hatched, fill = shape.hatched, combined = true, hatch = if (shape.hatched) shape.intensity else 1, strong = shape.hatched, heavy = !shape.hatched)
+            else AlertDraw(pieces, shape.color, dashed = false, fill = false, open = true, heavy = !shape.hatched)
+        }
+    }
+}
+
+/** [probSevereDraws] on any picture. */
+internal fun probSevereDrawsOn(state: ProbSevereState, at: Long?, project: PlaceProjection): List<AlertDraw> {
+    if (!state.enabled) return emptyList()
+    return simplemodelview.placeShapesAt(state.shapes, at).mapNotNull { shape ->
+        val (pieces, whole) = projectRing(shape.points, project)
+        if (pieces.isEmpty()) null else AlertDraw(pieces, shape.color, dashed = false, fill = false, open = !shape.closed || !whole)
+    }
+}
+
+/** [lightningDraws] on any picture. */
+internal fun lightningDrawsOn(state: LightningState, at: Long?, project: PlaceProjection): List<AlertDraw> {
+    if (!state.enabled) return emptyList()
+    val frame = simplemodelview.lightningFrameFor(state.frames, at) ?: return emptyList()
+    return frame.contours.sortedBy { it.percent }.mapNotNull { contour ->
+        val (pieces, _) = projectRing(contour.points, project)
+        if (pieces.isEmpty()) null else AlertDraw(pieces, contour.color, dashed = false, fill = false, open = true)
+    }
+}

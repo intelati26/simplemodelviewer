@@ -164,11 +164,12 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
     // settings export / import go through the system file pickers: the app needs no storage permission
+    var restartAsk by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
+        if (uri != null) scope.launch { if (vm.importSettings(context.contentResolver, uri)) restartAsk = true }
     }
     LifecycleResumeEffect(Unit) { vm.checkForNewCycle(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
 
@@ -299,6 +300,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
         onGo = { places = false; vm.goToPlace(it) },
         onDelete = vm::deletePlace, live = live,
     )
+    if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
@@ -664,7 +666,7 @@ internal fun SettingsDialog(
                 )
                 Column {
                     Text("Back up or move your settings")
-                    Text("Favorites, saved places, last product and area, and these options, as a JSON file you choose where to save.", style = MaterialTheme.typography.bodySmall)
+                    Text("Favorites, saved places, these options, the display choices (units, barbs, contours, loops, each page's product, area and level) and the sources (LightningCast and ProbSevere links, the GFS crop switch), as a JSON file you choose where to save. Importing restarts the app.", style = MaterialTheme.typography.bodySmall)
                     Row {
                         TextButton(onClick = onExport) { Text("Export") }
                         TextButton(onClick = onImport) { Text("Import") }
@@ -818,4 +820,18 @@ private fun TimesLine(fileTime: Long?, runComplete: Long?, cycle: Cycle?, validT
             pad, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+
+/** After an import: the display and source choices are read when the app starts, so offer to start it again. */
+@Composable
+internal fun RestartDialog(onLater: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    AlertDialog(
+        onDismissRequest = onLater,
+        title = { Text("Restart to apply") },
+        text = { Text("The display choices and sources in that file are read when the app starts. Restart now?") },
+        confirmButton = { TextButton(onClick = { SettingsTransfer.restart(context) }) { Text("Restart") } },
+        dismissButton = { TextButton(onClick = onLater) { Text("Later") } },
+    )
 }

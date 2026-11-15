@@ -233,8 +233,102 @@ fun urlEncode(text: String): String = buildString {
     }
 }
 
+/**
+ * Warnings and watches of the past, from the Iowa Environmental Mesonet's archive: the storm based warnings issued in the hours before a time (kept when the time
+ * falls between their issue and expiry) and the SPC watch outlines in force at it. What the NWS service the app reads for the present does not keep.
+ */
+object AlertArchive {
+    const val BASE = "https://mesonet.agron.iastate.edu/api/1"
+
+    /** The longest a storm based warning lasts, with room: a flash flood warning runs for hours. */
+    private const val LOOKBACK = 8 * 3600L
+
+    private val warningTitles = mapOf(
+        "TO.W" to "Tornado Warning", "SV.W" to "Severe Thunderstorm Warning", "FF.W" to "Flash Flood Warning",
+        "EW.W" to "Extreme Wind Warning", "MA.W" to "Special Marine Warning", "SQ.W" to "Snow Squall Warning",
+    )
+
+    private fun iso(epoch: Long): String {
+        val c = civilFromEpoch(epoch)
+        fun two(n: Int) = n.toString().padStart(2, '0')
+        return "${c[0]}-${two(c[1])}-${two(c[2])}T${two(c[3])}:${two(c[4])}:00Z"
+    }
+
+    fun warningsUrl(valid: Long) = "$BASE/vtec/sbw_interval.geojson?begints=${iso(valid - LOOKBACK)}&endts=${iso(valid + 60)}&only_new=true" +
+        listOf("TO", "SV", "FF", "EW", "MA", "SQ").joinToString("") { "&ph=$it" }
+
+    fun watchesUrl(valid: Long) = "$BASE/spc_watch_outline.geojson?valid=${iso(valid)}"
+
+    private fun featuresOf(text: String): JsonArray? = try { json.parseToJsonElement(text).jsonObject["features"]?.jsonArray } catch (e: Exception) { null }
+
+    private fun time(props: JsonObject, key: String): Long? = props[key]?.jsonPrimitive?.contentOrNull?.let { parseIsoWithOffset(it) }
+
+    /** The warnings of a [warningsUrl] answer that were in force at [valid] (issued at or before it, not expired yet), as shapes to draw and tap. */
+    fun parseWarnings(text: String, valid: Long): List<AlertShape> {
+        val out = ArrayList<AlertShape>()
+        for (feature in featuresOf(text) ?: return emptyList()) {
+            try {
+                val obj = feature.jsonObject
+                val props = obj["properties"]?.jsonObject ?: continue
+                val title = warningTitles[props["ph_sig"]?.jsonPrimitive?.contentOrNull] ?: continue
+                val issued = time(props, "utc_issue"); val expires = time(props, "utc_expire")
+                if (issued == null || expires == null || issued > valid || expires <= valid) continue
+                val rings = ringsOf(obj["geometry"] as? JsonObject)
+                if (rings.isEmpty()) continue
+                val where = props["locations"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                val product = props["product_id"]?.jsonPrimitive?.contentOrNull
+                out += AlertShape(AlertKind.Warning, title, AlertTypes.colorOf(title), rings, issued, expires, where, detailUrl = product?.let { "$BASE/nwstext/$it" })
+            } catch (e: Exception) { /* one damaged feature does not hide the others */ }
+        }
+        return out
+    }
+
+    /** The SPC tornado and severe thunderstorm watches of a [watchesUrl] answer (the four-sided outlines) that were in force at [valid]. */
+    fun parseWatches(text: String, valid: Long): List<AlertShape> {
+        val out = ArrayList<AlertShape>()
+        for (feature in featuresOf(text) ?: return emptyList()) {
+            try {
+                val obj = feature.jsonObject
+                val props = obj["properties"]?.jsonObject ?: continue
+                val name = when (props["type"]?.jsonPrimitive?.contentOrNull) { "TOR" -> "Tornado Watch"; "SVR" -> "Severe Thunderstorm Watch"; else -> continue }
+                val issued = time(props, "utc_issued"); val expires = time(props, "utc_expired")
+                if (issued == null || expires == null || issued > valid || expires <= valid) continue
+                val rings = ringsOf(obj["geometry"] as? JsonObject)
+                if (rings.isEmpty()) continue
+                val number = props["num"]?.jsonPrimitive?.contentOrNull
+                out += AlertShape(AlertKind.Watch, if (number != null) "$name $number" else name, AlertTypes.colorOf(name), rings, issued, expires, "SPC watch" + (number?.let { " $it" } ?: ""))
+            } catch (e: Exception) { }
+        }
+        return out
+    }
+}
+
 /** Reads the watches, warnings and discussions from NOAA's public services over [http]. Never holds state. */
 class AlertsRepository(private val http: Http) {
+    /** The warnings and SPC watches (of the kinds asked for) that were in force at [valid], from the archive. A part that cannot be read is skipped; all parts failing is an error. */
+    suspend fun archived(valid: Long, kinds: Set<AlertKind>): List<AlertShape> {
+        val out = ArrayList<AlertShape>()
+        var failure: Exception? = null
+        var answered = 0
+        var tried = 0
+        if (AlertKind.Warning in kinds) {
+            tried += 1
+            try {
+                val r = http.get(AlertArchive.warningsUrl(valid))
+                if (r.status == 200) { out += AlertArchive.parseWarnings(r.body.decodeToString(), valid); answered += 1 } else failure = RefsException("the archived warnings could not be read (HTTP ${r.status})")
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { failure = e }
+        }
+        if (AlertKind.Watch in kinds) {
+            tried += 1
+            try {
+                val r = http.get(AlertArchive.watchesUrl(valid))
+                if (r.status == 200) { out += AlertArchive.parseWatches(r.body.decodeToString(), valid); answered += 1 } else failure = RefsException("the archived watches could not be read (HTTP ${r.status})")
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { failure = e }
+        }
+        if (tried > 0 && answered == 0 && failure != null) throw failure       // every part failed: a note, not "nothing was in force"
+        return out
+    }
+
     /** Tornado / severe thunderstorm / flash flood / ... warnings and the convective and flash flood watches in force at [nowEpochSeconds]. */
     suspend fun warningsAndWatches(nowEpochSeconds: Long): List<AlertShape> {
         val types = (AlertTypes.warnings.keys + AlertTypes.watches.keys).joinToString(",") { "'$it'" }
@@ -274,7 +368,9 @@ class AlertsRepository(private val http: Http) {
         shape.text?.let { return it }
         val url = shape.detailUrl ?: return null
         val result = try { http.get(url) } catch (e: Exception) { return null }
-        return if (result.status == 200) parseAlertDetail(result.body.decodeToString()) else null
+        if (result.status != 200) return null
+        // the archive gives the product's own text; the NWS service gives JSON
+        return if (url.startsWith(AlertArchive.BASE)) result.body.decodeToString().trim().takeIf { it.isNotEmpty() } else parseAlertDetail(result.body.decodeToString())
     }
 
     /** The bytes of a discussion's graphic (PNG / GIF), or null when it has none or it cannot be read. */

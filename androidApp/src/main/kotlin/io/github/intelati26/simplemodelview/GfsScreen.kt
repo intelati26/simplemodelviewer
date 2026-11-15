@@ -66,15 +66,19 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var settings by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
+    var outlookDialog by remember { mutableStateOf(false) }
+    var pickSince by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var restartAsk by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
+        if (uri != null) scope.launch { if (vm.importSettings(context.contentResolver, uri)) restartAsk = true }
     }
-    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
     val dark = isSystemInDarkTheme()
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
@@ -106,6 +110,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         DropdownMenu(expanded = productMenu, onDismissRequest = { productMenu = false }) {
                             DropdownMenuItem(text = { Text("Heights and winds (250 to 850 mb)") }, onClick = { productMenu = false; vm.pickHeightsAndWinds() })
                             for (p in GfsCatalog.surface) DropdownMenuItem(text = { Text(p.title) }, onClick = { productMenu = false; vm.pickSurface(p.id) })
+                            DropdownMenuItem(text = { Text("Precipitation since a date and time…") }, onClick = { productMenu = false; pickSince = true })
                         }
                     }
                     PageMenu("gfs", onOpen)
@@ -154,16 +159,31 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         }
                     }
                     var sectorMenu by remember { mutableStateOf(false) }
+                    var sectorPage by remember { mutableStateOf(0) }
                     Box {
                         TextButton(onClick = { sectorMenu = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text((if (s.polar != null) (if (s.polar?.north == true) "N polar" else "S polar") else if (s.globe) "Globe" else s.sector.name) + " ▾", maxLines = 1) }
-                        DropdownMenu(expanded = sectorMenu, onDismissRequest = { sectorMenu = false }) {
-                            DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
-                            DropdownMenuItem(text = { Text("Globe over the north pole") }, onClick = { sectorMenu = false; vm.setGlobePole(true) })
-                            DropdownMenuItem(text = { Text("Globe over the south pole") }, onClick = { sectorMenu = false; vm.setGlobePole(false) })
-                            DropdownMenuItem(text = { Text("North polar map") }, onClick = { sectorMenu = false; vm.setPolar(true) })
-                            DropdownMenuItem(text = { Text("South polar map") }, onClick = { sectorMenu = false; vm.setPolar(false) })
-                            for (sector in GFS_SECTORS) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; vm.pickSector(sector) })
-                        }
+                        DropdownMenu(expanded = sectorMenu, onDismissRequest = { sectorMenu = false; sectorPage = 0 }) {
+                            val wide = GFS_SECTORS.take(4)
+                            when (sectorPage) {
+                                1 -> {
+                                    DropdownMenuItem(text = { Text("‹ Views") }, onClick = { sectorPage = 0 })
+                                    DropdownMenuItem(text = { Text("Globe over the north pole") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setGlobePole(true) })
+                                    DropdownMenuItem(text = { Text("Globe over the south pole") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setGlobePole(false) })
+                                    DropdownMenuItem(text = { Text("North polar map") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setPolar(true) })
+                                    DropdownMenuItem(text = { Text("South polar map") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setPolar(false) })
+                                }
+                                2 -> {
+                                    DropdownMenuItem(text = { Text("‹ Views") }, onClick = { sectorPage = 0 })
+                                    for (sector in GFS_SECTORS.drop(4)) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; sectorPage = 0; vm.pickSector(sector) })
+                                }
+                                else -> {
+                                    DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
+                                    DropdownMenuItem(text = { Text("Poles ›") }, onClick = { sectorPage = 1 })
+                                    for (sector in wide) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; vm.pickSector(sector) })
+                                    DropdownMenuItem(text = { Text("Regions ›") }, onClick = { sectorPage = 2 })
+                                }
+                            }
+}
                     }
                     TextButton(
                         onClick = { scope.launch { vm.buildShareFile()?.let { shareFile(context, it, "image/png", "Share map") } } },
@@ -180,6 +200,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+            OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
@@ -207,6 +228,33 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 TimeStepRow(s.index, s.frames.size, s.playing, vm::togglePlay, vm::pickIndex)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+        }
+    }
+
+    if (pickSince) {
+        val now = System.currentTimeMillis()
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = (now - 86_400_000L) / 86_400_000L * 86_400_000L,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis in (simplemodelview.GfsHistory.FIRST_RUN * 1000L - 86_400_000L)..now
+            },
+        )
+        var hour by remember { mutableStateOf(0) }
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickSince = false },
+            confirmButton = {
+                TextButton(
+                    enabled = state.selectedDateMillis != null,
+                    onClick = { val d = state.selectedDateMillis ?: return@TextButton; pickSince = false; vm.pickPrecipSince(d / 1000L + hour * 3600L) },
+                ) { Text("Show") }
+            },
+            dismissButton = { TextButton(onClick = { pickSince = false }) { Text("Cancel") } },
+        ) {
+            androidx.compose.material3.DatePicker(state, modifier = Modifier.weight(1f, fill = false), title = { Text("Precipitation from … to the time shown", Modifier.padding(start = 24.dp, top = 16.dp)) })
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Run time (UTC)", Modifier.padding(end = 8.dp))
+                for (h in listOf(0, 6, 12, 18)) androidx.compose.material3.FilterChip(selected = hour == h, onClick = { hour = h }, label = { Text("%02dZ".format(h)) }, modifier = Modifier.padding(end = 6.dp))
+            }
         }
     }
 
@@ -248,6 +296,8 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
         onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt,
         provider = "NOAA", server = "NOAA's servers",
     )
+    if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
+    if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
         onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, disclaimer = GFS_DISCLAIMER, showContours = true, showBarbs = true, showCrop = true,

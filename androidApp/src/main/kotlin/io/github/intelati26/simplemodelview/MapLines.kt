@@ -137,7 +137,7 @@ class MapLines(context: Context, private val core: Core) {
                 count += 4
             }
             paint.color = color
-            paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f)
+            paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f) * maxOf(1f, minOf(width, height) / 1100f)
             canvas.drawLines(pts, 0, count, paint)
         }
     }
@@ -180,7 +180,7 @@ class MapLines(context: Context, private val core: Core) {
                 count += 4
             }
             paint.color = color
-            paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f)
+            paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f) * maxOf(1f, minOf(width, height) / 1100f)
             canvas.drawLines(pts, 0, count, paint)
         }
     }

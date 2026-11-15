@@ -138,7 +138,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** Alert outlines over everything else: a dark casing under a colored line so they read on any background. */
-    private fun drawAlerts(canvas: Canvas, alerts: List<AlertDraw>, pictureWidth: Int) {
+    internal fun drawAlerts(canvas: Canvas, alerts: List<AlertDraw>, pictureWidth: Int) {
         val width = maxOf(2f, pictureWidth / 600f)
         val casing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width + 2f; color = 0x4D000000.toInt(); strokeJoin = Paint.Join.ROUND }
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = width; strokeJoin = Paint.Join.ROUND }

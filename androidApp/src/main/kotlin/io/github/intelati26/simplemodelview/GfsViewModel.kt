@@ -16,6 +16,7 @@ import simplemodelview.BackupPlace
 import simplemodelview.GfsCatalog
 import simplemodelview.GfsGlobal
 import simplemodelview.GlobeCamera
+import simplemodelview.GfsHistory
 import simplemodelview.PolarCamera
 import simplemodelview.Grid
 import simplemodelview.NbmCycle
@@ -27,6 +28,7 @@ import simplemodelview.Style
 import simplemodelview.View
 import simplemodelview.WindProducts
 import simplemodelview.formatUtc
+import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
 import simplemodelview.nbmDwellMillis
@@ -36,6 +38,10 @@ import java.io.File
 import kotlin.math.floor
 
 /** The windows of the globe the GFS page shows (Lambert boxes of the REFS projection, like the sectors of the other pages). */
+/** Side of the square a globe or polar map is saved at (a picture), and a loop frame before the video size scales it. */
+private const val EXPORT_SIDE = 3000
+private const val LOOP_SIDE = 2000
+
 internal val GFS_SECTORS = listOf(
     Sector("CONUS", -125.0, 24.0, -66.5, 50.0),
     Sector("North America", -170.0, 8.0, -50.0, 72.0),
@@ -75,6 +81,7 @@ data class GfsState(
     val history: Boolean = false,             // the frames are the analyses (hour 0) of the runs of the past days, not one run's forecast hours
     val historyDays: Int = 5,
     val historyRange: Pair<Long, Long>? = null,   // a hand-picked span (epoch seconds); null = the past [historyDays] days
+    val since: Long? = null,                  // the start (epoch seconds) of the precipitation-since product
     val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
@@ -111,7 +118,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(
         GfsState(
-            product = prefs.getString("gfs_product", "hw") ?: "hw",
+            product = (prefs.getString("gfs_product", "hw") ?: "hw").let { if (it == GfsHistory.SINCE_ID) "hw" else it },      // the since product needs a start time, which is not kept
             level = prefs.getInt("gfs_level", 500).takeIf { it in GfsCatalog.levels || it == WindProducts.STACK } ?: 500,
             color = prefs.getString("gfs_color", "speed")?.takeIf { k -> WindProducts.colors.any { it.key == k } } ?: "speed",
             sector = GFS_SECTORS.firstOrNull { it.name == prefs.getString("gfs_sector", null) } ?: GFS_SECTORS[0],
@@ -128,7 +135,13 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false),
     ).withDisplayPrefs(prefs)
 
-    init { load(); promptForContact() }
+    private val outlook = AppContainer.outlook
+
+    init {
+        load(); promptForContact()
+        // a newly read (or changed) SPC outlook is drawn at once
+        viewModelScope.launch { overlayChanges(lightning = false).collect { if (!_state.value.playing && (shown != null || globeShown != null)) { if (_state.value.globe) requestGlobe(coarse = false) else showFrame() } } }
+    }
 
     // ---- runs and frames ----
     fun load() {
@@ -223,6 +236,15 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- what is shown ----
     fun pickHeightsAndWinds() { prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw", crosshair = null, readout = null) }; showFrame() }
+    private fun sinceTitle(st: GfsState, file: NbmFile) = "Precipitation from ${formatUtc((st.since ?: 0L) / 21600L * 21600L)} to ${formatUtc(file.valid)}"
+
+    /** Precipitation from [start] (epoch seconds, back to 2021-03-23) to the time of the frame shown: it follows the slider and plays as a loop. */
+    fun pickPrecipSince(start: Long) {
+        prefs.edit().putString("gfs_product", GfsHistory.SINCE_ID).apply()
+        update { it.copy(product = GfsHistory.SINCE_ID, since = start, crosshair = null, readout = null) }
+        showFrame()
+    }
+
     fun pickSurface(id: String) { prefs.edit().putString("gfs_product", id).apply(); update { it.copy(product = id, crosshair = null, readout = null) }; showFrame() }
     fun pickLevel(level: Int) { prefs.edit().putInt("gfs_level", level).apply(); update { it.copy(level = level, product = "hw") }; showFrame() }
     fun pickColor(key: String) { prefs.edit().putString("gfs_color", key).apply(); update { it.copy(color = key, product = "hw") }; showFrame() }
@@ -280,13 +302,21 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
     private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
-        val surface = GfsCatalog.surfaceById(st.product)
+        val since = st.product == GfsHistory.SINCE_ID
+        val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
-        val key = "${file.url}|${st.product}|${st.level}|${st.color}"
+        val key = "${file.url}|${st.product}|${st.since}|${st.level}|${st.color}"
         val data = globalComputed[key] ?: withContext(Dispatchers.Default) {
-            Timings.timed("data") { if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status) }
+            Timings.timed("data") {
+                if (since) {
+                    var grid: Grid? = null
+                    val values = repo.precipitationSince(st.since ?: throw IllegalStateException("no start time"), file, "gfs", "globe", { f, p -> repo.loadFieldGlobal(f, p, status).also { grid = it.grid }.values }, { d, n -> status("Precipitation: $d of $n runs…") })
+                    GfsGlobal(grid ?: Grid.REFS, values)
+                } else if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status)
+            }
         }.also { globalComputed[key] = it }
-        val (product, title) = productFor(st, surface, data.grid)
+        val (product, title0) = productFor(st, surface, data.grid)
+        val title = if (since) sinceTitle(st, file) else title0
         globeShown = product to data.values
         update { it.copy(style = product.style, title = title, loadStatus = null) }
         if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
@@ -302,7 +332,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
         val column = Math.round(c).toInt().coerceIn(0, grid.columns - 1)
         val row = Math.round(r).toInt().coerceIn(0, grid.rows - 1)
-        update { it.copy(readout = readout(core, product, values, emptyList(), column, row, trueFrameWinds = true), tapLatLon = ll[0] to ll[1]) }
+        update { it.copy(readout = readout(core, product, values, emptyList(), column, row, trueFrameWinds = true) + (outlook.readoutAt(ll[0], ll[1], _state.value.file?.valid, _state.value.file?.run)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = ll[0] to ll[1]) }
     }
 
     fun setGlobe(on: Boolean) {
@@ -374,13 +404,20 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A place on the globe or polar map as the page has it now (null where it is not shown). */
+    private fun globeProjection(st: GfsState, width: Int, height: Int): PlaceProjection =
+        { lat, lon -> st.polar?.project(width, height, lat, lon) ?: if (st.polar == null) globeForward(st.cam, width, height, lat, lon) else null }
+
     private suspend fun renderGlobeNow(stride: Int) {
         val (product, values) = globeShown ?: return
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
+        val valid = st.file?.valid
+        val run = st.file?.run
+        outlook.want(valid, run)
         val bitmap = withContext(Dispatchers.Default) {
             // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -391,18 +428,24 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(busy = true, error = null) }
         if (st.globe) { showGlobeFrame(st, file); return }
         val target = gridFor(st.sector)
-        val surface = GfsCatalog.surfaceById(st.product)
+        val since = st.product == GfsHistory.SINCE_ID
+        val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
-        val key = "${file.url}|${st.product}|${st.level}|${st.color}|${st.sector.name}"
+        val key = "${file.url}|${st.product}|${st.since}|${st.level}|${st.color}|${st.sector.name}"
         val region = regionFor(st)
         val values = computed[key] ?: withContext(Dispatchers.Default) {
-            Timings.timed("data") { if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop) }
+            Timings.timed("data") {
+                if (since) repo.precipitationSince(st.since ?: throw IllegalStateException("no start time"), file, "gfs", "sector|${st.sector.name}|${st.settings.gfsCrop}", { f, p -> repo.loadField(f, p, target, status, region, st.settings.gfsCrop) }, { d, n -> status("Precipitation: $d of $n runs…") })
+                else if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop)
+            }
         }.also { computed[key] = it }
-        val (product, title) = productFor(st, surface, target)
+        val (product, title0) = productFor(st, surface, target)
+        val title = if (since) sinceTitle(st, file) else title0
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
+        outlook.want(file.valid, file.run)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), view, dark, contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
+            renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
         }
         shown = Triple(product, values, view)
         update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null, detail = null) }
@@ -423,8 +466,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             delay(400)
             try {
                 val settings = _state.value.settings
+                val valid = _state.value.file?.valid
+                val run = _state.value.file?.run
                 val bitmap = withContext(Dispatchers.Default) {
-                    renderer.render(product, product.style, values, emptyList(), window.view, dark, contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                    renderer.render(product, product.style, values, emptyList(), window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid, run), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
                 }
                 if (shown?.second === values) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 25.0)) }
             } catch (e: CancellationException) { throw e } catch (_: Exception) { }
@@ -437,7 +482,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val column = v.col0 + floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.row0 + v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon, _state.value.file?.valid, _state.value.file?.run)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -454,11 +499,11 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun reloadFromPrefs() = update { it.copy(settings = readSettings()) }
 
-    private fun backup() = SettingsBackup(
+    private fun backup() = SettingsTransfer.withPrefs(SettingsBackup(
         wifiOnlyLoop = _state.value.settings.wifiOnlyLoop, dataSaver = _state.value.settings.dataSaver, cacheMegabytes = _state.value.settings.cacheMegabytes,
         contactEmail = _state.value.settings.contactEmail, favorites = prefs.getStringSet("favorites", emptySet()).orEmpty().sorted(), places = emptyList(),
         product = prefs.getString("product", null), sector = prefs.getString("sector", null),
-    )
+    ), prefs)
 
     suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
         val text = SettingsBackup.encode(backup())
@@ -466,13 +511,16 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(notice = if (ok) "Settings exported." else "Could not write the settings file.") }
     }
 
-    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+    /** True when display or source choices were imported: the app restarts to take them up. */
+    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
         val text = withContext(Dispatchers.IO) { try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null } }
         val b = text?.let { SettingsBackup.decode(it) }
-        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
+        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
-        update { it.copy(notice = "Settings imported.") }
+        val extras = SettingsTransfer.apply(prefs, b)
+        update { it.copy(notice = "Settings imported" + (if (extras > 0) " ($extras display and source choices)" else "") + ".") }
+        return extras > 0
     }
 
     private var lastContactPrompt = 0L
@@ -503,6 +551,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val window = loopWindow(st)
         if (window.count() < 2) return
+        outlook.wantAllAs(window.map { st.frames[it].valid to st.frames[it].run })      // the outlook of every day the loop reaches, ready when the loop gets there
         frameJob?.cancel()
         update { it.copy(playing = true) }
         playJob = viewModelScope.launch {
@@ -512,7 +561,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 val count = window.count()
                 var done = 0
                 for (i in window) {
-                    if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
+                    if (st.product == GfsHistory.SINCE_ID) Unit else if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }
@@ -549,11 +598,12 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         try {
             for ((k, i) in window.withIndex()) {
                 update { it.copy(index = i) }
+                outlook.ensure(st.frames[i].valid, st.frames[i].run)    // the outlook of that day, read before the frame is drawn
                 showCurrent()                         // draws the frame (and downloads what it needs)
                 val now = _state.value
                 val file = now.file ?: continue
                 val product = (if (now.globe) globeShown?.first else shown?.first) ?: continue
-                val map = now.map ?: continue
+                val map = exportMap(now, LOOP_SIDE) ?: continue
                 val header = "Valid ${formatUtc(file.valid)} " + (if (now.history) "(analysis)" else "(+${file.leadHours} h)   Run ${now.cycle?.label ?: ""}") + "   Data: NOAA/NWS Global Forecast System (experimental viewer)"
                 val size = videoSize
                 var picture = withContext(Dispatchers.Default) { renderer.shareImage(map, product, product.style, header, emptyList()) }
@@ -571,12 +621,29 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * The picture to export: the globe or polar map drawn again on a square [side] pixels across (the screen's rotation and zoom kept), so a saved picture or loop
+     * frame is far finer than the screen; the flat map is already drawn at its own scale.
+     */
+    private suspend fun exportMap(st: GfsState, side: Int): Bitmap? {
+        if (!st.globe || globeW == 0) return st.map
+        val (product, values) = globeShown ?: return st.map
+        val f = side.toDouble() / minOf(globeW, globeH)
+        return withContext(Dispatchers.Default) {
+            globeRenderer.render(
+                product.grid, values, product.style, emptyList(), st.cam.copy(radius = st.cam.radius * f), side, side, 1, dark, product,
+                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) },
+                alerts = outlookDrawsOn(outlook, st.file?.valid, st.file?.run, globeProjection(st.copy(cam = st.cam.copy(radius = st.cam.radius * f), polar = st.polar?.let { it.copy(radius = it.radius * f) }), side, side)),
+            )
+        }
+    }
+
     // ---- sharing ----
     suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null
         val product = (if (st.globe) globeShown?.first else shown?.first) ?: return@withContext null
-        val map = st.map ?: return@withContext null
+        val map = exportMap(st, EXPORT_SIDE) ?: return@withContext null
         val c = simplemodelview.civilFromEpoch(file.valid)
         fun p(n: Int) = n.toString().padStart(2, '0')
         val header = "Valid ${formatUtc(file.valid)} (+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}   Data: NOAA/NWS Global Forecast System (experimental viewer)"

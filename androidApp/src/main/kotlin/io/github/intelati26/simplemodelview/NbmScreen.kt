@@ -85,11 +85,12 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var restartAsk by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { vm.importSettings(context.contentResolver, uri) }
+        if (uri != null) scope.launch { if (vm.importSettings(context.contentResolver, uri)) restartAsk = true }
     }
     LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
     val dark = isSystemInDarkTheme()
@@ -219,6 +220,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
     if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live)
+    if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
         onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, disclaimer = NBM_DISCLAIMER, showContours = true,

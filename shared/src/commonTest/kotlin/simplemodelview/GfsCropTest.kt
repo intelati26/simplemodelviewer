@@ -220,4 +220,32 @@ class GfsCropStoreTest {
         assertEquals(0, repo.listHistory(NbmCycle(2020, 1, 1, 0).epoch, NbmCycle(2021, 3, 1, 0).epoch, "gfs").size)
         assertEquals(6, GfsHistory.stepHours(10 * 86400L)); assertEquals(12, GfsHistory.stepHours(80 * 86400L)); assertEquals(24, GfsHistory.stepHours(120 * 86400L))
     }
+
+    @Test fun precipitationSinceChainsTheFirstSixHoursOfEachRunThenTheRunsTotal() = runTest {
+        val http = object : Http {
+            override suspend fun get(url: String): HttpResult {
+                val key = url.substringAfter("prefix=")
+                return HttpResult(200, ("<ListBucketResult><Contents><Key>$key</Key><LastModified>2026-11-06T05:00:00.000Z</LastModified><Size>500</Size></Contents></ListBucketResult>").encodeToByteArray())
+            }
+        }
+        val repo = GfsRepository(http, StubCore)
+        var loads = 0
+        val load: suspend (NbmFile, GfsProduct) -> FloatArray = { f, p -> loads += 1; FloatArray(2) { if (p.id == "apcp6_gfs") 1f else if (f.leadHours == 6) 4f else 10f } }
+        val run = NbmCycle(2026, 11, 6, 12).epoch
+        // history frame (an analysis): 24 hours back = four 6-hour amounts
+        val analysis = NbmFile("gfs.20261106/12/atmos/gfs.t12z.pgrb2.0p25.f000", run, run, null, 1, grib = true, field = "gfs", bucketUrl = GfsBucket.URL)
+        assertEquals(4f, repo.precipitationSince(run - 24 * 3600L, analysis, "gfs", "k1", load)[0])
+        assertEquals(4, loads)
+        // the next frame of the loop (six hours later) continues from the sum: one more amount, not five
+        val next = analysis.copy(key = "gfs.20261106/18/atmos/gfs.t18z.pgrb2.0p25.f000", run = run + 6 * 3600L, valid = run + 6 * 3600L)
+        loads = 0
+        assertEquals(5f, repo.precipitationSince(run - 24 * 3600L, next, "gfs", "k1", load)[0])
+        assertEquals(1, loads)
+        // a forecast frame: the amounts before the run, then the run's total at the frame (lead 12 here gives 10)
+        val forecast = NbmFile("gfs.20261106/12/atmos/gfs.t12z.pgrb2.0p25.f012", run, run + 12 * 3600L, null, 1, grib = true, field = "gfs", bucketUrl = GfsBucket.URL)
+        assertEquals(12f, repo.precipitationSince(run - 12 * 3600L, forecast, "gfs", "k2", load)[0])      // 2 amounts + 10
+        // a start inside the run: the difference of two totals (10 at hour 12, 4 at hour 6)
+        assertEquals(6f, repo.precipitationSince(run + 6 * 3600L, forecast, "gfs", "k3", load)[0])
+        assertTrue(runCatching { repo.precipitationSince(run + 12 * 3600L, forecast, "gfs", "k4", load) }.isFailure)
+    }
 }

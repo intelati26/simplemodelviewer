@@ -35,6 +35,7 @@ import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
 import simplemodelview.encodePlaces
+import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
@@ -128,7 +129,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     init {
         load(); promptForContact()
         // a newly read (or changed) SPC outlook is drawn at once
-        viewModelScope.launch { overlayChanges(lightning = false).collect { if (shown != null && !_state.value.playing && !_state.value.globe) showFrame() } }
+        viewModelScope.launch { overlayChanges(lightning = false).collect { if (shown != null && !_state.value.playing) { if (_state.value.globe) requestGlobe(coarse = false) else showFrame() } } }
     }
 
     /** The other pages may have changed favorites, places or settings while this page was away. */
@@ -325,11 +326,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
             return
         }
-        outlook.want(file.valid)
+        outlook.want(file.valid, file.run)
         val v = viewFor(st.sector, grid)
         val product = synthetic(st.product, grid)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity)
+            renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid, file.run), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity)
         }
         view = v
         shown = product to field.values
@@ -347,7 +348,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val column = v.col0 + floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.row0 + v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon, _state.value.file?.valid)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon, _state.value.file?.valid, _state.value.file?.run)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -414,8 +415,12 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         val (product, values) = shown ?: return
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
+        val valid = st.file?.valid
+        val run = st.file?.run
+        outlook.want(valid, run)
         val bitmap = withContext(Dispatchers.Default) {
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity)
+            val alerts = outlookDrawsOn(outlook, valid, run) { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -440,9 +445,10 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             delay(400)
             try {
                 val valid = st.file?.valid
+                val run = st.file?.run
                 val settings = _state.value.settings
                 val bitmap = withContext(Dispatchers.Default) {
-                    renderer.render(product, product.style, values, emptyList(), window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                    renderer.render(product, product.style, values, emptyList(), window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid, run), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
                 }
                 if (view === base && shown?.second === values) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 2.5)) }
             } catch (e: CancellationException) { throw e } catch (_: Exception) { }
@@ -496,12 +502,12 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun backup(): SettingsBackup {
         val st = _state.value
-        return SettingsBackup(
+        return SettingsTransfer.withPrefs(SettingsBackup(
             wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
             contactEmail = st.settings.contactEmail, favorites = st.favorites.sorted(),
             places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
             product = prefs.getString("product", null), sector = prefs.getString("sector", null),
-        )
+        ), prefs)
     }
 
     suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
@@ -512,18 +518,21 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(notice = if (ok) "Settings exported: ${backup().favorites.size} favorites, ${backup().places.size} places." else "Could not write the settings file.") }
     }
 
-    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+    /** True when display or source choices were imported: the app restarts to take them up. */
+    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
         val text = withContext(Dispatchers.IO) {
             try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null }
         }
         val b = text?.let { SettingsBackup.decode(it) }
-        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
+        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
-        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places.") }
+        val extras = SettingsTransfer.apply(prefs, b)
+        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places" + (if (extras > 0) ", $extras display and source choices" else "") + ".") }
+        return extras > 0
     }
 
     private var lastContactPrompt = 0L
@@ -567,7 +576,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             update { it.copy(playing = true, prefetch = 0f) }
             val frames = st.frames
             val window = nbmLoopWindow(frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
-            outlook.wantAll(window.map { frames[it].valid })      // the outlook of every day the loop reaches, ready when the loop gets there
+            outlook.wantAllAs(window.map { frames[it].valid to frames[it].run })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(frames.size)
             var finished = false
@@ -668,11 +677,11 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             }
             return Triple(bitmap, globeProduct, globeProduct.style)
         }
-        outlook.ensure(file.valid)
+        outlook.ensure(file.valid, file.run)
         val box = areaView(area, field.grid)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
+            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid, file.run), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
         }
         return Triple(map, product, product.style)
     }

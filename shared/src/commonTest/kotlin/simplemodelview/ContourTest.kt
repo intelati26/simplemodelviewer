@@ -112,4 +112,27 @@ class ContourSmoothingTest {
         val ring = Contours.chaikin(floatArrayOf(0f, 0f, 4f, 0f, 4f, 4f, 0f, 4f, 0f, 0f), true, 1)
         assertEquals(ring[0], ring[ring.size - 2]); assertEquals(ring[1], ring[ring.size - 1])
     }
+
+    @Test fun blockCullingFindsEverySegmentABruteForceCountFinds() {
+        val cols = 83; val rows = 61            // not multiples of the block size
+        val v = FloatArray(cols * rows)
+        var seed = 7L
+        for (r in 0 until rows) for (c in 0 until cols) {
+            seed = seed * 6364136223846793005L + 1442695040888963407L
+            v[r * cols + c] = (kotlin.math.sin(c / 7.0) * 40 + kotlin.math.cos(r / 5.0) * 30 + ((seed ushr 44) % 100) / 25.0).toFloat()
+        }
+        for (k in 0 until 40) v[(k * 37) % v.size] = Float.NaN
+        for (level in listOf(-20f, 0f, 3.3f, 25f, 90f)) {
+            var expected = 0
+            for (r in 0 until rows - 1) for (c in 0 until cols - 1) {
+                val a = v[r * cols + c]; val b = v[r * cols + c + 1]; val d = v[(r + 1) * cols + c]; val e = v[(r + 1) * cols + c + 1]
+                if (a.isNaN() || b.isNaN() || d.isNaN() || e.isNaN()) continue
+                val corners = listOf(a >= level, b >= level, e >= level, d >= level)       // around the square
+                val changes = (0 until 4).count { corners[it] != corners[(it + 1) % 4] }
+                expected += changes / 2                                                    // two crossings make a segment, four (a saddle) make two
+            }
+            val chains = Contours.trace(v, cols, 0, 0, cols - 1, rows - 1, level)
+            assertEquals(expected, chains.sumOf { it.size / 2 - 1 }, "level $level")
+        }
+    }
 }
