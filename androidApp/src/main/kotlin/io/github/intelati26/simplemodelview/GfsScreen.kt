@@ -154,16 +154,31 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         }
                     }
                     var sectorMenu by remember { mutableStateOf(false) }
+                    var sectorPage by remember { mutableStateOf(0) }
                     Box {
                         TextButton(onClick = { sectorMenu = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text((if (s.polar != null) (if (s.polar?.north == true) "N polar" else "S polar") else if (s.globe) "Globe" else s.sector.name) + " ▾", maxLines = 1) }
-                        DropdownMenu(expanded = sectorMenu, onDismissRequest = { sectorMenu = false }) {
-                            DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
-                            DropdownMenuItem(text = { Text("Globe over the north pole") }, onClick = { sectorMenu = false; vm.setGlobePole(true) })
-                            DropdownMenuItem(text = { Text("Globe over the south pole") }, onClick = { sectorMenu = false; vm.setGlobePole(false) })
-                            DropdownMenuItem(text = { Text("North polar map") }, onClick = { sectorMenu = false; vm.setPolar(true) })
-                            DropdownMenuItem(text = { Text("South polar map") }, onClick = { sectorMenu = false; vm.setPolar(false) })
-                            for (sector in GFS_SECTORS) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; vm.pickSector(sector) })
-                        }
+                        DropdownMenu(expanded = sectorMenu, onDismissRequest = { sectorMenu = false; sectorPage = 0 }) {
+                            val wide = GFS_SECTORS.take(4)
+                            when (sectorPage) {
+                                1 -> {
+                                    DropdownMenuItem(text = { Text("‹ Views") }, onClick = { sectorPage = 0 })
+                                    DropdownMenuItem(text = { Text("Globe over the north pole") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setGlobePole(true) })
+                                    DropdownMenuItem(text = { Text("Globe over the south pole") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setGlobePole(false) })
+                                    DropdownMenuItem(text = { Text("North polar map") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setPolar(true) })
+                                    DropdownMenuItem(text = { Text("South polar map") }, onClick = { sectorMenu = false; sectorPage = 0; vm.setPolar(false) })
+                                }
+                                2 -> {
+                                    DropdownMenuItem(text = { Text("‹ Views") }, onClick = { sectorPage = 0 })
+                                    for (sector in GFS_SECTORS.drop(4)) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; sectorPage = 0; vm.pickSector(sector) })
+                                }
+                                else -> {
+                                    DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
+                                    DropdownMenuItem(text = { Text("Poles ›") }, onClick = { sectorPage = 1 })
+                                    for (sector in wide) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; vm.pickSector(sector) })
+                                    DropdownMenuItem(text = { Text("Regions ›") }, onClick = { sectorPage = 2 })
+                                }
+                            }
+}
                     }
                     TextButton(
                         onClick = { scope.launch { vm.buildShareFile()?.let { shareFile(context, it, "image/png", "Share map") } } },
