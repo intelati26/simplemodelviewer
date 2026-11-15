@@ -99,7 +99,8 @@ class MapLines(context: Context, private val core: Core) {
     }
 
     /** Draws the lines on an orthographic globe (see simplemodelview.GlobeCamera). Only segments with both ends on the near side are drawn. */
-    fun drawGlobe(canvas: Canvas, cam: simplemodelview.GlobeCamera, width: Int, height: Int, dark: Boolean, detailed: Boolean) {
+    /** [countyMode]: 0 counties when zoomed in, 1 always, 2 never (as on the flat map). */
+    fun drawGlobe(canvas: Canvas, cam: simplemodelview.GlobeCamera, width: Int, height: Int, dark: Boolean, detailed: Boolean, countyMode: Int = 0) {
         val phi0 = Math.toRadians(cam.lat)
         val sin0 = Math.sin(phi0).toFloat(); val cos0 = Math.cos(phi0).toFloat()
         val lam0 = Math.toRadians(cam.lon)
@@ -109,7 +110,7 @@ class MapLines(context: Context, private val core: Core) {
         val zoomedIn = r > width * 1.4f
         val gray = if (dark) 0xFF9AA4B0.toInt() else 0xFF4A5560.toInt()
         val plan = listOf(Triple("mx", gray, 0.8f), Triple("ca", gray, 0.8f)) +
-            (if (zoomedIn && detailed) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
+            (if (detailed && when (countyMode) { 1 -> true; 2 -> false; else -> zoomedIn }) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
             listOf(Triple("statev2", if (dark) 0xFFE0E4E8.toInt() else 0xFF2A3036.toInt(), 1.1f))
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = detailed }
         for ((name, color, width1) in plan) {
@@ -143,7 +144,7 @@ class MapLines(context: Context, private val core: Core) {
     }
 
     /** Draws the lines on a polar stereographic map (see simplemodelview.PolarCamera). Only segments with both ends inside the circle are drawn. */
-    fun drawPolar(canvas: Canvas, cam: simplemodelview.PolarCamera, width: Int, height: Int, dark: Boolean, detailed: Boolean) {
+    fun drawPolar(canvas: Canvas, cam: simplemodelview.PolarCamera, width: Int, height: Int, dark: Boolean, detailed: Boolean, countyMode: Int = 0) {
         val lam0 = Math.toRadians(cam.lon)
         val sinL0 = Math.sin(lam0).toFloat(); val cosL0 = Math.cos(lam0).toFloat()
         val cx = width / 2f; val cy = height / 2f
@@ -153,7 +154,7 @@ class MapLines(context: Context, private val core: Core) {
         val zoomedIn = r > Math.min(width, height) * 1.2f
         val gray = if (dark) 0xFF9AA4B0.toInt() else 0xFF4A5560.toInt()
         val plan = listOf(Triple("mx", gray, 0.8f), Triple("ca", gray, 0.8f)) +
-            (if (zoomedIn && detailed) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
+            (if (detailed && when (countyMode) { 1 -> true; 2 -> false; else -> zoomedIn }) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
             listOf(Triple("statev2", if (dark) 0xFFE0E4E8.toInt() else 0xFF2A3036.toInt(), 1.1f))
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = detailed }
         for ((name, color, width1) in plan) {

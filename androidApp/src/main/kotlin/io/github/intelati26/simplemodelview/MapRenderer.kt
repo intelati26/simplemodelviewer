@@ -255,6 +255,9 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
     /** Edge width in picture pixels: 2 on a small picture, 3 on a large one. */
     private fun edgeFor(pictureWidth: Int) = 1 + maxOf(1, pictureWidth / 1200)
 
+    /** A picture's shapes (pixels with any opacity) edged in black and haloed in white, grown first on a wide picture: the globe's hail swaths and rotation tracks. */
+    internal fun haloPixels(px: IntArray, w: Int, h: Int) { grow(px, w, h, growFor(w)); outline(px, w, h, edgeFor(w)) }
+
     /** The overlay drawn at picture resolution, its shapes edged in black and haloed in white (see [outline]). */
     private fun drawHaloed(canvas: Canvas, overlay: Overlay, w: Int, h: Int) {
         val plain = Paint().apply { isFilterBitmap = false }

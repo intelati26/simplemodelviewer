@@ -420,7 +420,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         outlook.want(valid, run)
         val bitmap = withContext(Dispatchers.Default) {
             val alerts = outlookDrawsOn(outlook, valid, run) { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts, counties = st.settings.counties)
         }
         update { it.copy(map = bitmap, busy = false) }
     }

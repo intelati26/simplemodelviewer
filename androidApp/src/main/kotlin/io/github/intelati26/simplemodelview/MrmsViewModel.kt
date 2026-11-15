@@ -524,6 +524,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private class ShownOverlay(val name: String, val product: Product, val values: suspend () -> FloatArray)
     private class OverlayResult(val layer: Overlay, val shown: ShownOverlay, val info: String)
     private var shownOverlays: List<ShownOverlay> = emptyList()
+    private var globeLayers: List<GlobeOverlay> = emptyList()           // the overlays as the globe draws them
     private var readoutJob: Job? = null
 
     /** What names a layer in the read-out and the file times: its own title, or only what tells the layers of a stack apart ("5 min"). */
@@ -556,6 +557,25 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             results += OverlayResult(Overlay(bitmap, dst, overlayIsSparse(ov) && layer.opacity >= 1.0, overlayIsMarker(ov), overlayMarkerScale(ov), halo = mrmsHasHalo(ov), markerColor = overlayMarkerColor(ov)), ShownOverlay(shortName, product) { decode(ov, file, "$label|overlay|${base.grid.id}", gridCoverBox(core, base.grid), stepOf(ov), cache, FrameTarget.Onto(base.grid)).window.values }, "$shortName ${formatClock(file.validTime)}")
         }
         return results
+    }
+
+    /** The overlay fields for the globe: each decoded onto the globe's own grid [grid], with how it is drawn and what a tap reads from it. */
+    private suspend fun globeOverlays(baseFile: MrmsFile, grid: Grid): List<Pair<GlobeOverlay, ShownOverlay>> {
+        val layers = _state.value.overlays
+        val out = ArrayList<Pair<GlobeOverlay, ShownOverlay>>()
+        for (layer in layers) {
+            val ov = layer.product
+            val file = overlayFileFor(layer, baseFile) ?: continue
+            val label = "globe|overlay|${grid.id}"
+            val frame = try { decode(ov, file, label, gridCoverBox(core, grid), globeStep(ov), true, FrameTarget.Onto(grid)) } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
+            val g = frame.window.grid
+            val style = styleForLayer(layer)
+            val shortName = layerLabel(layer, layers.size)
+            val product = Product(ov.directory, ov.displayTitle, ov.group, style, hasMembers = false, timeDimension = null, grid = g)
+            out += GlobeOverlay(g, frame.window.values, style, overlayIsMarker(ov), overlayMarkerScale(ov), mrmsHasHalo(ov), overlayMarkerColor(ov)) to
+                ShownOverlay(shortName, product) { frame.window.values }
+        }
+        return out
     }
 
     private fun overlayInfoFor(results: List<OverlayResult>): String? {
@@ -644,6 +664,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             shownGrid = frame.window.grid
             shown = synthetic(product, frame.window.grid) to frame.window.values
+            val layers = globeOverlays(file, frame.window.grid)
+            globeLayers = layers.map { it.first }
+            shownOverlays = layers.map { it.second }
             update { it.copy(style = styleOf(product), cellKilometers = frame.window.sourceCellDegrees * globeStep(product) * 111.0) }
             if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
             return
@@ -702,7 +725,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val hits = st.file?.let { f -> shapesAt(alertShapesNow(f), lat, lon) } ?: emptyList()
         update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon, alertHits = hits) }
-        // the layers' values are fetched for this tap (from the cache, or decoded again from the downloaded file): the read-out follows a moment later
+        appendOverlayReadouts(text, lat, lon)
+    }
+
+    /** The overlay layers' values at a tap are fetched (from the cache, or decoded again from the downloaded file): the read-out follows a moment later. */
+    private fun appendOverlayReadouts(text: String, lat: Double, lon: Double) {
         val layers = shownOverlays
         if (layers.isEmpty()) return
         readoutJob?.cancel()
@@ -727,9 +754,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
         val column = Math.round(c).toInt()
         val row = Math.round(r).toInt()
-        val text = if (column !in 0 until grid.columns || row !in 0 until grid.rows)
+        var text = if (column !in 0 until grid.columns || row !in 0 until grid.rows)
             "${placeLabel(ll[0], ll[1])}   outside the MRMS area" else readout(core, product, values, emptyList(), column, row)
-        update { it.copy(readout = text, tapLatLon = ll[0] to ll[1]) }
+        outlook.readoutAt(ll[0], ll[1], _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
+        val hits = _state.value.file?.let { f -> shapesAt(alertShapesNow(f), ll[0], ll[1]) } ?: emptyList()
+        update { it.copy(readout = text, tapLatLon = ll[0] to ll[1], alertHits = hits) }
+        appendOverlayReadouts(text, ll[0], ll[1])
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null, alertHits = emptyList()) }
@@ -858,7 +888,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val alertShapes = if (file == null) emptyList() else alertShapesFor(file)
         val bitmap = withContext(Dispatchers.Default) {
             val alerts = if (file == null) emptyList() else alertDrawsWith(alertShapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts, counties = st.settings.counties, overlays = globeLayers, baseHalo = mrmsHasHalo(st.product))
         }
         update { it.copy(map = bitmap, busy = false) }
     }

@@ -493,7 +493,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val (bitmap, style) = withContext(Dispatchers.Default) {
             val style = withAutoStops(product.style, data)
             val alerts = outlookDrawsOn(outlook, valid) { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
-            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts) to style
+            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts, counties = st.settings.counties) to style
         }
         update { it.copy(map = bitmap, style = style, busy = false) }
     }

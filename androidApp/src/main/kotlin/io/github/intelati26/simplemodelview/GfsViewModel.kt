@@ -417,7 +417,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         outlook.want(valid, run)
         val bitmap = withContext(Dispatchers.Default) {
             // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, counties = st.settings.counties, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -632,7 +632,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         return withContext(Dispatchers.Default) {
             globeRenderer.render(
                 product.grid, values, product.style, emptyList(), st.cam.copy(radius = st.cam.radius * f), side, side, 1, dark, product,
-                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) },
+                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) }, counties = st.settings.counties,
                 alerts = outlookDrawsOn(outlook, st.file?.valid, st.file?.run, globeProjection(st.copy(cam = st.cam.copy(radius = st.cam.radius * f), polar = st.polar?.let { it.copy(radius = it.radius * f) }), side, side)),
             )
         }

@@ -19,10 +19,17 @@ import simplemodelview.View
 import simplemodelview.WindProducts
 import simplemodelview.globeForward
 
+/** A second field over the globe's data (the MRMS overlays): its [values] on [grid], drawn with [style]; [marker] fields are a cross per cell, [halo] ones edged and haloed. */
+class GlobeOverlay(
+    val grid: Grid, val values: FloatArray, val style: Style, val marker: Boolean = false, val markerScale: Float = 1f,
+    val halo: Boolean = false, val markerColor: Int? = null,
+)
+
 /** Draws the globe picture: space, a shaded sphere, a graticule, the data wrapped onto it and the border lines. */
 class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private var buffer = IntArray(0)
     private val alertPainter = MapRenderer(core, lines)
+    private var layerBuffer = IntArray(0)
 
     /** A contour line in latitude / longitude (lat0, lon0, lat1, lon1, ...), so any camera can project it. */
     private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: DoubleArray)
@@ -37,6 +44,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     fun render(
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
         product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null, alerts: List<AlertDraw> = emptyList(),
+        counties: Int = 0, overlays: List<GlobeOverlay> = emptyList(), baseHalo: Boolean = false,
     ): Bitmap {
         val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -60,13 +68,16 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
+        val baseDomain = if (baseHalo) 0 else domain          // an edged swath is only the shapes, not the whole domain
         Timings.timed("raster") {
-            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, domain, style, memberRgb, buffer)
-            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
+            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, baseDomain, style, memberRgb, buffer)
+            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, baseDomain, style, memberRgb, buffer)
         }
+        if (baseHalo) alertPainter.haloPixels(buffer, width, height)
         canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)
+        for (overlay in overlays) Timings.timed("overlay") { drawOverlay(canvas, overlay, cam, polar, width, height, stride) }
 
-        Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
+        Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1, countyMode = counties) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1, countyMode = counties) }
         if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame)
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
@@ -176,5 +187,48 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val sign = if (cam.north) 1 else -1
         for (lat in 30..80 step 10) polyline((-180..180 step 3).asSequence().map { (sign * lat).toDouble() to it.toDouble() })
         for (lon in -180 until 180 step 30) polyline(sequenceOf((sign * 89.9) to lon.toDouble(), (sign * cam.edgeLat) to lon.toDouble()))
+    }
+
+    /** One overlay field over the data: rastered like the base field into its own buffer (clear where it has nothing), then edged or drawn as crosses where it asks. */
+    private fun drawOverlay(canvas: Canvas, ov: GlobeOverlay, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, stride: Int) {
+        if (layerBuffer.size < width * height) layerBuffer = IntArray(width * height)
+        val rgb = IntArray(10)
+        if (polar != null) core.renderPolar(ov.grid, ov.values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, 0, ov.style, rgb, layerBuffer)
+        else core.renderGlobe(ov.grid, ov.values, width, height, cam.radius, cam.lat, cam.lon, stride, 0, ov.style, rgb, layerBuffer)
+        if (ov.marker) { drawMarkers(canvas, ov, cam, polar, width, height); return }
+        if (ov.halo && stride == 1) alertPainter.haloPixels(layerBuffer, width, height)
+        canvas.drawBitmap(layerBuffer, 0, width, 0, 0, width, height, true, null)
+    }
+
+    /** A cross for each cell that shows (strikes), in the overlay's color there (or the marker color), on a dark rim: the flat map's look. */
+    private fun drawMarkers(canvas: Canvas, ov: GlobeOverlay, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int) {
+        val g = ov.grid
+        val st = ov.style
+        val f = if (st.factor == 0.0) 1.0 else st.factor
+        val unit = maxOf(1f, width / 900f) * ov.markerScale
+        val arm = 3.4f * unit
+        val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.9f * unit; strokeCap = Paint.Cap.BUTT }
+        val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3.7f * unit; strokeCap = Paint.Cap.BUTT; color = Color.BLACK }
+        var drawn = 0
+        for (r in 0 until g.rows) {
+            for (c in 0 until g.columns) {
+                val raw = ov.values[r * g.columns + c]
+                if (raw.isNaN()) continue
+                val shown = raw * f + st.offset
+                if (shown < st.hideBelow) continue
+                val ll = core.gridToLatLon(g, c.toDouble(), r.toDouble())
+                val p = (if (polar != null) polar.project(width, height, ll[0], ll[1]) else globeForward(cam, width, height, ll[0], ll[1])) ?: continue
+                val x = p[0].toFloat(); val y = p[1].toFloat()
+                if (x < -arm || y < -arm || x > width + arm || y > height + arm) continue
+                val sampled = if (x >= 0 && y >= 0 && x < width && y < height) layerBuffer[y.toInt() * width + x.toInt()] else 0
+                val alpha = if (sampled ushr 24 == 0) 255 else sampled ushr 24
+                ink.color = ov.markerColor?.let { (alpha shl 24) or it } ?: if (sampled ushr 24 == 0) Color.WHITE else sampled
+                rim.alpha = maxOf(alpha * 2 / 3, 90)
+                canvas.drawLine(x - arm, y, x + arm, y, rim); canvas.drawLine(x, y - arm, x, y + arm, rim)
+                canvas.drawLine(x - arm, y, x + arm, y, ink); canvas.drawLine(x, y - arm, x, y + arm, ink)
+                drawn += 1
+                if (drawn >= 20_000) return                     // a storm-wide burst: enough to read
+            }
+        }
     }
 }
