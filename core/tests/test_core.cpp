@@ -133,6 +133,48 @@ static void testGlobe() {
     CHECK(img[100 * 200 + 100] == 0x40FFFFFFu);
 }
 
+static void testPolar() {
+    // the mapping: the center is the pole, the circle's edge is the edge latitude, the half radius is where tan(colatitude / 2) is half of the edge's
+    double lat = 0, lon = 0;
+    CHECK(spc_polar_to_latlon(1, -100.0, 20.0, 0.0, 0.0, &lat, &lon) == 1 && std::fabs(lat - 90.0) < 1e-9);
+    CHECK(spc_polar_to_latlon(1, -100.0, 20.0, 0.0, -1.0, &lat, &lon) == 1);           // the bottom of the circle: the center longitude, at the edge latitude
+    CHECK(std::fabs(lat - 20.0) < 1e-9 && std::fabs(lon + 100.0) < 1e-9);
+    CHECK(spc_polar_to_latlon(1, -100.0, 20.0, 1.0, 0.0, &lat, &lon) == 1);            // to the right: 90 degrees east of it
+    CHECK(std::fabs(lat - 20.0) < 1e-9 && std::fabs(lon + 10.0) < 1e-9);
+    CHECK(spc_polar_to_latlon(1, -100.0, 20.0, 0.0, 1.0, &lat, &lon) == 1);            // the top: the opposite meridian
+    CHECK(std::fabs(std::fmod(lon + 180.0 + 360.0, 360.0) - std::fmod(80.0 + 360.0, 360.0)) < 1e-6 || std::fabs(lon - 80.0) < 1e-6);
+    CHECK(spc_polar_to_latlon(1, -100.0, 20.0, 0.5, 0.0, &lat, &lon) == 1);
+    const double colat = 2.0 * std::atan(0.5 * std::tan(35.0 * 3.14159265358979323846 / 180.0)) * 180.0 / 3.14159265358979323846;
+    CHECK(std::fabs(lat - (90.0 - colat)) < 1e-9);
+    CHECK(spc_polar_to_latlon(1, -100.0, 20.0, 1.1, 0.0, &lat, &lon) == 0);             // outside the circle
+    CHECK(spc_polar_to_latlon(0, 0.0, 20.0, 0.0, 0.0, &lat, &lon) == 1 && std::fabs(lat + 90.0) < 1e-9);   // the south pole
+    CHECK(spc_polar_to_latlon(0, 0.0, 20.0, 0.0, 1.0, &lat, &lon) == 1 && std::fabs(lat + 20.0) < 1e-9 && std::fabs(lon) < 1e-9);   // its center longitude is at the top
+    // a whole-globe field of the latitude itself (row 0 = south): the colors follow the latitude, from the pole to the edge
+    const int columns = 360, rows = 181;
+    const int grid = spc_define_latlon_grid(columns, rows, -90.0, -180.0, 1.0, 1.0);
+    std::vector<float> values(static_cast<size_t>(columns) * rows);
+    for (int r = 0; r < rows; r += 1) for (int c = 0; c < columns; c += 1) values[static_cast<size_t>(r) * columns + c] = static_cast<float>(-90 + r);
+    const spc_stop stops[2] = {{0.0, 0, 0, 255}, {90.0, 255, 0, 0}};
+    spc_style style{SPC_BLENDED, stops, 2, 1.0, 0.0, -1e30, nullptr, 0, 1e30, 1.0};
+    spc_polar polar{grid, 201, 201, 100.0, -100.0, 20.0, 1, 1, 0x40FFFFFFu};
+    std::vector<uint32_t> img(201 * 201, 0xDEADBEEF);
+    spc_render_polar(values.data(), &polar, &style, img.data());
+    CHECK(((img[100 * 201 + 100] >> 16) & 0xFF) > 245);                                  // the pole: latitude 90, red
+    const int half = static_cast<int>((img[100 * 201 + 150] >> 16) & 0xFF);              // half the radius: about 51.7 N, red = 255 * 51.7 / 90
+    CHECK(half > 135 && half < 160);
+    CHECK(((img[100 * 201 + 199] >> 16) & 0xFF) < 80);                                   // near the edge: about 20 N
+    CHECK(img[2 * 201 + 2] == 0);                                                        // a corner: outside the circle
+    for (uint32_t p : img) { CHECK(p != 0xDEADBEEF); }
+    // the south pole shows the southern values
+    spc_polar south{grid, 201, 201, 100.0, 0.0, 20.0, 0, 1, 0x40FFFFFFu};
+    spc_render_polar(values.data(), &south, &style, img.data());
+    CHECK(((img[100 * 201 + 100] >> 16) & 0xFF) < 10);                                   // latitude -90: blue
+    // coarse blocks fill the same pixels
+    spc_polar coarse{grid, 201, 201, 100.0, -100.0, 20.0, 1, 4, 0x40FFFFFFu};
+    spc_render_polar(values.data(), &coarse, &style, img.data());
+    CHECK(img[100 * 201 + 100] == img[101 * 201 + 101]);
+}
+
 static void testRender() {
     std::vector<float> values(static_cast<size_t>(SPC_GRID_COLUMNS) * SPC_GRID_ROWS, std::nanf(""));
     values[10 * SPC_GRID_COLUMNS + 20] = 45.0f;   // one cell at column 20, row 10 (from the south)
@@ -670,6 +712,7 @@ int main() {
     testGrefsGrid();
     testRender();
     testGlobe();
+    testPolar();
     testMrms();
     testGeotiff();
     testGrib();

@@ -77,6 +77,25 @@ typedef struct {
 
 void spc_render_globe(const float * values, const spc_globe * globe, const spc_style * style, uint32_t * argb);
 
+/* A polar stereographic map of one hemisphere: `width` x `height` pixels, the pole at the center, the circle of `radius` pixels reaching to latitude `edge_lat`
+ * (the same side as the pole: 20 means 20 N for the north pole, 20 S for the south). `north` 1: the north pole, looked at from above, with `center_lon` at the
+ * bottom (as the globe looks from over the pole); 0: the south pole. Drawn like the globe: data colors, or `domain_argb` over a grid with nothing to show, and
+ * transparent (0) outside the circle and the grid. `stride` > 1 draws coarse blocks. */
+typedef struct {
+    int grid;
+    int width, height;
+    double radius;
+    double center_lon, edge_lat;
+    int north;
+    int stride;
+    uint32_t domain_argb;
+} spc_polar;
+
+void spc_render_polar(const float * values, const spc_polar * polar, const spc_style * style, uint32_t * argb);
+
+/* The latitude / longitude under a point of a polar map, given as (x, y) in units of the radius from the center, y up; 0 (nothing set) outside the circle. */
+int spc_polar_to_latlon(int north, double center_lon, double edge_lat, double x, double y, double * lat, double * lon);
+
 /* Renders `values` (the grid's columns x rows, row 0 = south) into `argb` ((view.cols*scale/step) x (view.rows*scale/step), north up,
  * 0xAARRGGBB, transparent where nothing is shown). */
 void spc_render(const float * values, const spc_view * view, const spc_style * style, uint32_t * argb);

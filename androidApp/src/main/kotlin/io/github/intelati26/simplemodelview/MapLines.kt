@@ -141,4 +141,47 @@ class MapLines(context: Context, private val core: Core) {
             canvas.drawLines(pts, 0, count, paint)
         }
     }
+
+    /** Draws the lines on a polar stereographic map (see simplemodelview.PolarCamera). Only segments with both ends inside the circle are drawn. */
+    fun drawPolar(canvas: Canvas, cam: simplemodelview.PolarCamera, width: Int, height: Int, dark: Boolean, detailed: Boolean) {
+        val lam0 = Math.toRadians(cam.lon)
+        val sinL0 = Math.sin(lam0).toFloat(); val cosL0 = Math.cos(lam0).toFloat()
+        val cx = width / 2f; val cy = height / 2f
+        val r = cam.radius.toFloat()
+        val tanEdge = Math.tan(Math.toRadians(90.0 - cam.edgeLat) / 2).toFloat()
+        val sign = if (cam.north) 1f else -1f
+        val zoomedIn = r > Math.min(width, height) * 1.2f
+        val gray = if (dark) 0xFF9AA4B0.toInt() else 0xFF4A5560.toInt()
+        val plan = listOf(Triple("mx", gray, 0.8f), Triple("ca", gray, 0.8f)) +
+            (if (zoomedIn && detailed) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
+            listOf(Triple("statev2", if (dark) 0xFFE0E4E8.toInt() else 0xFF2A3036.toInt(), 1.1f))
+        val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = detailed }
+        for ((name, color, width1) in plan) {
+            val trig = layers.getValue(name).trig
+            val pts = FloatArray(trig.size / 2)
+            var count = 0
+            var i = 0
+            while (i < trig.size) {
+                val sa = trig[i]; val ca = trig[i + 1]; val sla = trig[i + 2]; val cla = trig[i + 3]
+                val sb = trig[i + 4]; val cb = trig[i + 5]; val slb = trig[i + 6]; val clb = trig[i + 7]
+                i += 8
+                // tan(colatitude / 2) = cos(lat) / (1 +- sin(lat)); the far hemisphere has no map
+                val da = 1f + sign * sa; val db = 1f + sign * sb
+                if (da < 1e-4f || db < 1e-4f) continue
+                val ta = ca / da; val tb = cb / db
+                if (ta > tanEdge || tb > tanEdge) continue
+                val ra = r * ta / tanEdge; val rb = r * tb / tanEdge
+                val sinDa = sla * cosL0 - cla * sinL0; val cosDa = cla * cosL0 + sla * sinL0
+                val sinDb = slb * cosL0 - clb * sinL0; val cosDb = clb * cosL0 + slb * sinL0
+                val x1 = cx + ra * sinDa; val y1 = cy + sign * ra * cosDa
+                val x2 = cx + rb * sinDb; val y2 = cy + sign * rb * cosDb
+                if ((x1 < 0 && x2 < 0) || (x1 > width && x2 > width) || (y1 < 0 && y2 < 0) || (y1 > height && y2 > height)) continue
+                pts[count] = x1; pts[count + 1] = y1; pts[count + 2] = x2; pts[count + 3] = y2
+                count += 4
+            }
+            paint.color = color
+            paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f)
+            canvas.drawLines(pts, 0, count, paint)
+        }
+    }
 }

@@ -39,7 +39,7 @@ class GlobeTest {
         assertTrue(c.lon < cam.lon)
         val d = cam.dragged(dx = 0.0, dy = 100.0)
         assertTrue(d.lat > cam.lat)
-        assertEquals(85.0, GlobeCamera(80.0, 0.0, 100.0).dragged(0.0, 10000.0).lat)
+        assertEquals(90.0, GlobeCamera(80.0, 0.0, 100.0).dragged(0.0, 10000.0).lat)
         assertTrue(GlobeCamera(0.0, 179.0, 100.0).dragged(-200.0, 0.0).lon in -180.0..180.0)
     }
 

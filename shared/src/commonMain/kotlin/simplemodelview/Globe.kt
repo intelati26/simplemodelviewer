@@ -14,7 +14,7 @@ data class GlobeCamera(val lat: Double, val lon: Double, val radius: Double) {
     /** Drags the surface under the finger: [dx] / [dy] pixels (right / down) turn the globe the other way. */
     fun dragged(dx: Double, dy: Double): GlobeCamera {
         val k = 180.0 / PI / radius
-        val newLat = (lat + dy * k).coerceIn(-85.0, 85.0)
+        val newLat = (lat + dy * k).coerceIn(-90.0, 90.0)       // as far as the poles
         val cosLat = maxOf(cos(lat * PI / 180.0), 0.2)            // near the poles a horizontal drag turns the globe faster
         var newLon = lon - dx * k / cosLat
         newLon = ((newLon + 540.0) % 360.0 + 360.0) % 360.0 - 180.0

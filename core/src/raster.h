@@ -12,5 +12,7 @@ namespace Raster {
     uint32_t shade(const float * values, int w, int h, double column, double row, bool smooth, const spc_style& style);
     void render(const float * values, const spc_view& view, const spc_style& style, uint32_t * argb);
     void renderGlobe(const float * values, const spc_globe& globe, const spc_style& style, uint32_t * argb);
+    bool polarToLatLon(bool north, double centerLon, double edgeLat, double x, double y, double& lat, double& lon);
+    void renderPolar(const float * values, const spc_polar& polar, const spc_style& style, uint32_t * argb);
 }
 #endif

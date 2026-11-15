@@ -197,4 +197,27 @@ class GfsCropStoreTest {
         assertEquals(3, http.calls)
         assertEquals(2, store.kept.keys.map { it.first }.distinct().size)
     }
+
+    @Test fun historyIsTheAnalysisOfEveryRunOldestFirst() = runTest {
+        val now = NbmCycle(2026, 11, 6, 13).epoch
+        val http = object : Http {
+            override suspend fun get(url: String): HttpResult {
+                val key = url.substringAfter("prefix=")
+                val body = "<ListBucketResult><Contents><Key>$key</Key><LastModified>2026-11-06T05:00:00.000Z</LastModified><Size>500</Size></Contents>" +
+                    "<Contents><Key>$key.idx</Key><LastModified>2026-11-06T05:00:00.000Z</LastModified><Size>5</Size></Contents></ListBucketResult>"
+                return HttpResult(200, body.encodeToByteArray())
+            }
+        }
+        val repo = GfsRepository(http, StubCore)
+        val history = repo.listHistory(now - 24 * 3600L, now, "gfs")
+        assertEquals(4, history.size)                                    // 18Z, 00Z, 06Z, 12Z
+        assertTrue(history.zipWithNext().all { (a, b) -> a.valid < b.valid }, "oldest first")
+        assertTrue(history.all { it.leadHours == 0 && it.key.endsWith(".f000") })
+        assertEquals(now - 3600L, history.last().valid)
+        // a long span is thinned to whole days; before the archive's start nothing is asked for
+        val year = repo.listHistory(now - 365 * 86400L, now, "gfs")
+        assertTrue(year.size in 150..200 && year.zipWithNext().all { (a, b) -> (b.valid - a.valid) % 86400L == 0L })
+        assertEquals(0, repo.listHistory(NbmCycle(2020, 1, 1, 0).epoch, NbmCycle(2021, 3, 1, 0).epoch, "gfs").size)
+        assertEquals(6, GfsHistory.stepHours(10 * 86400L)); assertEquals(12, GfsHistory.stepHours(80 * 86400L)); assertEquals(24, GfsHistory.stepHours(120 * 86400L))
+    }
 }

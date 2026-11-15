@@ -63,13 +63,21 @@ internal class GlobeProjector(private val cam: GlobeCamera, override val width: 
     override val pixelsPerDegree get() = cam.radius * Math.PI / 180.0
     // how far from the camera's point the picture reaches, in degrees
     private val reach = Math.toDegrees(Math.asin(minOf(1.0, Math.hypot(width.toDouble(), height.toDouble()) / 2 / cam.radius)))
-    override val latRange get() = maxOf(-85.0, cam.lat - reach)..minOf(85.0, cam.lat + reach)
+    override val latRange get() = maxOf(-90.0, cam.lat - reach)..minOf(90.0, cam.lat + reach)
     override fun lonRange(lat: Double): ClosedFloatingPointRange<Double> {
         val c = Math.cos(Math.toRadians(lat))
         val r = if (c < 0.2) 180.0 else minOf(180.0, reach / c)
         return (cam.lon - r)..(cam.lon + r)
     }
     override fun project(lat: Double, lon: Double): DoubleArray? = globeForward(cam, width, height, lat, lon)
+}
+
+/** A polar stereographic map as [cam] has it, in a picture [width] x [height]. */
+internal class PolarProjector(private val cam: simplemodelview.PolarCamera, override val width: Int, override val height: Int) : MapProjector {
+    override val pixelsPerDegree get() = simplemodelview.Polar.pixelsPerDegree(cam.radius, cam.edgeLat)
+    override val latRange get() = if (cam.north) cam.edgeLat..90.0 else -90.0..-cam.edgeLat
+    override fun lonRange(lat: Double): ClosedFloatingPointRange<Double> = -180.0..180.0
+    override fun project(lat: Double, lon: Double): DoubleArray? = cam.project(width, height, lat, lon)
 }
 
 /** Contour lines over the data and the map lines: a halo under each line so it reads on any color, heavier for the bold levels, one label per level. */
@@ -137,9 +145,11 @@ internal fun drawWindBarbs(
                 val rc = core.latLonToGrid(grid, lat, lonNow)
                 val col = Math.round(rc[0]).toInt()
                 val row = Math.round(rc[1]).toInt()
-                val up = proj.project(lat + 0.7, lonNow)
+                val flip = lat + 0.7 > 90.0       // at the pole itself, look south and turn the answer round
+                val up = proj.project(if (flip) lat - 0.7 else lat + 0.7, lonNow)
                 if (col in 0 until grid.columns && row in 0 until grid.rows && up != null) {
                     var nx = (up[0] - here[0]).toFloat(); var ny = (up[1] - here[1]).toFloat()       // which way north points on the picture here
+                    if (flip) { nx = -nx; ny = -ny }
                     val len = Math.hypot(nx.toDouble(), ny.toDouble()).toFloat()
                     if (len > 1e-6f) {
                         nx /= len; ny /= len

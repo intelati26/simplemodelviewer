@@ -16,6 +16,7 @@ import simplemodelview.BackupPlace
 import simplemodelview.GfsCatalog
 import simplemodelview.GfsGlobal
 import simplemodelview.GlobeCamera
+import simplemodelview.PolarCamera
 import simplemodelview.Grid
 import simplemodelview.NbmCycle
 import simplemodelview.NbmFile
@@ -71,6 +72,10 @@ data class GfsState(
     val detail: DetailLayer? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val history: Boolean = false,             // the frames are the analyses (hour 0) of the runs of the past days, not one run's forecast hours
+    val historyDays: Int = 5,
+    val historyRange: Pair<Long, Long>? = null,   // a hand-picked span (epoch seconds); null = the past [historyDays] days
+    val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
 }
@@ -112,6 +117,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             sector = GFS_SECTORS.firstOrNull { it.name == prefs.getString("gfs_sector", null) } ?: GFS_SECTORS[0],
             settings = readSettings(),
             loopSpanHours = prefs.getInt("gfs_loop_hours", 0),
+            historyDays = prefs.getInt("gfs_history_days", 5),
         )
     )
     val state: StateFlow<GfsState> = _state
@@ -134,6 +140,17 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             for (attempt in 0..3) {
                 try {
                     val now = System.currentTimeMillis() / 1000
+                    if (_state.value.history) {
+                        val range = _state.value.historyRange ?: ((now - _state.value.historyDays * 86400L) to now)
+                        val frames = repo.listHistory(range.first, range.second, "gfs")
+                        if (frames.isEmpty()) throw IllegalStateException("No GFS analyses found for those days.")
+                        lastLoad = System.currentTimeMillis()
+                        val keep = _state.value.file?.valid
+                        val index = keep?.let { v -> frames.indices.minByOrNull { kotlin.math.abs(frames[it].valid - v) } } ?: frames.lastIndex
+                        update { it.copy(frames = frames, index = index, cycle = null, following = true) }
+                        showCurrent()
+                        return@launch
+                    }
                     val cycles = repo.listCycles(now)
                     if (cycles.isEmpty()) throw IllegalStateException("No recent GFS runs on the server.")
                     val hand = pickedCycle?.takeIf { it in cycles }
@@ -171,7 +188,22 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         load()
     }
 
-    fun pickCycle(cycle: NbmCycle?) { pickedCycle = cycle; load() }
+    fun pickCycle(cycle: NbmCycle?) { pickedCycle = cycle; update { it.copy(history = false) }; load() }
+
+    /** The analyses of the past [days] days (a frame per run) in place of one run's forecast hours: play it, or save it as a loop video. 0 leaves history. */
+    fun setHistory(days: Int) {
+        if (days > 0) prefs.edit().putInt("gfs_history_days", days).apply()
+        stopPlaying()
+        update { it.copy(history = days > 0, historyDays = if (days > 0) days else it.historyDays, historyRange = null, frames = if (days > 0) emptyList() else it.frames, index = 0) }
+        load()
+    }
+
+    /** The analyses from [from] to [to] (epoch seconds; the bucket reaches back to 2021-03-23): every run for a few weeks, thinned beyond that. */
+    fun setHistoryRange(from: Long, to: Long) {
+        stopPlaying()
+        update { it.copy(history = true, historyRange = from to to, frames = emptyList(), index = 0) }
+        load()
+    }
 
     // the extended point view asks for the synoptic set up at a valid time: Heights & Winds at 500 mb at the frame nearest it
     private var wantedValid: Long? = null
@@ -198,7 +230,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun pickSector(sector: Sector) {
         prefs.edit().putString("gfs_sector", sector.name).apply()
         stopPlaying()
-        update { it.copy(sector = sector, globe = false, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(sector = sector, globe = false, polar = null, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
 
@@ -243,7 +275,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val color = WindProducts.colors.firstOrNull { it.key == st.color }
         val top = if (st.level == WindProducts.STACK) 500 else st.level
         val title = (if (st.level == WindProducts.STACK) "500 mb Height with 850 / 700 / 500 mb Wind Barbs" else "${st.level} mb Height and Wind Barbs") + if (color == null || color.source == null) "" else " over ${if (color.key == "tlev" || color.key == "rhlev") color.title.replace("the level", "$top mb") else color.title}"
-        return Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color), false, null, grid) to title
+        return Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color, top), false, null, grid) to title
     }
 
     /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
@@ -263,7 +295,8 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- the globe ----
     fun onGlobeTap(px: Float, py: Float) {
         val (product, values) = globeShown ?: return
-        val ll = globeInverse(_state.value.cam, globeW, globeH, px.toDouble(), py.toDouble())
+        val st = _state.value
+        val ll = if (st.polar != null) st.polar.inverse(globeW, globeH, px.toDouble(), py.toDouble()) else globeInverse(st.cam, globeW, globeH, px.toDouble(), py.toDouble())
         if (ll == null) { clearTap(); return }
         val grid = product.grid
         val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
@@ -273,17 +306,42 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setGlobe(on: Boolean) {
-        if (_state.value.globe == on) return
+        if (_state.value.globe == on && _state.value.polar == null) return
         stopPlaying()
-        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(globe = on, polar = null, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
+    }
+
+    /** The globe turned to look straight down on a pole. */
+    fun setGlobePole(north: Boolean) {
+        stopPlaying()
+        val wasGlobe = _state.value.globe && _state.value.polar == null
+        update { it.copy(globe = true, polar = null, cam = it.cam.copy(lat = if (north) 90.0 else -90.0, lon = if (north) -100.0 else 80.0), crosshair = null, readout = null, tapLatLon = null) }
+        if (wasGlobe && globeShown != null) requestGlobe(coarse = false) else showFrame()
+    }
+
+    /** The polar stereographic map of one hemisphere (the pole in the middle, out to 20 degrees). */
+    fun setPolar(north: Boolean) {
+        stopPlaying()
+        val wasGlobe = _state.value.globe
+        val radius = if (globeW > 0) 0.48 * minOf(globeW, globeH) else 300.0
+        update { it.copy(globe = true, polar = PolarCamera(north, if (north) -100.0 else 80.0, radius), crosshair = null, readout = null, tapLatLon = null) }
+        if (wasGlobe && globeShown != null) requestGlobe(coarse = false) else showFrame()
+    }
+
+    fun polarGesture(dx: Float, dy: Float, zoom: Float, cx: Float, cy: Float) {
+        val minR = 0.3 * minOf(globeW, globeH)
+        update { st -> st.polar?.let { st.copy(polar = it.turned(dx.toDouble(), dy.toDouble(), cx.toDouble(), cy.toDouble(), globeW, globeH).zoomed(zoom.toDouble(), minR, minR * 30)) } ?: st }
+        requestGlobe(coarse = true)
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
     }
 
     fun setGlobeSize(w: Int, h: Int) {
         if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
         val first = globeW == 0
         globeW = w; globeH = h
-        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h)), polar = it.polar?.copy(radius = 0.48 * minOf(w, h))) }
         if (_state.value.globe && globeShown != null) requestGlobe(coarse = false)
     }
 
@@ -322,7 +380,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val bitmap = withContext(Dispatchers.Default) {
             // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar)
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -443,7 +501,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startPlaying() {
         val st = _state.value
-        val window = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+        val window = loopWindow(st)
         if (window.count() < 2) return
         frameJob?.cancel()
         update { it.copy(playing = true) }
@@ -462,12 +520,54 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                     for (i in window) {
                         update { it.copy(index = i) }
                         showCurrent()
-                        delay(maxOf(nbmDwellMillis(_state.value.frames, i, 150L), if (i == window.last) 1200L else 0L))
+                        delay(maxOf(if (st.history) 450L else nbmDwellMillis(_state.value.frames, i, 150L), if (i == window.last) 1200L else 0L))
                     }
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }
+        }
+    }
+
+    private fun loopWindow(st: GfsState): IntRange =
+        if (st.history) st.frames.indices else nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+
+    var videoSize: simplemodelview.VideoSize
+        get() = simplemodelview.VideoSize.byName(prefs.getString("video_size", null))
+        set(value) { prefs.edit().putString("video_size", value.name).apply() }
+
+    /** The loop (all the analyses in history, else the loop span) drawn as the page shows it now, as an MP4. [onProgress] gets (done, total). */
+    suspend fun buildLoopFile(onProgress: (Int, Int) -> Unit): File? {
+        stopPlaying()
+        val st = _state.value
+        val window = loopWindow(st)
+        val n = window.count()
+        if (n < 2) return null
+        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+        val out = File(dir, "gfs_loop_${st.product}_${st.frames[window.last].valid}.mp4")
+        var exporter: LoopExporter? = null
+        try {
+            for ((k, i) in window.withIndex()) {
+                update { it.copy(index = i) }
+                showCurrent()                         // draws the frame (and downloads what it needs)
+                val now = _state.value
+                val file = now.file ?: continue
+                val product = (if (now.globe) globeShown?.first else shown?.first) ?: continue
+                val map = now.map ?: continue
+                val header = "Valid ${formatUtc(file.valid)} " + (if (now.history) "(analysis)" else "(+${file.leadHours} h)   Run ${now.cycle?.label ?: ""}") + "   Data: NOAA/NWS Global Forecast System (experimental viewer)"
+                val size = videoSize
+                var picture = withContext(Dispatchers.Default) { renderer.shareImage(map, product, product.style, header, emptyList()) }
+                val (sw, sh) = size.scaled(picture.width, picture.height)
+                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
+                if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
+                exporter.add(picture, last = k == n - 1)
+                onProgress(k + 1, n)
+            }
+            exporter?.finish()
+            return if (exporter != null) out else null
+        } catch (e: Exception) {
+            exporter?.abort()
+            throw e
         }
     }
 

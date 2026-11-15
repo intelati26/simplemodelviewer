@@ -2,6 +2,8 @@ package simplemodelview
 
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.sync.withPermit
 
 /**
@@ -17,7 +19,16 @@ object GfsBucket {
 }
 
 /** The name of a message in the index: variable, level text and the field's own conversion into the units shown. */
-class GfsMessage(val variable: String, val level: String)
+class GfsMessage(
+    val variable: String, val level: String,
+    /** Tells apart messages of one variable and level that differ only in their time text ("18-24 hour acc fcst" and "0-1 day acc fcst"): part of [key]. */
+    val tag: String = "",
+    /** The index's time text for a file [lead] hours after the run, when it is not "N hour fcst" (an accumulation: "18-24 hour acc fcst"). */
+    val time: ((Int) -> String)? = null,
+) {
+    /** The name the message is kept and looked up under. */
+    val key: String get() = "$variable:$level" + if (tag.isEmpty()) "" else "|$tag"
+}
 
 /** What a GFS product needs and how it is drawn: the messages (in this order: first is the color, or for a wind product height, u, v then the color). */
 class GfsProduct(val id: String, val title: String, val group: String, val style: Style, val convert: (Float) -> Float = { it }, val message: GfsMessage?)
@@ -30,7 +41,8 @@ object GfsCatalog {
     private fun kelvinToC(k: Float) = k - 273.15f
     const val MS_TO_KNOTS = 1.9438445f
 
-    val levels = listOf(250, 300, 500, 700, 850)
+    /** The levels of the heights and winds: the stratosphere (10 to 50 mb, where the polar vortex is) and the troposphere, from the top down. */
+    val levels = WindProducts.levels
 
     /** The message behind a color of a level ([WindProducts.colors]); null for the wind speed, which is made from the u and v messages. */
     fun colorMessage(level: Int, colorKey: String): GfsMessage? = when (colorKey) {
@@ -49,9 +61,10 @@ object GfsCatalog {
         else -> { v -> v }
     }
 
-    fun colorStyle(colorKey: String): Style = when (colorKey) {
+    fun colorStyle(colorKey: String, level: Int? = null): Style = when (colorKey) {
+        // the air up high is far colder than the palette of the lower levels covers: its own range
+        "tlev" -> if (level != null && level <= 300) Style(Kind.Blended, Palettes.rainbow(-90.0, -20.0), units = "C", digits = 0) else Style(Kind.Blended, Palettes.temperature(false), units = "C", digits = 0)
         "t2m", "td2m" -> Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0)
-        "tlev" -> Style(Kind.Blended, Palettes.temperature(false), units = "C", digits = 0)
         "rh2m", "rhlev" -> Style(Kind.Banded, Palettes.relativeHumidity, units = "%", digits = 0)
         else -> Style(Kind.Banded, Palettes.upperWind, hideBelow = 10.0, units = "kt", digits = 0)
     }
@@ -65,6 +78,12 @@ object GfsCatalog {
         GfsProduct("td2m_gfs", "2-m Dewpoint", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), ::kelvinToF, GfsMessage("DPT", "2 m above ground")),
         GfsProduct("pmsl_gfs", "Mean Sea-Level Pressure", SURFACE, Style(Kind.Blended, Palettes.rainbow(985.0, 1035.0), units = "hPa", digits = 0), { it / 100f }, GfsMessage("PRMSL", "mean sea level")),
         GfsProduct("pwat_gfs", "Precipitable Water", SURFACE, Style(Kind.Banded, Palettes.precipitableWater, hideBelow = 0.0, units = "in", digits = 2), { it / 25.4f }, GfsMessage("PWAT", "entire atmosphere (considered as a single layer)")),
+        // accumulations: the file holds the amount of the last 6 hours (3 after day 5) and the total since the run began, under their own time texts
+        GfsProduct("apcp6_gfs", "Precipitation, last 6 h (3 h after day 5)", SURFACE, Style(Kind.Banded, Palettes.qpf, hideBelow = 0.01, units = "in", digits = 2), { it / 25.4f },
+            GfsMessage("APCP", "surface", "bucket") { lead -> "${lead - (if (lead % 6 == 0) 6 else lead % 6)}-$lead hour acc fcst" }),
+        GfsProduct("apcptot_gfs", "Precipitation, total since the run began", SURFACE, Style(Kind.Banded, Palettes.qpf, hideBelow = 0.01, units = "in", digits = 2), { it / 25.4f },
+            GfsMessage("APCP", "surface", "total") { lead -> if (lead > 0 && lead % 24 == 0) "0-${lead / 24} day acc fcst" else "0-$lead hour acc fcst" }),
+        GfsProduct("snod_gfs", "Snow depth", SURFACE, Style(Kind.Banded, Palettes.snow, hideBelow = 0.1, units = "in", digits = 1), { it / 0.0254f }, GfsMessage("SNOD", "surface")),
         GfsProduct("cape_gfs", "Surface-Based CAPE", SURFACE, Style(Kind.Banded, Palettes.cape, hideBelow = 100.0, units = "J/kg", digits = 0), { it }, GfsMessage("CAPE", "surface")),
     )
 
@@ -98,7 +117,7 @@ fun parseGfsListing(xml: String, cycle: NbmCycle, fieldId: String): List<NbmFile
 
 /** The byte range of a message by its names; the time text is "N hour fcst" ("anl" for the analysis, hour 0). */
 fun findGfsMessage(index: List<GribIndexEntry>, message: GfsMessage, leadHours: Int): Pair<Long, Long?>? {
-    val time = if (leadHours == 0) "anl" else "$leadHours hour fcst"
+    val time = message.time?.invoke(leadHours) ?: if (leadHours == 0) "anl" else "$leadHours hour fcst"
     val at = index.indexOfFirst { it.variable == message.variable && it.level == message.level && it.time == time && it.extra.isEmpty() }
     if (at < 0) return null
     return index[at].offset to index.getOrNull(at + 1)?.offset?.let { it - 1 }
@@ -123,6 +142,19 @@ object GfsWinds {
             v[i] = n * c + e * s
         }
         return u to v
+    }
+}
+
+/** What the bucket's history allows. */
+object GfsHistory {
+    /** The first run with 0.25 degree files in the bucket's present layout (2021-03-23 00Z). */
+    val FIRST_RUN: Long = epochOf(2021, 3, 23, 0, 0, 0)
+    const val MAX_FRAMES = 200
+
+    /** Hours between the runs that are used for a span of [spanSeconds]: every run (6 h) while it fits in [maxFrames], then 12 h, then whole days. */
+    fun stepHours(spanSeconds: Long, maxFrames: Int = MAX_FRAMES): Int {
+        val raw = ((spanSeconds / 3600L + maxFrames - 1) / maxFrames).toInt()
+        return when { raw <= 6 -> 6; raw <= 12 -> 12; else -> (raw + 23) / 24 * 24 }
     }
 }
 
@@ -157,6 +189,34 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return parseGfsListing(result.body.decodeToString(), cycle, fieldId)
     }
 
+    /**
+     * The analysis (forecast hour 0) of the runs from [from] to [to] (epoch seconds), oldest first: what the atmosphere did, to play as a loop. The bucket holds
+     * every run back to [GfsHistory.FIRST_RUN]. At most about [maxFrames] frames: a long span takes every second, third... run (see [GfsHistory.stepHours]).
+     * One small listing per run (the f000 file only), a few at a time; a run that is not there (yet) is left out.
+     */
+    suspend fun listHistory(from: Long, to: Long, fieldId: String, maxFrames: Int = GfsHistory.MAX_FRAMES): List<NbmFile> {
+        val step = GfsHistory.stepHours(to - from, maxFrames) * 3600L
+        val times = ArrayList<Long>()
+        var t = maxOf(from, GfsHistory.FIRST_RUN).let { (it + 6 * 3600L - 1) / (6 * 3600L) * (6 * 3600L) }
+        while (t <= to) { times += t; t += step }
+        val gate = kotlinx.coroutines.sync.Semaphore(8)
+        return kotlinx.coroutines.coroutineScope {
+            times.map { time ->
+                async {
+                    gate.withPermit {
+                        val c = civilFromEpoch(time)
+                        val cycle = gfsCycle(c[0], c[1], c[2], c[3])
+                        val prefix = cycle.prefix + "gfs.t${cycle.hour.toString().padStart(2, '0')}z.pgrb2.0p25.f000"
+                        val result = http.get("${GfsBucket.URL}/?list-type=2&max-keys=10&prefix=$prefix")
+                        if (result.status == 404) null
+                        else if (result.status != 200) throw RefsException("could not list the GFS files (HTTP ${result.status})")
+                        else parseGfsListing(result.body.decodeToString(), cycle, fieldId).firstOrNull { it.leadHours == 0 }
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
+    }
+
     private val indexes = LinkedHashMap<String, List<GribIndexEntry>>(8, 0.75f, true)
 
     private suspend fun index(file: NbmFile): List<GribIndexEntry> = indexes[file.url] ?: run {
@@ -175,7 +235,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         val entries by lazy { kotlinx.coroutines.CompletableDeferred<List<GribIndexEntry>>() }
         var idx: List<GribIndexEntry>? = null
         for (m in wanted) {
-            val name = "${m.variable}:${m.level}"
+            val name = m.key
             store.get(file.url, name)?.let { out[name] = it; return@let }
             if (name in out) continue
             if (idx == null) { status("Reading the GFS index…"); idx = index(file) }
@@ -233,7 +293,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
                 val decoded = splitGribMessages(bytes).map { decodeRaw(it) }
                 return wanted.associate { m ->
                     val spec = gfsCropSpec(m)!!
-                    "${m.variable}:${m.level}" to (decoded.firstOrNull { it.meta?.matches(spec) == true } ?: throw RefsException("NOMADS sent no ${m.variable} at ${m.level}"))
+                    m.key to (decoded.firstOrNull { it.meta?.matches(spec) == true } ?: throw RefsException("NOMADS sent no ${m.variable} at ${m.level}"))
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -256,7 +316,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         val bytes = messages(file, wanted, status)
         status(if (region != null) "Source: AWS (whole fields)" else "Source: AWS")
         status("Decoding\u2026")
-        return wanted.associate { "${it.variable}:${it.level}" to decodeRaw(bytes.getValue("${it.variable}:${it.level}")) }
+        return wanted.associate { it.key to decodeRaw(bytes.getValue(it.key)) }
     }
 
     private fun decodeRaw(bytes: ByteArray): GridField = try { core.decodeGrib(bytes) } catch (e: Exception) { throw RefsException("could not decode the GFS message: ${e.message}") }
@@ -287,7 +347,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         var entries: List<GribIndexEntry>? = null
         val out = HashMap<String, GridField>()
         for (m in wanted) {
-            val name = "${m.variable}:${m.level}"
+            val name = m.key
             // a whole message already kept is used as it is
             store.get(file.url, name)?.let { out[name] = decodeRaw(it); return@let }
             if (name in out) continue
@@ -352,7 +412,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     /** A single field of [product] on [target] (a sector's Lambert grid); [region] crops the download (see [fields]). */
     suspend fun loadField(file: NbmFile, product: GfsProduct, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null, crop: Boolean = true): FloatArray {
         val message = product.message ?: throw RefsException("not a single field")
-        val field = fields(file, listOf(message), region, crop, status).getValue("${message.variable}:${message.level}")
+        val field = fields(file, listOf(message), region, crop, status).getValue(message.key)
         return plane(field, product.convert, target)
     }
 
@@ -361,7 +421,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     /** A surface field for the globe: the whole message on GFS's own grid (nothing is cropped or reprojected). */
     suspend fun loadFieldGlobal(file: NbmFile, product: GfsProduct, status: (String) -> Unit = {}): GfsGlobal {
         val message = product.message ?: throw RefsException("not a single field")
-        val field = fields(file, listOf(message), null, false, status).getValue("${message.variable}:${message.level}")
+        val field = fields(file, listOf(message), null, false, status).getValue(message.key)
         return GfsGlobal(field.grid, converted(field.values, product.convert))
     }
 
@@ -372,7 +432,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     suspend fun loadWindGlobal(file: NbmFile, level: Int, colorKey: String, status: (String) -> Unit = {}): GfsGlobal {
         val wanted = windMessages(level, colorKey)
         val fields = fields(file, wanted, null, false, status)
-        fun field(m: GfsMessage) = fields.getValue("${m.variable}:${m.level}")
+        fun field(m: GfsMessage) = fields.getValue(m.key)
         val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
         val grid = field(wanted[0]).grid
         val height = field(wanted[0]).values.copyOf()
@@ -394,7 +454,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     suspend fun loadWind(file: NbmFile, level: Int, colorKey: String, target: Grid, status: (String) -> Unit = {}, region: DoubleArray? = null, crop: Boolean = true): FloatArray {
         val wanted = windMessages(level, colorKey)
         val fields = fields(file, wanted, region, crop, status)
-        fun field(m: GfsMessage) = fields.getValue("${m.variable}:${m.level}")
+        fun field(m: GfsMessage) = fields.getValue(m.key)
         val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
         val height = plane(field(wanted[0]), { it }, target)
         if (level == WindProducts.STACK) {
