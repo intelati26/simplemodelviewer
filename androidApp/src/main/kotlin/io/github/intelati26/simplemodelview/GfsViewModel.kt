@@ -36,6 +36,10 @@ import java.io.File
 import kotlin.math.floor
 
 /** The windows of the globe the GFS page shows (Lambert boxes of the REFS projection, like the sectors of the other pages). */
+/** Side of the square a globe or polar map is saved at (a picture), and a loop frame before the video size scales it. */
+private const val EXPORT_SIDE = 3000
+private const val LOOP_SIDE = 2000
+
 internal val GFS_SECTORS = listOf(
     Sector("CONUS", -125.0, 24.0, -66.5, 50.0),
     Sector("North America", -170.0, 8.0, -50.0, 72.0),
@@ -553,7 +557,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 val now = _state.value
                 val file = now.file ?: continue
                 val product = (if (now.globe) globeShown?.first else shown?.first) ?: continue
-                val map = now.map ?: continue
+                val map = exportMap(now, LOOP_SIDE) ?: continue
                 val header = "Valid ${formatUtc(file.valid)} " + (if (now.history) "(analysis)" else "(+${file.leadHours} h)   Run ${now.cycle?.label ?: ""}") + "   Data: NOAA/NWS Global Forecast System (experimental viewer)"
                 val size = videoSize
                 var picture = withContext(Dispatchers.Default) { renderer.shareImage(map, product, product.style, header, emptyList()) }
@@ -571,12 +575,28 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * The picture to export: the globe or polar map drawn again on a square [side] pixels across (the screen's rotation and zoom kept), so a saved picture or loop
+     * frame is far finer than the screen; the flat map is already drawn at its own scale.
+     */
+    private suspend fun exportMap(st: GfsState, side: Int): Bitmap? {
+        if (!st.globe || globeW == 0) return st.map
+        val (product, values) = globeShown ?: return st.map
+        val f = side.toDouble() / minOf(globeW, globeH)
+        return withContext(Dispatchers.Default) {
+            globeRenderer.render(
+                product.grid, values, product.style, emptyList(), st.cam.copy(radius = st.cam.radius * f), side, side, 1, dark, product,
+                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) },
+            )
+        }
+    }
+
     // ---- sharing ----
     suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null
         val product = (if (st.globe) globeShown?.first else shown?.first) ?: return@withContext null
-        val map = st.map ?: return@withContext null
+        val map = exportMap(st, EXPORT_SIDE) ?: return@withContext null
         val c = simplemodelview.civilFromEpoch(file.valid)
         fun p(n: Int) = n.toString().padStart(2, '0')
         val header = "Valid ${formatUtc(file.valid)} (+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}   Data: NOAA/NWS Global Forecast System (experimental viewer)"

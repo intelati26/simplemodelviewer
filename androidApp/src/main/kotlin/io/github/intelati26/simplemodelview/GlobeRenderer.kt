@@ -70,7 +70,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 
         canvas.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.style = Paint.Style.STROKE; strokeWidth = 1.5f; color = if (dark) 0x66FFFFFF else 0x66000000
+            this.style = Paint.Style.STROKE; strokeWidth = maxOf(1.5f, minOf(width, height) / 800f); color = if (dark) 0x66FFFFFF else 0x66000000
         })
         return bitmap
     }
@@ -145,7 +145,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     private fun drawGraticule(canvas: Canvas, cam: GlobeCamera, width: Int, height: Int, dark: Boolean) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 1f; color = if (dark) 0x33FFFFFF else 0x33000000
+            style = Paint.Style.STROKE; strokeWidth = maxOf(1f, minOf(width, height) / 1100f); color = if (dark) 0x33FFFFFF else 0x33000000
         }
         fun polyline(points: Sequence<Pair<Double, Double>>) {
             var prev: DoubleArray? = null
@@ -161,7 +161,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     private fun drawPolarGraticule(canvas: Canvas, cam: PolarCamera, width: Int, height: Int, dark: Boolean) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 1f; color = if (dark) 0x33FFFFFF else 0x33000000
+            style = Paint.Style.STROKE; strokeWidth = maxOf(1f, minOf(width, height) / 1100f); color = if (dark) 0x33FFFFFF else 0x33000000
         }
         fun polyline(points: Sequence<Pair<Double, Double>>) {
             var prev: DoubleArray? = null
