@@ -1082,14 +1082,22 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      * The map picture of an export for one file. The screen area is decoded afresh at the finest step that suits its size, so a zoomed-in
      * export has 1 km (rotation 500 m) detail, not the cells of the screen's overview.
      */
-    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile): Pair<Bitmap, Style> {
+    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile, side: Int = GLOBE_EXPORT_SIDE): Pair<Bitmap, Style> {
         val st = _state.value
         val style = styleOf(product)
         if (area == ShareArea.Globe && globeW > 0) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
-            val size = 1500
+            outlook.ensure(file.validTime)
+            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))       // the globe as turned now, on a square at export size
+            val project: PlaceProjection = { la, lo -> globeForward(cam, side, side, la, lo) }
+            val layers = globeOverlays(file, frame.window.grid).map { it.first }
+            val shapes = alertShapesFor(file)
             val bitmap = withContext(Dispatchers.Default) {
-                globeRenderer.render(frame.window.grid, frame.window.values, style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
+                val alerts = alertDrawsWith(shapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
+                globeRenderer.render(
+                    frame.window.grid, frame.window.values, style, emptyList(), cam, side, side, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity,
+                    alerts = alerts, counties = st.settings.forExport().counties, overlays = layers, baseHalo = mrmsHasHalo(product),
+                )
             }
             return bitmap to style
         }
@@ -1160,7 +1168,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         try {
             for ((k, i) in window.withIndex()) {
                 val file = st.files[i]
-                val (map, style) = areaBitmap(area, st.product, file)
+                val (map, style) = areaBitmap(area, st.product, file, GLOBE_LOOP_SIDE)
                 var picture = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
                 val (sw, sh) = size.scaled(picture.width, picture.height)
                 if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
@@ -1180,7 +1188,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
         val g = shownGrid
         val (w, h) = when {
-            area == ShareArea.Globe -> 1500 to 1500 * maxOf(globeH, 1) / maxOf(globeW, 1)
+            area == ShareArea.Globe -> GLOBE_LOOP_SIDE to GLOBE_LOOP_SIDE
             g == null -> 1800 to 900
             else -> {
                 val s = exportScale(g.columns, g.rows)

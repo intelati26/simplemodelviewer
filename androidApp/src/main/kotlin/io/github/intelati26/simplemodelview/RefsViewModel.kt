@@ -632,8 +632,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** Estimated size of a loop video of the current product and area, for the share dialog. */
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
         val v = resolveView(area)
-        val pictureW = if (area == ShareArea.Globe && globeW > 0) 1500 else v.pixelWidth
-        val pictureH = if (area == ShareArea.Globe && globeW > 0) 1500 * globeH / globeW else v.pixelHeight
+        val pictureW = if (area == ShareArea.Globe && globeW > 0) GLOBE_LOOP_SIDE else v.pixelWidth
+        val pictureH = if (area == ShareArea.Globe && globeW > 0) GLOBE_LOOP_SIDE else v.pixelHeight
         return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindowAnchored(_state.value.times.size, _state.value.loopLength, _state.value.timeIndex, AppContainer.loopFromShown.value).count())   // + header and legend
     }
 
@@ -798,7 +798,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
                 val data = repo.readFrame(s, product, t, st.member)
                 val style = withAutoStops(product.style, data)
                 outlook.ensure(st.times[t])
-                val map = areaBitmap(area, product, style, data, st, v, st.times[t])
+                val map = areaBitmap(area, product, style, data, st, v, st.times[t], GLOBE_LOOP_SIDE)
                 val hour = (st.times[t] - cycle.epochSeconds) / 3600
                 val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
                 var picture = renderer.shareImage(map, product, style, header, st.members)
@@ -817,11 +817,13 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The map picture of an export: a flat grid window, or the globe as turned now at export size. */
-    private fun areaBitmap(area: ShareArea, product: Product, style: Style, data: FloatArray, st: UiState, v: View = resolveView(area), valid: Long? = st.times.getOrNull(st.timeIndex)): Bitmap =
+    private fun areaBitmap(area: ShareArea, product: Product, style: Style, data: FloatArray, st: UiState, v: View = resolveView(area), valid: Long? = st.times.getOrNull(st.timeIndex), side: Int = GLOBE_EXPORT_SIDE): Bitmap =
         if (area == ShareArea.Globe && globeW > 0) {
-            val size = 1500
-            val h = size * globeH / globeW
-            globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
+            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))       // the globe as turned now, on a square at export size
+            globeRenderer.render(
+                product.grid, data, style, st.members, cam, side, side, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity,
+                alerts = outlookDrawsOn(outlook, valid) { la, lo -> globeForward(cam, side, side, la, lo) }, counties = st.settings.forExport().counties,
+            )
         } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */

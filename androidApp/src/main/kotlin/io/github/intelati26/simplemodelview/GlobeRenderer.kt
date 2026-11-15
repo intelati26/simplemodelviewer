@@ -7,7 +7,10 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import simplemodelview.ContourLine
+import simplemodelview.ContourSpec
 import simplemodelview.Contours
+import simplemodelview.Kind
+import simplemodelview.PaintballLines
 import simplemodelview.Core
 import simplemodelview.GlobeCamera
 import simplemodelview.Grid
@@ -18,6 +21,10 @@ import simplemodelview.Style
 import simplemodelview.View
 import simplemodelview.WindProducts
 import simplemodelview.globeForward
+
+/** The side of the square a globe or polar picture is saved at, and of a loop frame (before the video size scales it). */
+internal const val GLOBE_EXPORT_SIDE = 3000
+internal const val GLOBE_LOOP_SIDE = 2000
 
 /** A second field over the globe's data (the MRMS overlays): its [values] on [grid], drawn with [style]; [marker] fields are a cross per cell, [halo] ones edged and haloed. */
 class GlobeOverlay(
@@ -67,14 +74,18 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         // data
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
+        // a member-probability contour product: the members' paintball under lines of the share of members, as the flat map has it
+        val paintLines = product != null && PaintballLines.isPaintballLines(product.id)
+        val rasterStyle = if (paintLines) Style(Kind.Paintball, units = "members") else style
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
         val baseDomain = if (baseHalo) 0 else domain          // an edged swath is only the shapes, not the whole domain
         Timings.timed("raster") {
-            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, baseDomain, style, memberRgb, buffer)
-            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, baseDomain, style, memberRgb, buffer)
+            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, baseDomain, rasterStyle, memberRgb, buffer)
+            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, baseDomain, rasterStyle, memberRgb, buffer)
         }
         if (baseHalo) alertPainter.haloPixels(buffer, width, height)
-        canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)
+        if (paintLines) Timings.timed("contours") { drawPaintball(canvas, grid, values, members.size, cam, polar, width, height, dark) }
+        canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, if (paintLines) Paint().apply { alpha = 0x90 } else null)
         for (overlay in overlays) Timings.timed("overlay") { drawOverlay(canvas, overlay, cam, polar, width, height, stride) }
 
         Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1, countyMode = counties) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1, countyMode = counties) }
@@ -107,7 +118,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
                     Timings.timed("contours") { geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) } }
                     geoKey = key
                 }
-                drawContourLines(canvas, projectedContours { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
+                drawContourLines(canvas, projectedContours(geoLines) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
             }
         }
         if (windLevel != null) {
@@ -134,9 +145,9 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon, a label on the longest piece of each level. */
-    private fun projectedContours(project: (Double, Double) -> DoubleArray?): List<ContourLine> {
+    private fun projectedContours(lines: List<GeoLine>, project: (Double, Double) -> DoubleArray?): List<ContourLine> {
         val out = ArrayList<ContourLine>()
-        for (line in geoLines) {
+        for (line in lines) {
             val pieces = ArrayList<FloatArray>()
             var current = ArrayList<Float>()
             var i = 0
@@ -230,5 +241,22 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
                 if (drawn >= 20_000) return                     // a storm-wide burst: enough to read
             }
         }
+    }
+
+    private var paintKey: Any? = null
+    private var paintGeo: List<GeoLine> = emptyList()
+
+    /** Lines of the share of members at or above the threshold: traced once per frame on the whole grid (the neighborhood and blur are the costly part), then projected. */
+    private fun drawPaintball(canvas: Canvas, grid: Grid, mask: FloatArray, memberCount: Int, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean) {
+        if (mask.size < grid.cells) return
+        val key = Triple(mask, grid, memberCount)
+        if (paintKey != key) {
+            val share = PaintballLines.blur(PaintballLines.neighborhoodPercent(mask, grid.columns, grid.rows, memberCount.takeIf { it > 0 } ?: 10, PaintballLines.NEIGHBORHOOD), grid.columns, grid.rows, PaintballLines.BLUR_RADIUS)
+            val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
+            val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
+            paintGeo = Contours.lines(share, grid, whole, Style(), spec, smoothing = 1, levelsOverride = PaintballLines.levels).map { GeoLine(it.level, it.bold, it.label, toLatLon(grid, whole, it)) }
+            paintKey = key
+        }
+        drawPaintballContourLines(canvas, projectedContours(paintGeo) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, dark, width)
     }
 }

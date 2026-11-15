@@ -199,3 +199,28 @@ internal fun drawWindBarbs(
         }
     }
 }
+
+
+/** The member probability contours of a paintball-lines product: a dark-edged line in each level's color, the 50 % line heavier, one label per level. Flat map and globe. */
+internal fun drawPaintballContourLines(canvas: Canvas, lines: List<ContourLine>, dark: Boolean, pictureWidth: Int) {
+    val width = maxOf(2.2f, pictureWidth / 600f)
+    val halo = if (dark) 0xDD000000.toInt() else 0xEEFFFFFF.toInt()
+    val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
+    val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+    for (c in lines.sortedBy { it.level }) {
+        if (c.points.size < 4) continue
+        val path = Path()
+        path.moveTo(c.points[0], c.points[1])
+        var i = 2
+        while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
+        val w = if (c.bold) width * 1.8f else width
+        line.strokeWidth = w + 4f; line.color = halo; canvas.drawPath(path, line)
+        line.strokeWidth = w; line.color = 0xFF000000.toInt() or simplemodelview.PaintballLines.levelColor(c.level); canvas.drawPath(path, line)
+    }
+    for (c in lines) if (c.labelAt >= 0) {
+        val x = c.points[c.labelAt]; val y = c.points[c.labelAt + 1]
+        if (x < 0 || y < 0 || x > pictureWidth) continue
+        text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(c.label, x, y + text.textSize / 3, text)
+        text.style = Paint.Style.FILL; text.color = 0xFF000000.toInt() or simplemodelview.PaintballLines.levelColor(c.level); canvas.drawText(c.label, x, y + text.textSize / 3, text)
+    }
+}
