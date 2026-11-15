@@ -136,9 +136,12 @@ object WindBarbs {
         val scale = view.scale.toFloat() / view.step
         val every = maxOf(1, (spacing / scale).roundToInt())
         val out = ArrayList<BarbGlyph>()
-        var r = view.row0 + every / 2
+        // the lattice is a multiple of the step from the grid's origin (not from the window's corner), so it holds still as the window moves or the step changes by whole cells
+        val firstRow = (view.row0 + every - 1) / every * every + every / 2
+        val firstCol = (view.col0 + every - 1) / every * every + every / 2
+        var r = firstRow
         while (r < view.row0 + view.rows && r < rows) {
-            var c = view.col0 + every / 2
+            var c = firstCol
             while (c < view.col0 + view.cols && c < cols) {
                 val uu = u[r * cols + c]
                 val vv = v[r * cols + c]

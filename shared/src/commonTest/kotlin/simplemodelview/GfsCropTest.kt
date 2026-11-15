@@ -124,6 +124,35 @@ class GfsCropTest {
         assertTrue(ranges.none { it.endsWith("-${total - 1}]") && false })
     }
 
+    @Test fun theGlobeGetsWholeFieldsOnGfsOwnGridWithTheWindsAsTheyAre() = runTest {
+        val idx = "1:0:d=2026110612:HGT:500 mb:120 hour fcst:\n2:100:d=2026110612:UGRD:500 mb:120 hour fcst:\n3:200:d=2026110612:VGRD:500 mb:120 hour fcst:\n" +
+            "4:300:d=2026110612:UGRD:700 mb:120 hour fcst:\n5:400:d=2026110612:VGRD:700 mb:120 hour fcst:\n6:500:d=2026110612:UGRD:850 mb:120 hour fcst:\n7:600:d=2026110612:VGRD:850 mb:120 hour fcst:\n8:700:d=2026110612:PRMSL:mean sea level:120 hour fcst:\n9:800:d=2026110612:TMP:2 m above ground:120 hour fcst:\n"
+        val urls = ArrayList<String>()
+        val http = object : Http {
+            override suspend fun get(url: String): HttpResult { urls += url; return HttpResult(200, idx.encodeToByteArray()) }
+            override suspend fun getRange(url: String, first: Long, lastInclusive: Long): HttpResult { urls += url; return HttpResult(206, ByteArray((lastInclusive - first + 1).toInt()) { 1 }) }
+        }
+        val globeGrid = Grid(5, 2, 1)
+        val core = object : Core by StubCore {
+            override fun decodeGrib(message: ByteArray) = GridField(globeGrid, FloatArray(2) { 10f })                 // 10 m/s everywhere
+            override fun reproject(values: FloatArray, from: Grid, to: Grid): FloatArray = throw AssertionError("the globe is not reprojected")
+        }
+        val repo = GfsRepository(http, core)
+        val single = repo.loadWindGlobal(file, 500, "speed")
+        assertEquals(2 * WindProducts.PLANES, single.values.size)
+        assertEquals(10f * GfsCatalog.MS_TO_KNOTS, single.values[2 * WindProducts.U], 1e-3f)       // knots, not turned
+        assertEquals(10f, single.values[2 * WindProducts.HEIGHT])
+        assertEquals(globeGrid, single.grid)
+        val stack = repo.loadWindGlobal(file, WindProducts.STACK, "speed")
+        assertEquals(2 * WindProducts.STACK_PLANES, stack.values.size)
+        assertTrue(WindProducts.isStackFrame(stack.values, 2))
+        // no region and no crop: whole messages from AWS, no NOMADS
+        assertTrue(urls.none { it.contains("nomads") })
+        val field = repo.loadFieldGlobal(file, GfsCatalog.surface.first { it.id == "pmsl_gfs" })
+        assertEquals(2, field.values.size)
+        assertEquals(0.1f, field.values[0], 1e-4f)                                                  // Pa to hPa
+    }
+
     @Test fun theRunTimeIsReadFromAnEncodedFilterUrl() {
         val url = nomadsGfsUrl(file, listOf(GfsMessage("HGT", "500 mb")), doubleArrayOf(-125.0, 24.0, -66.5, 50.0))!!
         assertEquals(run, gribSourceInitEpoch(url))

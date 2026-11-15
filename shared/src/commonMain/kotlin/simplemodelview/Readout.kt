@@ -22,7 +22,7 @@ fun shownValue(style: Style, values: FloatArray, column: Int, row: Int, grid: Gr
 }
 
 /** Text for the read-out at a grid cell: "39.10N 97.20W   42.5 dBZ", or "6 of 10 members: ..." for paintball products. */
-fun readout(core: Core, product: Product, values: FloatArray, members: List<String>, column: Int, row: Int): String {
+fun readout(core: Core, product: Product, values: FloatArray, members: List<String>, column: Int, row: Int, trueFrameWinds: Boolean = false): String {
     val grid = product.grid
     if (column !in 0 until grid.columns || row !in 0 until grid.rows || values.size < grid.cells) return ""
     val (lat, lon) = core.gridToLatLon(grid, column + 0.5, row + 0.5)
@@ -47,7 +47,7 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
         val winds = WindProducts.stackLevels.indices.joinToString("   ") { k ->
             val u = values[grid.cells * WindProducts.stackU(k) + i]
             val v = values[grid.cells * WindProducts.stackV(k) + i]
-            val from = WindProducts.compassDegrees(WindProducts.fromDegrees(u, v), lon)
+            val from = (if (trueFrameWinds) WindProducts.fromDegrees(u, v) else WindProducts.compassDegrees(WindProducts.fromDegrees(u, v), lon))
             "${WindProducts.stackLevels[k]}: ${fixed(from, 0)}\u00B0 at ${fixed(WindProducts.speed(u, v).toDouble(), 0)} kt"
         }
         val height = values[grid.cells * WindProducts.HEIGHT + i]
@@ -60,7 +60,7 @@ fun readout(core: Core, product: Product, values: FloatArray, members: List<Stri
         val u = values[grid.cells * WindProducts.U + i]
         val v = values[grid.cells * WindProducts.V + i]
         val height = values[grid.cells * WindProducts.HEIGHT + i]
-        val from = WindProducts.compassDegrees(WindProducts.fromDegrees(u, v), lon)
+        val from = (if (trueFrameWinds) WindProducts.fromDegrees(u, v) else WindProducts.compassDegrees(WindProducts.fromDegrees(u, v), lon))
         val colored = WindProducts.hasColorField(product.id)      // (the first plane then holds that field, not the speed)
         val speed = if (colored) WindProducts.speed(u, v) else raw
         val temperature = if (colored) "${fixed(raw * style.factor + style.offset, style.digits)}${if (style.units.isEmpty()) "" else " " + style.units}   " else ""

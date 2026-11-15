@@ -60,21 +60,22 @@ sealed class ShareArea {
 }
 
 data class Settings(val wifiOnlyLoop: Boolean = false, val dataSaver: Boolean = false, val cacheMegabytes: Int = 150, val contactEmail: String = "", val contours: Boolean = true, val minimalUi: Boolean = false,
-    val barbDensity: Int = DEFAULT_BARB_DENSITY, val counties: Int = 0, val optionsInExport: Boolean = false, val gfsCrop: Boolean = true) {
+    val barbDensity: Int = DEFAULT_BARB_DENSITY, val counties: Int = 0, val optionsInExport: Boolean = false, val gfsCrop: Boolean = true, val showTimings: Boolean = false) {
     /** What an export is drawn with: the screen's wind barb spacing and county lines only when [optionsInExport] is on, else the defaults. */
     fun forExport(): Settings = if (optionsInExport) this else copy(barbDensity = DEFAULT_BARB_DENSITY, counties = 0)
     fun displayDiffers(o: Settings) = barbDensity != o.barbDensity || counties != o.counties
 }
 
-const val DEFAULT_BARB_DENSITY = 4
+const val DEFAULT_BARB_DENSITY = 3
 
 fun Settings.withDisplayPrefs(prefs: android.content.SharedPreferences) =
-    copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false), gfsCrop = prefs.getBoolean("gfs_crop", true))
+    copy(barbDensity = prefs.getInt("barb_density", DEFAULT_BARB_DENSITY).coerceIn(1, 5), counties = prefs.getInt("counties", 0).coerceIn(0, 2), optionsInExport = prefs.getBoolean("options_in_export", false), gfsCrop = prefs.getBoolean("gfs_crop", true), showTimings = prefs.getBoolean("show_timings", false))
 
 fun android.content.SharedPreferences.Editor.putDisplay(s: Settings): android.content.SharedPreferences.Editor =
-    putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport).putBoolean("gfs_crop", s.gfsCrop)
+    putInt("barb_density", s.barbDensity).putInt("counties", s.counties).putBoolean("options_in_export", s.optionsInExport).putBoolean("gfs_crop", s.gfsCrop).putBoolean("show_timings", s.showTimings)
 
 data class UiState(
+    val detail: DetailLayer? = null,           // a finer picture of the zoomed-in part, drawn after the zoom settles
     val busy: Boolean = true,
     val error: String? = null,
     val cycles: List<Cycle> = emptyList(),
@@ -390,7 +391,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return
         update { it.copy(busy = true, error = null) }
-        val frame = repo.readFrameTimed(s, product, st.timeIndex, st.member)
+        val frame = Timings.timed("data") { repo.readFrameTimed(s, product, st.timeIndex, st.member) }
         values = frame.values
         update { it.copy(fileTime = frame.fileTime, runComplete = s.metadataTime) }
         rerender()
@@ -412,7 +413,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity), style, v)
         }
         view = v
-        update { it.copy(map = bitmap, style = style, busy = false) }
+        update { it.copy(map = bitmap, style = style, busy = false, detail = null) }
+        scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -487,7 +489,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val (bitmap, style) = withContext(Dispatchers.Default) {
             val style = withAutoStops(product.style, data)
-            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark) to style
+            globeRenderer.render(product.grid, data, style, st.members, st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity) to style
         }
         update { it.copy(map = bitmap, style = style, busy = false) }
     }
@@ -715,9 +717,36 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         return cm.isActiveNetworkMetered
     }
 
-    /** The UI reports which part of the picture is on screen (after pinch-zoom / pan). */
+    /** The UI reports which part of the picture is on screen (after pinch-zoom / pan): a finer picture of it is drawn once the zoom settles. */
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
         viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        scheduleDetail()
+    }
+
+    private var detailJob: Job? = null
+
+    /** After the zoom has rested a moment, only the cells on screen are drawn again, finer (contours, barbs and lines at the finer scale too), over the overview. */
+    private fun scheduleDetail() {
+        detailJob?.cancel()
+        val st = _state.value
+        val product = st.product
+        val data = values
+        val v = view
+        val (l, t, r, b) = viewport.toList()
+        val window = if (product == null || data == null || st.globe || st.playing || data.size < product.grid.cells) null else detailWindow(v, l, t, r, b)
+        if (window == null) { if (st.detail != null) update { it.copy(detail = null) }; return }
+        detailJob = viewModelScope.launch {
+            delay(400)
+            try {
+                val valid = st.times.getOrNull(st.timeIndex)
+                val settings = _state.value.settings
+                val style = withAutoStops(product!!.style, data!!)
+                val bitmap = withContext(Dispatchers.Default) {
+                    renderer.render(product, style, data, st.members, window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                }
+                if (view === v && values === data && _state.value.product == product) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 3.0)) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
     }
 
     /** The grid window an export covers, drawn at a resolution that suits its size (about 1800 px wide, at most 8 px per cell). */
@@ -785,7 +814,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (area == ShareArea.Globe && globeW > 0) {
             val size = 1500
             val h = size * globeH / globeW
-            globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false)
+            globeRenderer.render(product.grid, data, style, st.members, st.cam.copy(radius = st.cam.radius * size / globeW), size, h, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
         } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
