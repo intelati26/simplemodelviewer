@@ -20,7 +20,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Pillow (the script counts the colors of the middle of each screenshot)
-        run: sudo apt-get install -y python3-pil
+        run: sudo apt-get update && sudo apt-get install -y python3-pil
       - name: Smoke test on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
