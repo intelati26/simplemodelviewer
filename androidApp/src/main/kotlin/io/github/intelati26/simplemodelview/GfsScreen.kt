@@ -66,6 +66,8 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var settings by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
+    var outlookDialog by remember { mutableStateOf(false) }
     var pickSince by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -76,7 +78,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { if (vm.importSettings(context.contentResolver, uri)) restartAsk = true }
     }
-    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); onPauseOrDispose { } }
+    LifecycleResumeEffect(Unit) { vm.refreshIfStale(); vm.promptForContact(); AppContainer.outlook.refreshIfStale(); onPauseOrDispose { } }
     val dark = isSystemInDarkTheme()
     LaunchedEffect(dark) { vm.setDark(dark) }
     val mapBackground = if (dark) Color(0xFF202428) else Color(0xFFEDEFF2)
@@ -198,6 +200,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
+            OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
@@ -293,6 +296,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
         onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt,
         provider = "NOAA", server = "NOAA's servers",
     )
+    if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },
