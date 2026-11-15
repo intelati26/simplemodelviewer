@@ -162,7 +162,6 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
             s.style?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     var spanMenu by remember { mutableStateOf(false) }
                     Box {
                         val fromShown by AppContainer.loopFromShown.collectAsStateWithLifecycle()
@@ -177,11 +176,13 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                             LoopStartItem { spanMenu = false }
                         }
                     }
+                    TimeMenu(s.frames.map { it.valid }, s.index, { i -> nbmFrameLabel(s.frames[i]) }, vm::pickIndex)
                     Slider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.frames.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
+                TimeStepRow(s.index, s.frames.size, s.playing, vm::togglePlay, vm::pickIndex)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }

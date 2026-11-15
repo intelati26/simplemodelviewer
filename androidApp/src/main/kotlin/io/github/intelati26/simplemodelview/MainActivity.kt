@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
     private val mrmsViewModel: MrmsViewModel by viewModels()
     private val nbmViewModel: NbmViewModel by viewModels()
     private val gfsViewModel: GfsViewModel by viewModels()
+    private val pointViewModel: PointViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,7 +120,7 @@ class MainActivity : ComponentActivity() {
         val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs").firstOrNull { it == start } ?: "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point").firstOrNull { it == start } ?: "spc") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -129,7 +130,12 @@ class MainActivity : ComponentActivity() {
                         open(p)
                         when (p) { "spc" -> viewModel.reloadFromPrefs(); "mrms" -> mrmsViewModel.reloadFromPrefs(); "nbm" -> nbmViewModel.reloadFromPrefs() }
                     }
-                    if (page == "gfs") GfsScreen(gfsViewModel, go)
+                    // the extended point view opens the synoptic set up of a time on the REFS page, or on the GFS page beyond its range
+                    val toSynoptic: (Long, Cycle?) -> Unit = { valid, run ->
+                        if (run != null) { viewModel.showValid(valid, run); go("spc") } else { gfsViewModel.showValid(valid); go("gfs") }
+                    }
+                    if (page == "point") PointScreen(pointViewModel, go, toSynoptic)
+                    else if (page == "gfs") GfsScreen(gfsViewModel, go)
                     else if (page == "nbm") NbmScreen(nbmViewModel, go)
                     else if (page == "mrms") MrmsScreen(mrmsViewModel, go)
                     else {
@@ -243,14 +249,15 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             s.style?.let { Legend(it, s.members, withMembers = s.product?.id?.let(simplemodelview.PaintballLines::isPaintballLines) == true) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = vm::togglePlay, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (s.playing) "Pause" else "Play") }
                     LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
                     TextButton(onClick = vm::goToNow, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Now") }
+                    TimeMenu(s.times, s.timeIndex, { i -> s.cycle?.let { c -> "${formatUtc(s.times[i])}  (f${((s.times[i] - c.epochSeconds) / 3600).toString().padStart(2, '0')})" } ?: formatUtc(s.times[i]) }, vm::pickTime)
                     Slider(
                         value = s.timeIndex.toFloat(), onValueChange = { vm.pickTime(it.toInt()) },
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
+                TimeStepRow(s.timeIndex, s.times.size, s.playing, vm::togglePlay, vm::pickTime)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
