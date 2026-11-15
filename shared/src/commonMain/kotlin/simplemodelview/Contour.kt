@@ -93,10 +93,11 @@ object Contours {
         // the lines follow a lightly smoothed field, so the cell-to-cell noise of a model does not turn them into scribble
         val field = smoothed(values, cols, c0, r0, c1, r1, smoothing)
         val scale = view.scale.toFloat() / view.step
+        val stats = BlockStats.of(field, cols, c0, r0, c1, r1)       // the range of each block of cells: a level only looks at the blocks it crosses
         val out = ArrayList<ContourLine>()
         for (level in levels) {
             val stored = ((level - style.offset) / f).toFloat()
-            val chains = trace(field, cols, c0, r0, c1, r1, stored)
+            val chains = trace(field, cols, c0, r0, c1, r1, stored, stats)
             var best = -1
             var bestLen = -1
             chains.forEachIndexed { i, ch -> if (ch.size > bestLen) { best = i; bestLen = ch.size } }
@@ -133,36 +134,41 @@ object Contours {
 
     /**
      * [values] blurred [passes] times inside the window (c0..c1, r0..r1), a cell's neighbors weighing half of it, NaN cells staying NaN and not
-     * counting as neighbors. A straight ramp is left as it is. Cells outside the window are copied.
+     * counting as neighbors. A straight ramp is left as it is. Cells outside the window are copied. One copy of the field is made, whatever the passes:
+     * each pass blurs along the rows into a window-sized buffer and then down the columns back into the copy, which reads only the buffer.
      */
     internal fun smoothed(values: FloatArray, cols: Int, c0: Int, r0: Int, c1: Int, r1: Int, passes: Int): FloatArray {
         if (passes <= 0) return values
         val w = c1 - c0 + 1
         val h = r1 - r0 + 1
-        var cur = values
+        val dst = values.copyOf()
         val tmp = FloatArray(w * h)
-        repeat(passes) {
-            val src = cur
-            for (r in 0 until h) for (c in 0 until w) {
-                val v = src[(r0 + r) * cols + c0 + c]
-                if (v.isNaN()) { tmp[r * w + c] = v; continue }
-                var sum = 2 * v; var wt = 2f
-                if (c > 0) src[(r0 + r) * cols + c0 + c - 1].let { if (!it.isNaN()) { sum += it; wt += 1f } }
-                if (c < w - 1) src[(r0 + r) * cols + c0 + c + 1].let { if (!it.isNaN()) { sum += it; wt += 1f } }
-                tmp[r * w + c] = sum / wt
+        repeat(passes) { pass ->
+            val src = if (pass == 0) values else dst
+            for (r in 0 until h) {
+                val row = (r0 + r) * cols + c0
+                for (c in 0 until w) {
+                    val v = src[row + c]
+                    if (v.isNaN()) { tmp[r * w + c] = v; continue }
+                    var sum = 2 * v; var wt = 2f
+                    if (c > 0) { val a = src[row + c - 1]; if (!a.isNaN()) { sum += a; wt += 1f } }
+                    if (c < w - 1) { val a = src[row + c + 1]; if (!a.isNaN()) { sum += a; wt += 1f } }
+                    tmp[r * w + c] = sum / wt
+                }
             }
-            val dst = values.copyOf()
-            for (r in 0 until h) for (c in 0 until w) {
-                val v = tmp[r * w + c]
-                if (v.isNaN()) { dst[(r0 + r) * cols + c0 + c] = v; continue }
-                var sum = 2 * v; var wt = 2f
-                if (r > 0) tmp[(r - 1) * w + c].let { if (!it.isNaN()) { sum += it; wt += 1f } }
-                if (r < h - 1) tmp[(r + 1) * w + c].let { if (!it.isNaN()) { sum += it; wt += 1f } }
-                dst[(r0 + r) * cols + c0 + c] = sum / wt
+            for (r in 0 until h) {
+                val row = (r0 + r) * cols + c0
+                for (c in 0 until w) {
+                    val v = tmp[r * w + c]
+                    if (v.isNaN()) { dst[row + c] = v; continue }
+                    var sum = 2 * v; var wt = 2f
+                    if (r > 0) { val a = tmp[(r - 1) * w + c]; if (!a.isNaN()) { sum += a; wt += 1f } }
+                    if (r < h - 1) { val a = tmp[(r + 1) * w + c]; if (!a.isNaN()) { sum += a; wt += 1f } }
+                    dst[row + c] = sum / wt
+                }
             }
-            cur = dst
         }
-        return cur
+        return dst
     }
 
     /** Corner cutting: each pass replaces every corner of the line by two points at a quarter and three quarters of its segments. An open line keeps its ends. */
@@ -171,84 +177,186 @@ object Contours {
         repeat(passes) {
             val n = cur.size / 2
             if (n < 3) return cur
-            val out = ArrayList<Float>(cur.size * 2)
-            if (!closed) { out.add(cur[0]); out.add(cur[1]) }
+            val out = FloatArray(if (closed) 4 * (n - 1) + 2 else 4 * (n - 1) + 4)
+            var k = 0
+            if (!closed) { out[k++] = cur[0]; out[k++] = cur[1] }
             for (i in 0 until n - 1) {
                 val x0 = cur[2 * i]; val y0 = cur[2 * i + 1]; val x1 = cur[2 * i + 2]; val y1 = cur[2 * i + 3]
-                out.add(0.75f * x0 + 0.25f * x1); out.add(0.75f * y0 + 0.25f * y1)
-                out.add(0.25f * x0 + 0.75f * x1); out.add(0.25f * y0 + 0.75f * y1)
+                out[k++] = 0.75f * x0 + 0.25f * x1; out[k++] = 0.75f * y0 + 0.25f * y1
+                out[k++] = 0.25f * x0 + 0.75f * x1; out[k++] = 0.25f * y0 + 0.75f * y1
             }
-            if (closed) { out.add(out[0]); out.add(out[1]) } else { out.add(cur[2 * n - 2]); out.add(cur[2 * n - 1]) }
-            cur = out.toFloatArray()
+            if (closed) { out[k++] = out[0]; out[k++] = out[1] } else { out[k++] = cur[2 * n - 2]; out[k++] = cur[2 * n - 1] }
+            cur = out
         }
         return cur
     }
 
+    /** The lowest and highest value in each block of [size] x [size] cells of a window, corners included (a cell's square reaches one row and column past it). */
+    internal class BlockStats(val c0: Int, val r0: Int, val c1: Int, val r1: Int, val size: Int, val bw: Int, val bh: Int, val min: FloatArray, val max: FloatArray) {
+        companion object {
+            fun of(values: FloatArray, cols: Int, c0: Int, r0: Int, c1: Int, r1: Int, size: Int = 16): BlockStats {
+                val bw = (c1 - c0 + size - 1) / size
+                val bh = (r1 - r0 + size - 1) / size
+                val mn = FloatArray(bw * bh)
+                val mx = FloatArray(bw * bh)
+                for (by in 0 until bh) for (bx in 0 until bw) {
+                    val cs = c0 + bx * size; val ce = min(cs + size, c1)
+                    val rs = r0 + by * size; val re = min(rs + size, r1)
+                    var lo = Float.POSITIVE_INFINITY; var hi = Float.NEGATIVE_INFINITY      // a block of nothing but NaN keeps these: no level crosses it
+                    for (r in rs..re) {
+                        val row = r * cols
+                        for (c in cs..ce) {
+                            val v = values[row + c]
+                            if (v < lo) lo = v
+                            if (v > hi) hi = v
+                        }
+                    }
+                    mn[by * bw + bx] = lo; mx[by * bw + bx] = hi
+                }
+                return BlockStats(c0, r0, c1, r1, size, bw, bh, mn, mx)
+            }
+        }
+    }
+
+    /** The points where a level crosses the edges of the cells, found by the edge's key, with the (at most two) neighbors of each: no boxed numbers, no hash nodes. */
+    private class EdgePoints {
+        var xs = FloatArray(1024); var ys = FloatArray(1024)
+        var n0 = IntArray(1024); var n1 = IntArray(1024)
+        var count = 0
+        private var keys = LongArray(2048) { -1L }
+        private var ids = IntArray(2048)
+        private var mask = 2047
+
+        private fun slot(key: Long, mask: Int) = ((key * -7046029254386353131L) ushr 32).toInt() and mask
+
+        fun find(key: Long): Int {
+            var s = slot(key, mask)
+            while (true) {
+                val k = keys[s]
+                if (k == key) return ids[s]
+                if (k == -1L) return -1
+                s = (s + 1) and mask
+            }
+        }
+
+        fun add(key: Long, x: Float, y: Float): Int {
+            if (count == xs.size) { xs = xs.copyOf(count * 2); ys = ys.copyOf(count * 2); n0 = n0.copyOf(count * 2); n1 = n1.copyOf(count * 2) }
+            if ((count + 1) * 2 > keys.size) grow()
+            val id = count++
+            xs[id] = x; ys[id] = y; n0[id] = -1; n1[id] = -1
+            var s = slot(key, mask)
+            while (keys[s] != -1L) s = (s + 1) and mask
+            keys[s] = key; ids[s] = id
+            return id
+        }
+
+        private fun grow() {
+            val oldKeys = keys; val oldIds = ids
+            val size = oldKeys.size * 2
+            keys = LongArray(size) { -1L }; ids = IntArray(size); mask = size - 1
+            for (i in oldKeys.indices) if (oldKeys[i] != -1L) {
+                var s = slot(oldKeys[i], mask)
+                while (keys[s] != -1L) s = (s + 1) and mask
+                keys[s] = oldKeys[i]; ids[s] = oldIds[i]
+            }
+        }
+
+        /** Each point joins at most two segments (a third would replace the second). */
+        fun link(p: Int, q: Int) {
+            if (n0[p] < 0) n0[p] = q else n1[p] = q
+            if (n0[q] < 0) n0[q] = p else n1[q] = p
+        }
+    }
+
     /**
      * Marching squares of one level over the cells (c0..c1, r0..r1) of [values]: the segments are chained into polylines, as x0, y0, x1, y1, ...
-     * in cell coordinates (the value of cell (c, r) sits at (c, r)). A saddle is joined by the mean of its four corners.
+     * in cell coordinates (the value of cell (c, r) sits at (c, r)). A saddle is joined by the mean of its four corners. With [stats] only the blocks
+     * whose range holds the level are looked at.
      */
-    internal fun trace(values: FloatArray, cols: Int, c0: Int, r0: Int, c1: Int, r1: Int, level: Float): List<FloatArray> {
+    internal fun trace(values: FloatArray, cols: Int, c0: Int, r0: Int, c1: Int, r1: Int, level: Float, stats: BlockStats? = null): List<FloatArray> {
+        val st = stats ?: BlockStats.of(values, cols, c0, r0, c1, r1)
+        val pts = EdgePoints()
         // an edge is named by its lower-left cell and direction: horizontal (0) from (c, r) to (c + 1, r), vertical (1) to (c, r + 1)
-        fun key(c: Int, r: Int, vertical: Int): Long = ((r.toLong() * cols + c) shl 1) or vertical.toLong()
-        val px = HashMap<Long, FloatArray>()
-        val next = HashMap<Long, LongArray>()      // each edge point joins at most two segments
-
-        fun point(a: Int, b: Int, c: Int, r: Int, vertical: Int, va: Float, vb: Float): Long {
-            val k = key(c, r, vertical)
-            if (k !in px) {
-                val t = (level - va) / (vb - va)
-                px[k] = if (vertical == 0) floatArrayOf(c + t, r.toFloat()) else floatArrayOf(c.toFloat(), r + t)
-            }
-            return k
+        fun horizontal(c: Int, r: Int, va: Float, vb: Float): Int {
+            val key = (r.toLong() * cols + c) shl 1
+            val found = pts.find(key)
+            return if (found >= 0) found else pts.add(key, c + (level - va) / (vb - va), r.toFloat())
+        }
+        fun vertical(c: Int, r: Int, va: Float, vb: Float): Int {
+            val key = ((r.toLong() * cols + c) shl 1) or 1L
+            val found = pts.find(key)
+            return if (found >= 0) found else pts.add(key, c.toFloat(), r + (level - va) / (vb - va))
         }
 
-        fun link(p: Long, q: Long) {
-            for ((x, y) in listOf(p to q, q to p)) {
-                val cur = next[x]
-                next[x] = if (cur == null) longArrayOf(y) else longArrayOf(cur[0], y)
+        for (by in 0 until st.bh) for (bx in 0 until st.bw) {
+            val b = by * st.bw + bx
+            if (level <= st.min[b] || level > st.max[b]) continue      // every corner of the block is on one side of the level
+            val cs = c0 + bx * st.size; val ce = min(cs + st.size, c1)
+            val rs = r0 + by * st.size; val re = min(rs + st.size, r1)
+            for (r in rs until re) for (c in cs until ce) {
+                val a = values[r * cols + c]               // lower left
+                val bb = values[r * cols + c + 1]          // lower right
+                val d = values[(r + 1) * cols + c]         // upper left
+                val e = values[(r + 1) * cols + c + 1]     // upper right
+                if (a.isNaN() || bb.isNaN() || d.isNaN() || e.isNaN()) continue
+                val ia = a >= level; val ib = bb >= level; val id = d >= level; val ie = e >= level
+                if (ia == ib && ib == id && id == ie) continue
+                val bottom = if (ia != ib) horizontal(c, r, a, bb) else -1
+                val top = if (id != ie) horizontal(c, r + 1, d, e) else -1
+                val left = if (ia != id) vertical(c, r, a, d) else -1
+                val right = if (ib != ie) vertical(c + 1, r, bb, e) else -1
+                var hits = 0
+                if (bottom >= 0) hits += 1
+                if (right >= 0) hits += 1
+                if (top >= 0) hits += 1
+                if (left >= 0) hits += 1
+                if (hits == 2) {
+                    // the two that are there, in the order bottom, right, top, left
+                    var first = -1
+                    var second = -1
+                    if (bottom >= 0) first = bottom
+                    if (right >= 0) { if (first < 0) first = right else second = right }
+                    if (top >= 0) { if (first < 0) first = top else second = top }
+                    if (left >= 0) { if (first < 0) first = left else second = left }
+                    pts.link(first, second)
+                } else if (hits == 4) {                  // a saddle: the center decides which corners are joined
+                    val centerHigh = (a + bb + d + e) / 4 >= level
+                    if (centerHigh == ia) { pts.link(bottom, left); pts.link(top, right) } else { pts.link(bottom, right); pts.link(top, left) }
+                }
             }
         }
 
-        for (r in r0 until r1) for (c in c0 until c1) {
-            val a = values[r * cols + c]               // lower left
-            val b = values[r * cols + c + 1]           // lower right
-            val d = values[(r + 1) * cols + c]         // upper left
-            val e = values[(r + 1) * cols + c + 1]     // upper right
-            if (a.isNaN() || b.isNaN() || d.isNaN() || e.isNaN()) continue
-            val ia = a >= level; val ib = b >= level; val id = d >= level; val ie = e >= level
-            if (ia == ib && ib == id && id == ie) continue
-            val bottom = if (ia != ib) point(0, 0, c, r, 0, a, b) else -1L
-            val top = if (id != ie) point(0, 0, c, r + 1, 0, d, e) else -1L
-            val left = if (ia != id) point(0, 0, c, r, 1, a, d) else -1L
-            val right = if (ib != ie) point(0, 0, c + 1, r, 1, b, e) else -1L
-            val hits = listOf(bottom, right, top, left).filter { it >= 0 }
-            if (hits.size == 2) link(hits[0], hits[1])
-            else if (hits.size == 4) {                  // a saddle: the center decides which corners are joined
-                val centerHigh = (a + b + d + e) / 4 >= level
-                if (centerHigh == ia) { link(bottom, left); link(top, right) } else { link(bottom, right); link(top, left) }
-            }
-        }
-
-        val used = HashSet<Long>()
+        val n = pts.count
+        val used = BooleanArray(n)
         val chains = ArrayList<FloatArray>()
-        fun walk(start: Long) {
-            val pts = ArrayList<Float>()
-            var prev = -1L
+        var buf = FloatArray(256)
+        fun walk(start: Int) {
+            var len = 0
+            var prev = -1
             var cur = start
             while (true) {
-                used.add(cur)
-                val p = px.getValue(cur)
-                pts.add(p[0]); pts.add(p[1])
-                val nb = next[cur] ?: break
-                val step = nb.firstOrNull { it != prev && (it !in used || it == start && prev != -1L && cur != start && pts.size > 4) } ?: break
-                if (step == start) { val s = px.getValue(start); pts.add(s[0]); pts.add(s[1]); break }
+                used[cur] = true
+                if (len + 2 > buf.size) buf = buf.copyOf(buf.size * 2)
+                buf[len++] = pts.xs[cur]; buf[len++] = pts.ys[cur]
+                val a = pts.n0[cur]; val b2 = pts.n1[cur]
+                if (a < 0) break
+                // the first neighbor that is not where we came from and not used yet (the start again closes a loop of three or more points)
+                val canClose = prev != -1 && cur != start && len > 4
+                var step = -1
+                if (a != prev && (!used[a] || (a == start && canClose))) step = a
+                else if (b2 >= 0 && b2 != prev && (!used[b2] || (b2 == start && canClose))) step = b2
+                if (step < 0) break
+                if (step == start) {
+                    if (len + 2 > buf.size) buf = buf.copyOf(buf.size * 2)
+                    buf[len++] = pts.xs[start]; buf[len++] = pts.ys[start]
+                    break
+                }
                 prev = cur; cur = step
             }
-            chains.add(pts.toFloatArray())
+            chains.add(buf.copyOf(len))
         }
-        for ((k, nb) in next) if (nb.size == 1 && k !in used) walk(k)      // open lines first, from an end
-        for (k in next.keys) if (k !in used) walk(k)                        // what remains are closed loops
+        for (k in 0 until n) if (pts.n0[k] >= 0 && pts.n1[k] < 0 && !used[k]) walk(k)      // open lines first, from an end
+        for (k in 0 until n) if (pts.n0[k] >= 0 && !used[k]) walk(k)                        // what remains are closed loops
         return chains
     }
 }
