@@ -311,6 +311,50 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { refreshAlerts(force = true); showFrameIfNewest() }
     }
 
+    // ---- warnings and watches of the past: a frame that is not the newest shows what was in force at its own time (from the archive) ----
+    private val archivedAlerts = LinkedHashMap<String, List<AlertShape>>()
+
+    private fun isNewest(file: MrmsFile): Boolean = _state.value.files.lastOrNull()?.key == file.key
+
+    private fun archiveKey(file: MrmsFile, kinds: Set<AlertKind>) = "${file.validTime / 600}|${kinds.sorted().joinToString(",")}"        // frames ten minutes apart share one reading
+
+    /** The warnings and watches to draw on [file]'s picture without waiting for anything: the live ones on the newest frame, an archived reading already made otherwise. */
+    private fun alertShapesNow(file: MrmsFile): List<AlertShape> {
+        val st = _state.value
+        val kinds = st.alertKinds
+        if (kinds.isEmpty()) return emptyList()
+        if (isNewest(file)) return st.alertShapes.filter { it.kind in kinds }
+        val past = kinds - AlertKind.Discussion
+        return archivedAlerts[archiveKey(file, past)]?.filter { it.kind in past && (it.issued ?: 0L) <= file.validTime && (it.expires ?: Long.MAX_VALUE) > file.validTime } ?: emptyList()
+    }
+
+    /** [alertShapesNow], reading the archive first when this frame has no reading yet (a loop that is playing keeps to what has been read, so it does not stall). */
+    private suspend fun alertShapesFor(file: MrmsFile): List<AlertShape> {
+        val st = _state.value
+        if (st.alertKinds.isEmpty() || isNewest(file)) return alertShapesNow(file)
+        val past = st.alertKinds - AlertKind.Discussion
+        if (past.isEmpty()) return emptyList()
+        if (archiveKey(file, past) !in archivedAlerts && !st.playing) readArchivedAlerts(file, past)
+        return alertShapesNow(file)
+    }
+
+    private suspend fun readArchivedAlerts(file: MrmsFile, kinds: Set<AlertKind>) {
+        val key = archiveKey(file, kinds)
+        val shapes = try { kotlinx.coroutines.withTimeoutOrNull(12_000L) { alertsRepo.archived(file.validTime, kinds) } }
+            catch (e: CancellationException) { throw e } catch (_: Exception) { null } ?: return          // not read: nothing is drawn, and the next time asks again
+        archivedAlerts[key] = shapes
+        while (archivedAlerts.size > 60) archivedAlerts.remove(archivedAlerts.keys.first())
+    }
+
+    /** Before a loop plays: the archived warnings of its frames, read a few at a time, so every frame has them when it is shown. */
+    private suspend fun prefetchArchivedAlerts(files: List<MrmsFile>) {
+        val kinds = _state.value.alertKinds - AlertKind.Discussion
+        if (kinds.isEmpty()) return
+        for (file in files.filter { !isNewest(it) }.distinctBy { archiveKey(it, kinds) }) {
+            if (archiveKey(file, kinds) !in archivedAlerts) readArchivedAlerts(file, kinds)
+        }
+    }
+
     private fun showFrameIfNewest() { val st = _state.value; if (st.files.isNotEmpty() && st.index == st.files.lastIndex && !st.playing) showFrame() }
 
     /** Reads the enabled layers: watches / warnings every call, discussions at most every five minutes (unless [force]). A failure is a note, never an error screen. */
@@ -351,19 +395,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissAlertText() = update { it.copy(alertDetail = null, alertImage = null) }
 
     /** The outlines to draw on the picture [base]: only on the newest frame (they are of now, not of an older scan). */
-    private fun alertDraws(base: View): List<AlertDraw> {
+    private fun alertDraws(base: View, shapes: List<AlertShape>): List<AlertDraw> {
         val s = base.scale.toFloat()
-        return alertDrawsWith { lat, lon ->
+        return alertDrawsWith(shapes) { lat, lon ->
             val g = core.latLonToGrid(base.grid, lat, lon)
             doubleArrayOf((g[0] + 0.5) * s, (base.rows - 0.5 - g[1]) * s)
         }
     }
 
     /** The same outlines for any picture ([project] puts a place on it; an outline that goes over a globe's horizon is drawn as lines). */
-    private fun alertDrawsWith(project: PlaceProjection): List<AlertDraw> {
-        val st = _state.value
-        if (st.alertKinds.isEmpty() || st.files.isEmpty() || st.index != st.files.lastIndex) return emptyList()
-        val drawn = st.alertShapes.filter { it.kind in st.alertKinds }.map { shape ->
+    private fun alertDrawsWith(shapes: List<AlertShape>, project: PlaceProjection): List<AlertDraw> {
+        val drawn = shapes.map { shape ->
             val parts = shape.rings.map { projectRing(it, project) }
             val rings = parts.flatMap { it.first }
             val watch = shape.kind == AlertKind.Watch
@@ -615,7 +657,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val synthetic = synthetic(product, grid)
         val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
         outlook.want(file.validTime)
-        val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) } }
+        val alertShapes = alertShapesFor(file)
+        val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) } }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
@@ -657,7 +700,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         var text = readout(core, product, values, emptyList(), column, row)
         outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
         val st = _state.value
-        val hits = if (st.alertKinds.isNotEmpty() && st.index == st.files.lastIndex) shapesAt(st.alertShapes.filter { it.kind in st.alertKinds }, lat, lon) else emptyList()
+        val hits = st.file?.let { f -> shapesAt(alertShapesNow(f), lat, lon) } ?: emptyList()
         update { it.copy(crosshair = fx to fy, readout = text, tapLatLon = lat to lon, alertHits = hits) }
         // the layers' values are fetched for this tap (from the cache, or decoded again from the downloaded file): the read-out follows a moment later
         val layers = shownOverlays
@@ -735,7 +778,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
         val synthetic = synthetic(product, g2)
         val bitmap = withMemory { withContext(Dispatchers.Default) {
-            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product))
+            val alertShapes = alertShapesFor(file)
+            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box, alertShapes) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product))
         } }
         val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
         return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
@@ -811,8 +855,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val file = st.file
         val project: PlaceProjection = { lat, lon -> globeForward(st.cam, globeW, globeH, lat, lon) }
+        val alertShapes = if (file == null) emptyList() else alertShapesFor(file)
         val bitmap = withContext(Dispatchers.Default) {
-            val alerts = if (file == null) emptyList() else alertDrawsWith(project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
+            val alerts = if (file == null) emptyList() else alertDrawsWith(alertShapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
             globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
         }
         update { it.copy(map = bitmap, busy = false) }
@@ -951,6 +996,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                     val gate = Semaphore(3)
                     var done = 0
                     coroutineScope {
+                        launch { prefetchArchivedAlerts(window.map { st.files[it] }) }          // the warnings and watches that were in force at each frame
                         for (i in window) launch {
                             gate.withPermit {
                                 try { repo.prefetch(st.files[i]); ready[i] = true; for (layer in st.overlays) overlayFileFor(layer, st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } } } catch (e: CancellationException) { throw e } catch (_: Exception) { }

@@ -80,3 +80,48 @@ class OutlookArchiveTest {
         assertTrue(asked.first().contains("cycle=16") && asked.size == 2)
     }
 }
+
+class AlertArchiveTest {
+    private val valid = epochOf(2025, 5, 20, 22, 0, 0)
+
+    private fun warning(phSig: String, issue: String, expire: String, product: String = "202505202140-KOUN-WFUS54-TORFWD") =
+        """{"type":"Feature","properties":{"ph_sig":"$phSig","utc_issue":"$issue","utc_expire":"$expire","locations":"Cleveland [OK]","product_id":"$product"},
+            "geometry":{"type":"MultiPolygon","coordinates":[[[[-98,35],[-97,35],[-97,36],[-98,36],[-98,35]]]]}}"""
+
+    @Test fun onlyWarningsInForceAtTheTimeAreKept() {
+        val text = """{"type":"FeatureCollection","features":[
+            ${warning("TO.W", "2025-05-20T21:40:00Z", "2025-05-20T22:30:00Z")},
+            ${warning("SV.W", "2025-05-20T20:00:00Z", "2025-05-20T21:45:00Z")},
+            ${warning("TO.W", "2025-05-20T22:05:00Z", "2025-05-20T22:45:00Z")},
+            ${warning("FA.Y", "2025-05-20T21:00:00Z", "2025-05-20T23:00:00Z")}]}"""
+        val shapes = AlertArchive.parseWarnings(text, valid)
+        assertEquals(listOf("Tornado Warning"), shapes.map { it.title })             // the second expired, the third was issued later, the advisory is not drawn
+        val w = shapes.single()
+        assertEquals(AlertKind.Warning, w.kind); assertEquals(0xFF0000, w.color)
+        assertEquals("https://mesonet.agron.iastate.edu/api/1/nwstext/202505202140-KOUN-WFUS54-TORFWD", w.detailUrl)
+        assertEquals(1, w.rings.size)
+    }
+
+    @Test fun watchesAreTheSpcOutlinesInForce() {
+        val text = """{"type":"FeatureCollection","features":[
+            {"type":"Feature","properties":{"sel":"SEL2","utc_issued":"2025-05-20T17:10:00Z","utc_expired":"2025-05-20T22:30:00Z","type":"TOR","num":302},"geometry":{"type":"MultiPolygon","coordinates":[[[[-98,35],[-97,35],[-97,36],[-98,35]]]]}},
+            {"type":"Feature","properties":{"sel":"SEL3","utc_issued":"2025-05-20T18:10:00Z","utc_expired":"2025-05-20T21:00:00Z","type":"SVR","num":303},"geometry":{"type":"MultiPolygon","coordinates":[[[[-98,35],[-97,35],[-97,36],[-98,35]]]]}}]}"""
+        val shapes = AlertArchive.parseWatches(text, valid)
+        assertEquals(listOf("Tornado Watch 302"), shapes.map { it.title })
+        assertEquals(AlertKind.Watch, shapes.single().kind)
+    }
+
+    @Test fun urlsAskForTheHoursBeforeTheTime() {
+        val url = AlertArchive.warningsUrl(valid)
+        assertTrue("begints=2025-05-20T14:00:00Z" in url && "endts=2025-05-20T22:01:00Z" in url && "&ph=TO" in url && "&ph=MA" in url)
+        assertEquals("https://mesonet.agron.iastate.edu/api/1/spc_watch_outline.geojson?valid=2025-05-20T22:00:00Z", AlertArchive.watchesUrl(valid))
+    }
+
+    @Test fun archivedPartsFailTogetherOrNotAtAll() = kotlinx.coroutines.test.runTest {
+        val onlyWatches = object : Http {
+            override suspend fun get(url: String) = if ("vtec" in url) HttpResult(500, ByteArray(0)) else HttpResult(200, """{"features":[]}""".encodeToByteArray())
+        }
+        assertEquals(0, AlertsRepository(onlyWatches).archived(valid, setOf(AlertKind.Warning, AlertKind.Watch)).size)      // the watches answered (with none): not an error
+        assertTrue(runCatching { AlertsRepository(onlyWatches).archived(valid, setOf(AlertKind.Warning)) }.isFailure)
+    }
+}
