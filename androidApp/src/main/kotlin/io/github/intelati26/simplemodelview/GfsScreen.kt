@@ -66,6 +66,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var settings by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    var pickSince by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -106,6 +107,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         DropdownMenu(expanded = productMenu, onDismissRequest = { productMenu = false }) {
                             DropdownMenuItem(text = { Text("Heights and winds (250 to 850 mb)") }, onClick = { productMenu = false; vm.pickHeightsAndWinds() })
                             for (p in GfsCatalog.surface) DropdownMenuItem(text = { Text(p.title) }, onClick = { productMenu = false; vm.pickSurface(p.id) })
+                            DropdownMenuItem(text = { Text("Precipitation since a date and time…") }, onClick = { productMenu = false; pickSince = true })
                         }
                     }
                     PageMenu("gfs", onOpen)
@@ -222,6 +224,33 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 TimeStepRow(s.index, s.frames.size, s.playing, vm::togglePlay, vm::pickIndex)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+        }
+    }
+
+    if (pickSince) {
+        val now = System.currentTimeMillis()
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = (now - 86_400_000L) / 86_400_000L * 86_400_000L,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis in (simplemodelview.GfsHistory.FIRST_RUN * 1000L - 86_400_000L)..now
+            },
+        )
+        var hour by remember { mutableStateOf(0) }
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickSince = false },
+            confirmButton = {
+                TextButton(
+                    enabled = state.selectedDateMillis != null,
+                    onClick = { val d = state.selectedDateMillis ?: return@TextButton; pickSince = false; vm.pickPrecipSince(d / 1000L + hour * 3600L) },
+                ) { Text("Show") }
+            },
+            dismissButton = { TextButton(onClick = { pickSince = false }) { Text("Cancel") } },
+        ) {
+            androidx.compose.material3.DatePicker(state, modifier = Modifier.weight(1f, fill = false), title = { Text("Precipitation from … to the time shown", Modifier.padding(start = 24.dp, top = 16.dp)) })
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Run time (UTC)", Modifier.padding(end = 8.dp))
+                for (h in listOf(0, 6, 12, 18)) androidx.compose.material3.FilterChip(selected = hour == h, onClick = { hour = h }, label = { Text("%02dZ".format(h)) }, modifier = Modifier.padding(end = 6.dp))
+            }
         }
     }
 

@@ -16,6 +16,8 @@ import simplemodelview.BackupPlace
 import simplemodelview.GfsCatalog
 import simplemodelview.GfsGlobal
 import simplemodelview.GlobeCamera
+import simplemodelview.GfsGlobal
+import simplemodelview.GfsHistory
 import simplemodelview.PolarCamera
 import simplemodelview.Grid
 import simplemodelview.NbmCycle
@@ -79,6 +81,7 @@ data class GfsState(
     val history: Boolean = false,             // the frames are the analyses (hour 0) of the runs of the past days, not one run's forecast hours
     val historyDays: Int = 5,
     val historyRange: Pair<Long, Long>? = null,   // a hand-picked span (epoch seconds); null = the past [historyDays] days
+    val since: Long? = null,                  // the start (epoch seconds) of the precipitation-since product
     val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
@@ -115,7 +118,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(
         GfsState(
-            product = prefs.getString("gfs_product", "hw") ?: "hw",
+            product = (prefs.getString("gfs_product", "hw") ?: "hw").let { if (it == GfsHistory.SINCE_ID) "hw" else it },      // the since product needs a start time, which is not kept
             level = prefs.getInt("gfs_level", 500).takeIf { it in GfsCatalog.levels || it == WindProducts.STACK } ?: 500,
             color = prefs.getString("gfs_color", "speed")?.takeIf { k -> WindProducts.colors.any { it.key == k } } ?: "speed",
             sector = GFS_SECTORS.firstOrNull { it.name == prefs.getString("gfs_sector", null) } ?: GFS_SECTORS[0],
@@ -227,6 +230,15 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- what is shown ----
     fun pickHeightsAndWinds() { prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw", crosshair = null, readout = null) }; showFrame() }
+    private fun sinceTitle(st: GfsState, file: NbmFile) = "Precipitation from ${formatUtc((st.since ?: 0L) / 21600L * 21600L)} to ${formatUtc(file.valid)}"
+
+    /** Precipitation from [start] (epoch seconds, back to 2021-03-23) to the time of the frame shown: it follows the slider and plays as a loop. */
+    fun pickPrecipSince(start: Long) {
+        prefs.edit().putString("gfs_product", GfsHistory.SINCE_ID).apply()
+        update { it.copy(product = GfsHistory.SINCE_ID, since = start, crosshair = null, readout = null) }
+        showFrame()
+    }
+
     fun pickSurface(id: String) { prefs.edit().putString("gfs_product", id).apply(); update { it.copy(product = id, crosshair = null, readout = null) }; showFrame() }
     fun pickLevel(level: Int) { prefs.edit().putInt("gfs_level", level).apply(); update { it.copy(level = level, product = "hw") }; showFrame() }
     fun pickColor(key: String) { prefs.edit().putString("gfs_color", key).apply(); update { it.copy(color = key, product = "hw") }; showFrame() }
@@ -284,13 +296,21 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
     private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
-        val surface = GfsCatalog.surfaceById(st.product)
+        val since = st.product == GfsHistory.SINCE_ID
+        val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
-        val key = "${file.url}|${st.product}|${st.level}|${st.color}"
+        val key = "${file.url}|${st.product}|${st.since}|${st.level}|${st.color}"
         val data = globalComputed[key] ?: withContext(Dispatchers.Default) {
-            Timings.timed("data") { if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status) }
+            Timings.timed("data") {
+                if (since) {
+                    var grid: Grid? = null
+                    val values = repo.precipitationSince(st.since ?: throw IllegalStateException("no start time"), file, "gfs", "globe", { f, p -> repo.loadFieldGlobal(f, p, status).also { grid = it.grid }.values }, { d, n -> status("Precipitation: $d of $n runs…") })
+                    GfsGlobal(grid ?: Grid.REFS, values)
+                } else if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status)
+            }
         }.also { globalComputed[key] = it }
-        val (product, title) = productFor(st, surface, data.grid)
+        val (product, title0) = productFor(st, surface, data.grid)
+        val title = if (since) sinceTitle(st, file) else title0
         globeShown = product to data.values
         update { it.copy(style = product.style, title = title, loadStatus = null) }
         if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
@@ -395,14 +415,19 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(busy = true, error = null) }
         if (st.globe) { showGlobeFrame(st, file); return }
         val target = gridFor(st.sector)
-        val surface = GfsCatalog.surfaceById(st.product)
+        val since = st.product == GfsHistory.SINCE_ID
+        val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
-        val key = "${file.url}|${st.product}|${st.level}|${st.color}|${st.sector.name}"
+        val key = "${file.url}|${st.product}|${st.since}|${st.level}|${st.color}|${st.sector.name}"
         val region = regionFor(st)
         val values = computed[key] ?: withContext(Dispatchers.Default) {
-            Timings.timed("data") { if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop) }
+            Timings.timed("data") {
+                if (since) repo.precipitationSince(st.since ?: throw IllegalStateException("no start time"), file, "gfs", "sector|${st.sector.name}|${st.settings.gfsCrop}", { f, p -> repo.loadField(f, p, target, status, region, st.settings.gfsCrop) }, { d, n -> status("Precipitation: $d of $n runs…") })
+                else if (surface != null) repo.loadField(file, surface, target, status, region, st.settings.gfsCrop) else repo.loadWind(file, st.level, st.color, target, status, region, st.settings.gfsCrop)
+            }
         }.also { computed[key] = it }
-        val (product, title) = productFor(st, surface, target)
+        val (product, title0) = productFor(st, surface, target)
+        val title = if (since) sinceTitle(st, file) else title0
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
         val bitmap = withContext(Dispatchers.Default) {
@@ -516,7 +541,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 val count = window.count()
                 var done = 0
                 for (i in window) {
-                    if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
+                    if (st.product == GfsHistory.SINCE_ID) Unit else if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }

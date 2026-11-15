@@ -147,6 +147,7 @@ object GfsWinds {
 
 /** What the bucket's history allows. */
 object GfsHistory {
+    const val SINCE_ID = "apcpsince"   // the page's precipitation-since product (not a catalog entry: it is made of many fields)
     /** The first run with 0.25 degree files in the bucket's present layout (2021-03-23 00Z). */
     val FIRST_RUN: Long = epochOf(2021, 3, 23, 0, 0, 0)
     const val MAX_FRAMES = 200
@@ -157,6 +158,8 @@ object GfsHistory {
         return when { raw <= 6 -> 6; raw <= 12 -> 12; else -> (raw + 23) / 24 * 24 }
     }
 }
+
+const val MAX_PRECIPITATION_STEPS = 240   // 60 days of 6-hour runs
 
 /** Loads GFS runs, frames and fields over [http] (messages by byte range, kept in [store]) and puts them on a sector's Lambert grid with [core]. */
 class GfsRepository(private val http: Http, private val core: Core, private val store: GribStore = MemoryGribStore(24)) {
@@ -215,6 +218,68 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
                 }
             }.awaitAll().filterNotNull()
         }
+    }
+
+    /** The file of a run (its start in epoch seconds) at forecast hour [lead], or null when the bucket has none. */
+    suspend fun fileAt(runEpoch: Long, lead: Int, fieldId: String): NbmFile? {
+        val c = civilFromEpoch(runEpoch)
+        val cycle = gfsCycle(c[0], c[1], c[2], c[3])
+        val prefix = cycle.prefix + "gfs.t${cycle.hour.toString().padStart(2, '0')}z.pgrb2.0p25.f${lead.toString().padStart(3, '0')}"
+        val result = http.get("${GfsBucket.URL}/?list-type=2&max-keys=10&prefix=$prefix")
+        if (result.status == 404) return null
+        if (result.status != 200) throw RefsException("could not list the GFS files (HTTP ${result.status})")
+        return parseGfsListing(result.body.decodeToString(), cycle, fieldId).firstOrNull { it.leadHours == lead }
+    }
+
+    private var sinceCache: Triple<String, Long, FloatArray>? = null      // (key, up to, the 6-hour amounts added up to there)
+
+    /**
+     * The precipitation (inches) from [since] (epoch seconds, taken down to the run grid of 6 hours) to the time of [file]: the first six hours of every run
+     * from [since] up to [file]'s run, added up (each run's start is the best guess of the weather to come, so they chain without a gap), and from that run's start
+     * to [file]'s time the run's own total (or the difference of two totals when [since] is after the run began). [load] gives a field of a file on whatever
+     * grid the page draws; [cacheKey] names that grid, so the next frame of a loop continues from the sum already made. At most [MAX_PRECIPITATION_STEPS] runs.
+     */
+    suspend fun precipitationSince(since: Long, file: NbmFile, fieldId: String, cacheKey: String, load: suspend (NbmFile, GfsProduct) -> FloatArray, progress: (Int, Int) -> Unit = { _, _ -> }): FloatArray {
+        val bucket = GfsCatalog.surfaceById("apcp6_gfs") ?: throw RefsException("no precipitation product")
+        val total = GfsCatalog.surfaceById("apcptot_gfs") ?: throw RefsException("no precipitation product")
+        val sixHours = 6 * 3600L
+        val start = maxOf(since, GfsHistory.FIRST_RUN) / sixHours * sixHours
+        val run = file.run
+        val end = file.valid
+        if (end <= start) throw RefsException("choose a start before the time shown")
+        var acc: FloatArray? = null
+        fun add(values: FloatArray, sign: Float = 1f) {
+            val a = acc ?: FloatArray(values.size).also { acc = it }
+            if (a.size != values.size) throw RefsException("the fields do not match")
+            for (i in a.indices) { val v = values[i]; if (!v.isNaN()) a[i] += sign * v }
+        }
+        if (start >= run) {
+            if (file.leadHours > 0) add(load(file, total))
+            if (start > run) {
+                val first = fileAt(run, (start - run).toInt() / 3600, fieldId) ?: throw RefsException("the run has no file for the start time")
+                add(load(first, total), -1f)
+            }
+            return acc?.let { a -> FloatArray(a.size) { maxOf(0f, a[it]) } } ?: throw RefsException("nothing falls between those times")
+        }
+        val steps = ((run - start) / sixHours).toInt()
+        if (steps > MAX_PRECIPITATION_STEPS) throw RefsException("that is more than ${MAX_PRECIPITATION_STEPS / 4} days: choose a nearer start")
+        var from = start
+        sinceCache?.let { (key, upTo, sum) -> if (key == "$cacheKey|$start" && upTo in start..run && (upTo - start) % sixHours == 0L) { acc = sum.copyOf(); from = upTo } }
+        val times = ArrayList<Long>()
+        var t = from
+        while (t < run) { times += t; t += sixHours }
+        var done = ((from - start) / sixHours).toInt()
+        for (chunk in times.chunked(3)) {
+            val fields = kotlinx.coroutines.coroutineScope {
+                chunk.map { time -> async { (fileAt(time, 6, fieldId))?.let { load(it, bucket) } } }.awaitAll()
+            }
+            for (f in fields) if (f != null) add(f)
+            done += chunk.size
+            progress(done, steps)
+        }
+        acc?.let { sinceCache = Triple("$cacheKey|$start", run, it.copyOf()) }
+        if (end > run && file.leadHours > 0) add(load(file, total))
+        return acc?.let { a -> FloatArray(a.size) { maxOf(0f, a[it]) } } ?: throw RefsException("no precipitation files for those times")
     }
 
     private val indexes = LinkedHashMap<String, List<GribIndexEntry>>(8, 0.75f, true)
