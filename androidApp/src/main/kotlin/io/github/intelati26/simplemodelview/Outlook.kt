@@ -15,6 +15,7 @@ import simplemodelview.Core
 import simplemodelview.OutlookChoice
 import simplemodelview.OutlookData
 import simplemodelview.OutlookType
+import simplemodelview.outlookArchiveFor
 import simplemodelview.outlookChoiceFor
 import simplemodelview.OutlookRepository
 import simplemodelview.View
