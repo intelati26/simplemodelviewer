@@ -519,12 +519,12 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- settings export / import ----
     private fun backup(): SettingsBackup {
         val st = _state.value
-        return SettingsBackup(
+        return SettingsTransfer.withPrefs(SettingsBackup(
             wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
             contactEmail = st.settings.contactEmail, favorites = st.favorites.sorted(),
             places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
             product = st.product?.id ?: prefs.getString("product", null), sector = st.sector.name,
-        )
+        ), prefs)
     }
 
     /** Writes the settings as JSON to a file the user chose (the system "save as" picker). */
@@ -537,21 +537,24 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Reads a settings file the user chose, validates it and applies it. Nothing changes if it is not a simplemodelview backup. */
-    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+    /** True when display or source choices were imported: the app restarts to take them up. */
+    suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
         val text = withContext(Dispatchers.IO) {
             try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null }
         }
         val b = text?.let { SettingsBackup.decode(it) }
-        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return }
+        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
         prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
+        val extras = SettingsTransfer.apply(prefs, b)
         Sector.all.firstOrNull { it.name == b.sector }?.let { setGlobe(false); pickSector(it) }
         val product = b.product?.let { id -> _state.value.products.firstOrNull { it.id == id } }
         if (product != null) pickProduct(product) else b.product?.let { prefs.edit().putString("product", it).apply() }
-        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places.") }
+        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places" + (if (extras > 0) ", $extras display and source choices" else "") + ".") }
+        return extras > 0
     }
 
     // ---- places ----
