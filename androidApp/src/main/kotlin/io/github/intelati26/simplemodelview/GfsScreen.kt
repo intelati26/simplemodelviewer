@@ -151,7 +151,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     }
                     var sectorMenu by remember { mutableStateOf(false) }
                     Box {
-                        TextButton(onClick = { sectorMenu = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text((if (s.polar != null) (if (s.polar.north) "N polar" else "S polar") else if (s.globe) "Globe" else s.sector.name) + " ▾", maxLines = 1) }
+                        TextButton(onClick = { sectorMenu = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text((if (s.polar != null) (if (s.polar?.north == true) "N polar" else "S polar") else if (s.globe) "Globe" else s.sector.name) + " ▾", maxLines = 1) }
                         DropdownMenu(expanded = sectorMenu, onDismissRequest = { sectorMenu = false }) {
                             DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
                             DropdownMenuItem(text = { Text("Globe over the north pole") }, onClick = { sectorMenu = false; vm.setGlobePole(true) })
