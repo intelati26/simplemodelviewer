@@ -74,6 +74,7 @@ data class GfsState(
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
     val history: Boolean = false,             // the frames are the analyses (hour 0) of the runs of the past days, not one run's forecast hours
     val historyDays: Int = 5,
+    val historyRange: Pair<Long, Long>? = null,   // a hand-picked span (epoch seconds); null = the past [historyDays] days
     val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
@@ -140,7 +141,8 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     val now = System.currentTimeMillis() / 1000
                     if (_state.value.history) {
-                        val frames = repo.listHistory(now, _state.value.historyDays, "gfs")
+                        val range = _state.value.historyRange ?: ((now - _state.value.historyDays * 86400L) to now)
+                        val frames = repo.listHistory(range.first, range.second, "gfs")
                         if (frames.isEmpty()) throw IllegalStateException("No GFS analyses found for those days.")
                         lastLoad = System.currentTimeMillis()
                         val keep = _state.value.file?.valid
@@ -192,7 +194,14 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun setHistory(days: Int) {
         if (days > 0) prefs.edit().putInt("gfs_history_days", days).apply()
         stopPlaying()
-        update { it.copy(history = days > 0, historyDays = if (days > 0) days else it.historyDays, frames = if (days > 0) emptyList() else it.frames, index = 0) }
+        update { it.copy(history = days > 0, historyDays = if (days > 0) days else it.historyDays, historyRange = null, frames = if (days > 0) emptyList() else it.frames, index = 0) }
+        load()
+    }
+
+    /** The analyses from [from] to [to] (epoch seconds; the bucket reaches back to 2021-03-23): every run for a few weeks, thinned beyond that. */
+    fun setHistoryRange(from: Long, to: Long) {
+        stopPlaying()
+        update { it.copy(history = true, historyRange = from to to, frames = emptyList(), index = 0) }
         load()
     }
 

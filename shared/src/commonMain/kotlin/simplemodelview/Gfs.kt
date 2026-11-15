@@ -2,6 +2,8 @@ package simplemodelview
 
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.sync.withPermit
 
 /**
@@ -143,6 +145,19 @@ object GfsWinds {
     }
 }
 
+/** What the bucket's history allows. */
+object GfsHistory {
+    /** The first run with 0.25 degree files in the bucket's present layout (2021-03-23 00Z). */
+    val FIRST_RUN: Long = epochOf(2021, 3, 23, 0, 0, 0)
+    const val MAX_FRAMES = 200
+
+    /** Hours between the runs that are used for a span of [spanSeconds]: every run (6 h) while it fits in [maxFrames], then 12 h, then whole days. */
+    fun stepHours(spanSeconds: Long, maxFrames: Int = MAX_FRAMES): Int {
+        val raw = ((spanSeconds / 3600L + maxFrames - 1) / maxFrames).toInt()
+        return when { raw <= 6 -> 6; raw <= 12 -> 12; else -> (raw + 23) / 24 * 24 }
+    }
+}
+
 /** Loads GFS runs, frames and fields over [http] (messages by byte range, kept in [store]) and puts them on a sector's Lambert grid with [core]. */
 class GfsRepository(private val http: Http, private val core: Core, private val store: GribStore = MemoryGribStore(24)) {
     /** The runs within [hours] of now, newest first. */
@@ -175,18 +190,31 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
     }
 
     /**
-     * The analysis (forecast hour 0) of every run of the past [days] days, oldest first: what the atmosphere did, a frame every six hours, to play as a loop.
-     * One small listing per run (the f000 file only); a run with no f000 yet is left out.
+     * The analysis (forecast hour 0) of the runs from [from] to [to] (epoch seconds), oldest first: what the atmosphere did, to play as a loop. The bucket holds
+     * every run back to [GfsHistory.FIRST_RUN]. At most about [maxFrames] frames: a long span takes every second, third... run (see [GfsHistory.stepHours]).
+     * One small listing per run (the f000 file only), a few at a time; a run that is not there (yet) is left out.
      */
-    suspend fun listHistory(nowEpochSeconds: Long, days: Int, fieldId: String): List<NbmFile> {
-        val out = ArrayList<NbmFile>()
-        for (cycle in listCycles(nowEpochSeconds, days * 24).sortedBy { it.epoch }) {
-            val prefix = cycle.prefix + "gfs.t${cycle.hour.toString().padStart(2, '0')}z.pgrb2.0p25.f000"
-            val result = http.get("${GfsBucket.URL}/?list-type=2&max-keys=10&prefix=$prefix")
-            if (result.status != 200) throw RefsException("could not list the GFS files (HTTP ${result.status})")
-            parseGfsListing(result.body.decodeToString(), cycle, fieldId).firstOrNull { it.leadHours == 0 }?.let { out += it }
+    suspend fun listHistory(from: Long, to: Long, fieldId: String, maxFrames: Int = GfsHistory.MAX_FRAMES): List<NbmFile> {
+        val step = GfsHistory.stepHours(to - from, maxFrames) * 3600L
+        val times = ArrayList<Long>()
+        var t = maxOf(from, GfsHistory.FIRST_RUN).let { (it + 6 * 3600L - 1) / (6 * 3600L) * (6 * 3600L) }
+        while (t <= to) { times += t; t += step }
+        val gate = kotlinx.coroutines.sync.Semaphore(8)
+        return kotlinx.coroutines.coroutineScope {
+            times.map { time ->
+                async {
+                    gate.withPermit {
+                        val c = civilFromEpoch(time)
+                        val cycle = gfsCycle(c[0], c[1], c[2], c[3])
+                        val prefix = cycle.prefix + "gfs.t${cycle.hour.toString().padStart(2, '0')}z.pgrb2.0p25.f000"
+                        val result = http.get("${GfsBucket.URL}/?list-type=2&max-keys=10&prefix=$prefix")
+                        if (result.status == 404) null
+                        else if (result.status != 200) throw RefsException("could not list the GFS files (HTTP ${result.status})")
+                        else parseGfsListing(result.body.decodeToString(), cycle, fieldId).firstOrNull { it.leadHours == 0 }
+                    }
+                }
+            }.awaitAll().filterNotNull()
         }
-        return out
     }
 
     private val indexes = LinkedHashMap<String, List<GribIndexEntry>>(8, 0.75f, true)
