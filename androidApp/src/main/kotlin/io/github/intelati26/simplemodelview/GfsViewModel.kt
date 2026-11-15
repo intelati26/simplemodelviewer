@@ -332,7 +332,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val (c, r) = core.latLonToGrid(grid, ll[0], ll[1])
         val column = Math.round(c).toInt().coerceIn(0, grid.columns - 1)
         val row = Math.round(r).toInt().coerceIn(0, grid.rows - 1)
-        update { it.copy(readout = readout(core, product, values, emptyList(), column, row, trueFrameWinds = true) + (outlook.readoutAt(ll[0], ll[1], _state.value.file?.valid)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = ll[0] to ll[1]) }
+        update { it.copy(readout = readout(core, product, values, emptyList(), column, row, trueFrameWinds = true) + (outlook.readoutAt(ll[0], ll[1], _state.value.file?.valid, _state.value.file?.run)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = ll[0] to ll[1]) }
     }
 
     fun setGlobe(on: Boolean) {
@@ -413,10 +413,11 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
         val valid = st.file?.valid
-        outlook.want(valid)
+        val run = st.file?.run
+        outlook.want(valid, run)
         val bitmap = withContext(Dispatchers.Default) {
             // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, alerts = outlookDrawsOn(outlook, valid, globeProjection(st, globeW, globeH)))
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -442,9 +443,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val title = if (since) sinceTitle(st, file) else title0
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
-        outlook.want(file.valid)
+        outlook.want(file.valid, file.run)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid), contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
+            renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
         }
         shown = Triple(product, values, view)
         update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null, detail = null) }
@@ -466,8 +467,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val settings = _state.value.settings
                 val valid = _state.value.file?.valid
+                val run = _state.value.file?.run
                 val bitmap = withContext(Dispatchers.Default) {
-                    renderer.render(product, product.style, values, emptyList(), window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                    renderer.render(product, product.style, values, emptyList(), window.view, dark, alerts = outlookDraws(core, outlook, window.view, valid, run), contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
                 }
                 if (shown?.second === values) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 25.0)) }
             } catch (e: CancellationException) { throw e } catch (_: Exception) { }
@@ -480,7 +482,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val column = v.col0 + floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.row0 + v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
-        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon, _state.value.file?.valid)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
+        update { it.copy(crosshair = fx to fy, readout = readout(core, product, values, emptyList(), column, row) + (outlook.readoutAt(lat, lon, _state.value.file?.valid, _state.value.file?.run)?.let { t -> "   \u00B7 $t" } ?: ""), tapLatLon = lat to lon) }
     }
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
@@ -549,7 +551,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val window = loopWindow(st)
         if (window.count() < 2) return
-        outlook.wantAll(window.map { st.frames[it].valid })      // the outlook of every day the loop reaches, ready when the loop gets there
+        outlook.wantAllAs(window.map { st.frames[it].valid to st.frames[it].run })      // the outlook of every day the loop reaches, ready when the loop gets there
         frameJob?.cancel()
         update { it.copy(playing = true) }
         playJob = viewModelScope.launch {
@@ -596,7 +598,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         try {
             for ((k, i) in window.withIndex()) {
                 update { it.copy(index = i) }
-                outlook.ensure(st.frames[i].valid)    // the outlook of that day, read before the frame is drawn
+                outlook.ensure(st.frames[i].valid, st.frames[i].run)    // the outlook of that day, read before the frame is drawn
                 showCurrent()                         // draws the frame (and downloads what it needs)
                 val now = _state.value
                 val file = now.file ?: continue
@@ -631,7 +633,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             globeRenderer.render(
                 product.grid, values, product.style, emptyList(), st.cam.copy(radius = st.cam.radius * f), side, side, 1, dark, product,
                 st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) },
-                alerts = outlookDrawsOn(outlook, st.file?.valid, globeProjection(st.copy(cam = st.cam.copy(radius = st.cam.radius * f), polar = st.polar?.let { it.copy(radius = it.radius * f) }), side, side)),
+                alerts = outlookDrawsOn(outlook, st.file?.valid, st.file?.run, globeProjection(st.copy(cam = st.cam.copy(radius = st.cam.radius * f), polar = st.polar?.let { it.copy(radius = it.radius * f) }), side, side)),
             )
         }
     }

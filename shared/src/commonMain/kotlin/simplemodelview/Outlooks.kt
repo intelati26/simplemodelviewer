@@ -1,5 +1,7 @@
 package simplemodelview
 
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -15,7 +17,7 @@ enum class OutlookType(val label: String) {
 }
 
 /** One outlook of the Storm Prediction Center that can be drawn over a map: a [day] (1-8) and what it shows. */
-data class OutlookChoice(val day: Int, val type: OutlookType) {
+data class OutlookChoice(val day: Int, val type: OutlookType, val archive: List<ArchivedOutlook> = emptyList()) {
     /** The name of the file in SPC's public GIS data (`https://www.spc.noaa.gov/products/outlook/<name>.lyr.geojson`). */
     val fileName: String
         get() = when {
@@ -26,13 +28,15 @@ data class OutlookChoice(val day: Int, val type: OutlookType) {
             }
         }
 
-    val url: String get() = "$BASE/$fileName.lyr.geojson"
+    /** The file to read: SPC's current file, or for an [archive] choice the first archived outlook (see [OutlookArchive]). */
+    val url: String get() = archive.firstOrNull()?.let { OutlookArchive.url(it) } ?: "$BASE/$fileName.lyr.geojson"
 
-    /** The key it is saved under. */
-    val id: String get() = "$day:${type.name}"
+    /** The key it is saved under (an archived outlook by its date and cycle). */
+    val id: String get() = "$day:${type.name}" + (archive.firstOrNull()?.let { "@${it.validDate}/${it.cycle}" } ?: "")
 
-    /** "Day 1 tornado" */
-    val label: String get() = if (day >= 4) "Day $day severe chance" else "Day $day ${type.label.replaceFirstChar { it.lowercase() }}"
+    /** "Day 1 tornado" (an archived one says when it was issued) */
+    val label: String get() = (if (day >= 4) "Day $day severe chance" else "Day $day ${type.label.replaceFirstChar { it.lowercase() }}") +
+        (archive.firstOrNull()?.let { " (issued ${formatUtc(it.issued)})" } ?: "")
 
     companion object {
         const val BASE = "https://www.spc.noaa.gov/products/outlook"
@@ -200,6 +204,7 @@ fun outlookReadout(choice: OutlookChoice, shape: OutlookShape?): String = "SPC $
 class OutlookRepository(private val http: Http) {
     /** The outlook of [choice]. A 404 (not issued yet) throws; a file with no areas gives an empty list. */
     suspend fun load(choice: OutlookChoice): OutlookData {
+        if (choice.archive.isNotEmpty()) return loadArchived(choice)
         val result = http.get(choice.url)
         when (result.status) {
             200 -> {}
@@ -208,4 +213,127 @@ class OutlookRepository(private val http: Http) {
         }
         return parseOutlookGeoJson(result.body.decodeToString())
     }
+
+    /** An archived outlook: the first of the choice's candidates the archive holds (a few at a time, so a loop does not open dozens of connections). */
+    private suspend fun loadArchived(choice: OutlookChoice): OutlookData = archiveGate.withPermit {
+        var failure: Exception? = null
+        for (a in choice.archive) {
+            try {
+                val result = http.get(OutlookArchive.url(a))
+                if (result.status != 200) { failure = RefsException("the archived outlook could not be read (HTTP ${result.status})"); continue }
+                parseArchivedOutlook(result.body.decodeToString(), a.type)?.let { return@withPermit it }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { failure = e }
+        }
+        throw failure ?: RefsException("no outlook was archived for that time")
+    }
 }
+
+
+/** An outlook kept in the Iowa Environmental Mesonet's archive of SPC outlooks: the convective day it is valid for (its first calendar date), the issuance cycle (UTC hour), and what it is. */
+data class ArchivedOutlook(val validDate: String, val cycle: Int, val day: Int, val type: OutlookType, val issued: Long)
+
+/**
+ * Which archived outlook was in place at a time. The archive (`https://mesonet.agron.iastate.edu/api/1/nws/spc_outlook.geojson?day=&valid=&cycle=`) has every
+ * outlook back to the 2010s, one file per day, date and cycle holding every map of it (categorical, tornado, wind, hail, the total severe chance).
+ */
+object OutlookArchive {
+    const val BASE = "https://mesonet.agron.iastate.edu/api/1/nws/spc_outlook.geojson"
+
+    /** The cycles (UTC hours) of the issuances of each day's outlook. Day 1 is also updated at 01Z, which already belongs to the next calendar date. */
+    private val cycles: Map<Int, List<Int>> = mapOf(1 to listOf(1, 6, 13, 16, 20), 2 to listOf(7, 17), 3 to listOf(8, 20)) + (4..8).associateWith { listOf(10) }
+
+    /** The archive is not limited here: a date it does not hold simply has no outlook. */
+    fun url(a: ArchivedOutlook) = "$BASE?day=${a.day}&valid=${a.validDate}&cycle=${a.cycle}"
+
+    /** When the outlook of [day] for the convective day starting at [dayStart] (a 12Z) was issued at [cycle] (the hour), in epoch seconds. */
+    fun issueTime(day: Int, dayStart: Long, cycle: Int): Long {
+        val midnight = dayStart - 12 * 3600L            // 00Z of the date the convective day starts on
+        val date = when {
+            day == 1 -> if (cycle < 6) midnight + 86400L else midnight       // the 01Z update comes after midnight
+            else -> midnight - (day - 1) * 86400L                              // a later day's outlook is issued the days before
+        }
+        return date + cycle * 3600L
+    }
+
+    private fun dateOf(dayStart: Long): String {
+        val c = civilFromEpoch(dayStart)
+        return "${c[0]}-${c[1].toString().padStart(2, '0')}-${c[2].toString().padStart(2, '0')}"
+    }
+
+    /**
+     * The outlooks for the convective day of [valid] that existed at [asOf], the newest issuance first (at most [limit]; the first is the one that was in place,
+     * the others are what to try when the archive lacks it). The map shown for each follows the same rules as [outlookChoiceFor].
+     */
+    fun candidates(type: OutlookType, valid: Long, asOf: Long, limit: Int = 4): List<ArchivedOutlook> {
+        val dayStart = convectiveDayStart(valid)
+        val date = dateOf(dayStart)
+        val out = ArrayList<ArchivedOutlook>()
+        for (day in 1..8) for (cycle in cycles.getValue(day)) {
+            val issued = issueTime(day, dayStart, cycle)
+            if (issued > asOf) continue
+            val actual = when {
+                day >= 4 -> OutlookType.Probability
+                day == 3 -> if (type == OutlookType.Categorical) OutlookType.Categorical else OutlookType.Probability
+                type == OutlookType.Probability -> OutlookType.Categorical
+                else -> type
+            }
+            out += ArchivedOutlook(date, cycle, day, actual, issued)
+        }
+        return out.sortedByDescending { it.issued }.take(limit)
+    }
+}
+
+/** The outlook of [type] for a frame valid at [valid] as it stood at [asOf] (the run's start, or the frame's own time), from the archive; null when none had been issued. */
+fun outlookArchiveFor(type: OutlookType, valid: Long, asOf: Long): OutlookChoice? {
+    val list = OutlookArchive.candidates(type, valid, asOf)
+    val first = list.firstOrNull() ?: return null
+    return OutlookChoice(first.day, first.type, list)
+}
+
+private fun archiveTitle(threshold: String): String = when (threshold.uppercase()) {
+    "TSTM" -> "General Thunderstorms"; "MRGL" -> "Marginal Risk"; "SLGT" -> "Slight Risk"; "ENH" -> "Enhanced Risk"; "MDT" -> "Moderate Risk"; "HIGH" -> "High Risk"
+    else -> threshold
+}
+
+/**
+ * The areas of one map ([type]) of an archived outlook file: the features of its category, the categorical risks or the probabilities (given as fractions, "0.05"),
+ * and the hatched "SIGN" / "CIG1 to 3" areas. Null when the text is not an outlook file or holds no features at all (the archive has nothing for that date and cycle);
+ * an outlook that has no area of [type] gives an empty list of shapes.
+ */
+fun parseArchivedOutlook(text: String, type: OutlookType): OutlookData? {
+    val features = try { outlookJson.parseToJsonElement(text).jsonObject["features"]?.jsonArray } catch (e: Exception) { null } ?: return null
+    if (features.isEmpty()) return null
+    val wanted = when (type) {
+        OutlookType.Categorical -> "CATEGORICAL"; OutlookType.Tornado -> "TORNADO"; OutlookType.Wind -> "WIND"; OutlookType.Hail -> "HAIL"; OutlookType.Probability -> "ANY SEVERE"
+    }
+    val shapes = ArrayList<OutlookShape>()
+    var issued: Long? = null; var expires: Long? = null
+    for (feature in features) {
+        try {
+            val obj = feature.jsonObject
+            val props = obj["properties"]?.jsonObject ?: continue
+            fun str(key: String) = props[key]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            issued = issued ?: str("product_issue")?.let { isoToEpoch(it) }; expires = expires ?: str("expire")?.let { isoToEpoch(it) }
+            if (!str("category").equals(wanted, ignoreCase = true)) continue
+            val polygons = polygonsOf(obj["geometry"] as? JsonObject)
+            if (polygons.isEmpty()) continue
+            val threshold = str("threshold") ?: continue
+            val hatched = threshold.equals("SIGN", ignoreCase = true) || threshold.startsWith("CIG", ignoreCase = true)
+            val intensity = if (threshold.startsWith("CIG", ignoreCase = true)) threshold.last().digitToIntOrNull()?.coerceIn(1, 3) ?: 1 else 1
+            val catRank = OutlookColors.categoryRank(threshold)
+            val percent = threshold.toDoubleOrNull()?.let { if (it <= 1.0) (it * 100 + 0.5).toInt() else it.toInt() }
+            val rank = when { hatched -> 1000 + intensity; catRank > 0 -> catRank; percent != null -> percent; else -> 0 }
+            val title = when {
+                hatched -> "Significant severe"
+                catRank > 0 -> archiveTitle(threshold)
+                percent != null -> "$percent%"
+                else -> threshold
+            }
+            val color = OutlookColors.category[threshold.uppercase()] ?: if (percent != null) OutlookColors.probability(percent) else 0x808080
+            shapes += OutlookShape(title, rank, if (hatched) 0x000000 else color, polygons, hatched, intensity)
+        } catch (e: Exception) { /* one damaged feature does not hide the others */ }
+    }
+    return OutlookData(shapes.sortedBy { it.rank }, issued, null, expires)
+}
+
+private val archiveGate = Semaphore(4)
