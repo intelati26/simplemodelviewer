@@ -38,6 +38,9 @@ import java.io.File
 import kotlin.math.floor
 
 /** The windows of the globe the GFS page shows (Lambert boxes of the REFS projection, like the sectors of the other pages). */
+/** How many bytes of drawn globe pictures a loop keeps (a 24 hour loop on a phone screen is 25 pictures of about 7 MB). */
+private const val FRAME_BUDGET = 192L * 1024 * 1024
+
 internal val GFS_SECTORS = listOf(
     Sector("CONUS", -125.0, 24.0, -66.5, 50.0),
     Sector("North America", -170.0, 8.0, -50.0, 72.0),
@@ -108,6 +111,31 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private val globalSoft = object : LinkedHashMap<String, java.lang.ref.SoftReference<GfsGlobal>>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, java.lang.ref.SoftReference<GfsGlobal>>?) = size > 60
     }
+    /**
+     * Whole drawn pictures of globe and polar frames, for playing a loop at one view: a loop draws each frame once (while it loads) and then only swaps pictures.
+     * The key names everything a picture depends on (frame, product, view, size, look, outlook); held up to [FRAME_BUDGET] bytes, the least recently used going first.
+     */
+    private class CachedFrame(val bitmap: Bitmap, val product: Product, val title: String)
+    private val frameCache = LinkedHashMap<String, CachedFrame>(32, 0.75f, true)
+    private var frameCacheBytes = 0L
+
+    private fun cacheGet(key: String): CachedFrame? = synchronized(frameCache) { frameCache[key] }
+
+    private fun cachePut(key: String, frame: CachedFrame) = synchronized(frameCache) {
+        frameCache.put(key, frame)?.let { frameCacheBytes -= it.bitmap.allocationByteCount }
+        frameCacheBytes += frame.bitmap.allocationByteCount
+        val it = frameCache.entries.iterator()
+        while (frameCacheBytes > FRAME_BUDGET && frameCache.size > 1 && it.hasNext()) {
+            val eldest = it.next()
+            if (eldest.key == key) continue
+            frameCacheBytes -= eldest.value.bitmap.allocationByteCount
+            it.remove()                // (not recycled: the picture may be on screen)
+        }
+    }
+
+    private fun pictureKey(st: GfsState, file: NbmFile) =
+        "${frameKeyOf(st, file)}|${st.cam}|${st.polar}|${globeW}x$globeH|$dark|${st.settings.contours}|${st.settings.barbDensity}|${st.settings.counties}|${outlook.state.value.version}"
+
     private var globeFrameKey: String? = null            // the name of the globe frame shown: its contour lines are kept under it
     private var prepareJob: Job? = null
     private var lastLoad = 0L
@@ -326,19 +354,35 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
      * Gets the next frame of a loop ready while this one is shown (its fields decoded, its contour lines traced and turned into places), so the turn to it is
      * only the drawing. A flat map keeps every frame of a loop already; this is for the globe and the polar maps.
      */
-    private suspend fun prepareFrame(index: Int) {
+    private suspend fun prepareFrame(index: Int, render: Boolean = false) {
         val st = _state.value
         if (!st.globe) return
         val file = st.frames.getOrNull(index) ?: return
-        val surface = GfsCatalog.surfaceById(if (st.product == GfsHistory.SINCE_ID) "apcptot_gfs" else st.product)
+        val since = st.product == GfsHistory.SINCE_ID
+        val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val data = globalData(st, file)
-        if (!st.settings.contours) return
-        val (product, _) = productFor(st, surface, data.grid)
-        globeRenderer.warmContours(data.grid, data.values, product.style, product, frameKeyOf(st, file))
+        val (product, title0) = productFor(st, surface, data.grid)
+        if (st.settings.contours) globeRenderer.warmContours(data.grid, data.values, product.style, product, frameKeyOf(st, file))
+        // the whole picture too: a loop that fits the memory is drawn once, here, and played from these
+        if (render && globeW > 0) {
+            val key = pictureKey(st, file)
+            if (cacheGet(key) == null) {
+                val title = if (since) sinceTitle(st, file) else title0
+                val bitmap = withContext(Dispatchers.Default) { renderGlobeBitmap(st, product, data.values, file, frameKeyOf(st, file), 1) }
+                cachePut(key, CachedFrame(bitmap, product, title))
+            }
+        }
     }
 
     /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
     private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
+        if (st.playing) cacheGet(pictureKey(st, file))?.let { c ->
+            // a loop playing: the picture drawn ahead, nothing decoded (a tap waits until it is paused: see stopPlaying)
+            globeShown = null
+            globeFrameKey = frameKeyOf(st, file)
+            update { it.copy(map = c.bitmap, style = c.product.style, title = c.title, busy = false, loadStatus = null) }
+            return
+        }
         val since = st.product == GfsHistory.SINCE_ID
         val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val data = globalData(st, file)
@@ -436,17 +480,25 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private fun globeProjection(st: GfsState, width: Int, height: Int): PlaceProjection =
         { lat, lon -> st.polar?.project(width, height, lat, lon) ?: if (st.polar == null) globeForward(st.cam, width, height, lat, lon) else null }
 
+    /** One picture of a frame's globe or polar map at the view [st] has (GFS's winds are east and north already: no map axes to turn from). */
+    private fun renderGlobeBitmap(st: GfsState, product: Product, values: FloatArray, file: NbmFile?, frameKey: String?, stride: Int): Bitmap {
+        val valid = file?.valid
+        val run = file?.run
+        outlook.want(valid, run)
+        return globeRenderer.render(
+            product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true,
+            polar = st.polar, counties = st.settings.counties, frameKey = frameKey, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)),
+        )
+    }
+
     private suspend fun renderGlobeNow(stride: Int) {
         val (product, values) = globeShown ?: return
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
-        val valid = st.file?.valid
-        val run = st.file?.run
-        outlook.want(valid, run)
-        val bitmap = withContext(Dispatchers.Default) {
-            // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, counties = st.settings.counties, frameKey = globeFrameKey, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
-        }
+        val file = st.file
+        val frameKey = globeFrameKey
+        val bitmap = withContext(Dispatchers.Default) { renderGlobeBitmap(st, product, values, file, frameKey, stride) }
+        if (stride == 1 && file != null && frameKey != null) cachePut(pictureKey(st, file), CachedFrame(bitmap, product, st.title))
         update { it.copy(map = bitmap, busy = false) }
     }
 
@@ -573,7 +625,12 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
-    private fun stopPlaying() { playJob?.cancel(); playJob = null; prepareJob?.cancel(); prepareJob = null; update { it.copy(playing = false, prefetch = null) } }
+    private fun stopPlaying() {
+        val fromPictures = _state.value.playing && _state.value.globe && globeShown == null       // the frame on screen was a kept picture: its fields are read again for taps
+        playJob?.cancel(); playJob = null; prepareJob?.cancel(); prepareJob = null
+        update { it.copy(playing = false, prefetch = null) }
+        if (fromPictures) { frameJob?.cancel(); frameJob = viewModelScope.launch { try { showCurrent() } catch (e: CancellationException) { throw e } catch (_: Exception) { } } }
+    }
 
     private fun startPlaying() {
         val st = _state.value
@@ -587,10 +644,11 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 // download the frames' messages first (they are kept, so playing them is fast), then play
                 val surface = GfsCatalog.surfaceById(st.product)
                 val count = window.count()
+                val fits = st.globe && globeW > 0 && count.toLong() * globeW * globeH * 4 <= FRAME_BUDGET
                 var done = 0
                 for (i in window) {
                     if (st.product == GfsHistory.SINCE_ID) Unit else if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
-                    if (st.globe) prepareFrame(i)           // the contour lines of every frame are made while the loop loads, so it plays smoothly from the first pass
+                    if (st.globe) prepareFrame(i, render = fits)           // the contour lines (and, when the loop fits the memory, the whole picture) of every frame are made while it loads
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }
