@@ -26,6 +26,9 @@ import simplemodelview.globeForward
 internal const val GLOBE_EXPORT_SIDE = 3000
 internal const val GLOBE_LOOP_SIDE = 2000
 
+/** How many coordinates of contour lines a globe renderer keeps for the frames of a loop (4 bytes each). */
+private const val GEO_BUDGET = 12_000_000L
+
 /** A second field over the globe's data (the MRMS overlays): its [values] on [grid], drawn with [style]; [marker] fields are a cross per cell, [halo] ones edged and haloed. */
 class GlobeOverlay(
     val grid: Grid, val values: FloatArray, val style: Style, val marker: Boolean = false, val markerScale: Float = 1f,
@@ -39,9 +42,54 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private var layerBuffer = IntArray(0)
 
     /** A contour line in latitude / longitude (lat0, lon0, lat1, lon1, ...), so any camera can project it. */
-    private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: DoubleArray)
+    private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: FloatArray)       // (float is a metre or so: half the memory of a double)
     private var geoKey: Any? = null
     private var geoLines: List<GeoLine> = emptyList()
+
+    /**
+     * The contour lines of frames a loop plays, by the frame's name: tracing a field and turning every vertex into a latitude / longitude is the costly part of a
+     * frame, and a loop shows the same frames again and again. Kept until about [GEO_BUDGET] coordinates (some 50 MB) are held, the least recently used going first.
+     */
+    private val geoCache = LinkedHashMap<String, List<GeoLine>>(32, 0.75f, true)
+    private var geoCacheSize = 0L
+    private val geoLock = Any()
+
+    private fun cachedGeo(key: String): List<GeoLine>? = synchronized(geoLock) { geoCache[key] }
+
+    private fun putGeo(key: String, lines: List<GeoLine>) = synchronized(geoLock) {
+        geoCache.put(key, lines)?.let { old -> geoCacheSize -= old.sumOf { it.points.size.toLong() } }
+        geoCacheSize += lines.sumOf { it.points.size.toLong() }
+        val it = geoCache.entries.iterator()
+        while (geoCacheSize > GEO_BUDGET && geoCache.size > 1 && it.hasNext()) {
+            val eldest = it.next()
+            if (eldest.key == key) continue
+            geoCacheSize -= eldest.value.sumOf { l -> l.points.size.toLong() }
+            it.remove()
+        }
+    }
+
+    /** What decides which contour lines a frame has: the spec of its product, and for a wind product the height plane. Null when it has none. */
+    private fun contourSpecFor(grid: Grid, values: FloatArray, style: Style, product: Product): Pair<ContourSpec, Int?>? {
+        val windLevel = WindProducts.planeLevel(product.id)?.takeIf { WindProducts.hasPlanes(values, grid.cells) }
+        val spec = if (windLevel != null) Contours.specFor("z${if (windLevel == WindProducts.STACK) 500 else windLevel}", "m") else Contours.specFor(product.id, style.units)
+        return spec?.let { it to windLevel }
+    }
+
+    private fun traceGeo(grid: Grid, values: FloatArray, style: Style, spec: ContourSpec, windLevel: Int?): List<GeoLine> {
+        val field = if (windLevel != null) WindProducts.plane(values, grid.cells, WindProducts.HEIGHT) else values
+        val cstyle = if (windLevel != null) Style() else style
+        // the lines are traced on the whole grid (pixels of a one-pixel-per-cell view), then every vertex becomes a latitude / longitude
+        val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
+        return Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) }
+    }
+
+    /** Makes the contour lines of a frame ahead of its turn (a loop prepares the next frame while this one is shown): [frameKey] is the name [render] is given. Not locked: it runs beside a picture. */
+    fun warmContours(grid: Grid, values: FloatArray, style: Style, product: Product, frameKey: String) {
+        val key = "$frameKey|${product.id}"
+        if (cachedGeo(key) != null) return
+        val (spec, windLevel) = contourSpecFor(grid, values, style, product) ?: return
+        putGeo(key, traceGeo(grid, values, style, spec, windLevel))
+    }
 
     /**
      * Draws the globe. [product] (with [contours] and [barbDensity]) adds what the flat map draws over its data: the field's contour lines, and for the wind
@@ -51,7 +99,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     fun render(
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
         product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null, alerts: List<AlertDraw> = emptyList(),
-        counties: Int = 0, overlays: List<GlobeOverlay> = emptyList(), baseHalo: Boolean = false,
+        counties: Int = 0, overlays: List<GlobeOverlay> = emptyList(), baseHalo: Boolean = false, frameKey: String? = null,
     ): Bitmap {
         val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -89,7 +137,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         for (overlay in overlays) Timings.timed("overlay") { drawOverlay(canvas, overlay, cam, polar, width, height, stride) }
 
         Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1, countyMode = counties) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1, countyMode = counties) }
-        if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame)
+        if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame, frameKey)
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 
@@ -102,23 +150,23 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     /** The contour lines and the barbs of [product] on the sphere, drawn by the code the flat map uses. */
     private fun decorate(
         canvas: Canvas, grid: Grid, values: FloatArray, style: Style, product: Product, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean,
-        contours: Boolean, barbDensity: Int, trueFrame: Boolean,
+        contours: Boolean, barbDensity: Int, trueFrame: Boolean, frameKey: String? = null,
     ) {
         val cells = grid.cells
         val windLevel = WindProducts.planeLevel(product.id)?.takeIf { WindProducts.hasPlanes(values, cells) }
         if (contours) {
-            val spec = if (windLevel != null) Contours.specFor("z${if (windLevel == WindProducts.STACK) 500 else windLevel}", "m") else Contours.specFor(product.id, style.units)
-            if (spec != null) {
-                val key = Triple(values, product.id, grid)
-                if (geoKey != key) {
-                    val field = if (windLevel != null) WindProducts.plane(values, cells, WindProducts.HEIGHT) else values
-                    val cstyle = if (windLevel != null) Style() else style
-                    // the lines are traced on the whole grid (pixels of a one-pixel-per-cell view), then every vertex becomes a latitude / longitude
-                    val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
-                    Timings.timed("contours") { geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) } }
-                    geoKey = key
+            val found = contourSpecFor(grid, values, style, product)
+            if (found != null) {
+                val (spec, wind) = found
+                val lines: List<GeoLine> = if (frameKey != null) {
+                    val key = "$frameKey|${product.id}"
+                    cachedGeo(key) ?: Timings.timed("contours") { traceGeo(grid, values, style, spec, wind) }.also { putGeo(key, it) }
+                } else {
+                    val key = Triple(values, product.id, grid)
+                    if (geoKey != key) { Timings.timed("contours") { geoLines = traceGeo(grid, values, style, spec, wind) }; geoKey = key }
+                    geoLines
                 }
-                drawContourLines(canvas, projectedContours(geoLines) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
+                drawContourLines(canvas, projectedContours(lines) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
             }
         }
         if (windLevel != null) {
@@ -130,15 +178,15 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     private fun level(windLevel: Int, values: FloatArray, cells: Int) = windLevel == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
 
-    private fun toLatLon(grid: Grid, whole: View, line: ContourLine): DoubleArray {
+    private fun toLatLon(grid: Grid, whole: View, line: ContourLine): FloatArray {
         val p = line.points
-        val out = DoubleArray(p.size)
+        val out = FloatArray(p.size)
         var i = 0
         while (i + 1 < p.size) {
             val col = p[i] - 0.5 + whole.col0
             val row = whole.row0 + whole.rows - 0.5 - p[i + 1]
             val ll = core.gridToLatLon(grid, col, row)
-            out[i] = ll[0]; out[i + 1] = ll[1]
+            out[i] = ll[0].toFloat(); out[i + 1] = ll[1].toFloat()
             i += 2
         }
         return out
@@ -152,7 +200,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
             var current = ArrayList<Float>()
             var i = 0
             while (i + 1 < line.points.size) {
-                val p = project(line.points[i], line.points[i + 1])
+                val p = project(line.points[i].toDouble(), line.points[i + 1].toDouble())
                 if (p == null) { if (current.size >= 4) pieces += current.toFloatArray(); current = ArrayList() }
                 else { current.add(p[0].toFloat()); current.add(p[1].toFloat()) }
                 i += 2

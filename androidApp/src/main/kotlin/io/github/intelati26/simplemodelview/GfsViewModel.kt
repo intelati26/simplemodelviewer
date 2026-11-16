@@ -102,8 +102,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private var globeH = 0
     // whole-globe frames are big (4 or 8 planes of a million cells): only a few are kept
     private val globalComputed = object : LinkedHashMap<String, GfsGlobal>(4, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, GfsGlobal>?) = size > 3
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, GfsGlobal>?) = size > 4
     }
+    private var globeFrameKey: String? = null            // the name of the globe frame shown: its contour lines are kept under it
+    private var prepareJob: Job? = null
     private var lastLoad = 0L
     private var pickedCycle: NbmCycle? = null
     private val grids = HashMap<String, Grid>()
@@ -119,7 +121,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             color = prefs.getString("gfs_color", "speed")?.takeIf { k -> WindProducts.colors.any { it.key == k } } ?: "speed",
             sector = GFS_SECTORS.firstOrNull { it.name == prefs.getString("gfs_sector", null) } ?: GFS_SECTORS[0],
             settings = readSettings(),
-            loopSpanHours = prefs.getInt("gfs_loop_hours", 0),
+            loopSpanHours = prefs.getInt("gfs_loop_hours", 24),      // a day of hourly frames: enough to see the movement
             historyDays = prefs.getInt("gfs_history_days", 5),
         )
     )
@@ -296,13 +298,16 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         return Product(id, title, GfsCatalog.HEIGHTS_AND_WINDS, GfsCatalog.colorStyle(st.color, top), false, null, grid) to title
     }
 
-    /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
-    private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
+    private fun frameKeyOf(st: GfsState, file: NbmFile) = "${file.url}|${st.product}|${st.since}|${st.level}|${st.color}"
+
+    /** The decoded whole-globe fields of a frame: kept for the last few frames, else read (the messages are on the device once downloaded) and decoded. */
+    private suspend fun globalData(st: GfsState, file: NbmFile): GfsGlobal {
         val since = st.product == GfsHistory.SINCE_ID
         val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
-        val key = "${file.url}|${st.product}|${st.since}|${st.level}|${st.color}"
-        val data = globalComputed[key] ?: withContext(Dispatchers.Default) {
+        val key = frameKeyOf(st, file)
+        synchronized(globalComputed) { globalComputed[key] }?.let { return it }
+        return withContext(Dispatchers.Default) {
             Timings.timed("data") {
                 if (since) {
                     var grid: Grid? = null
@@ -310,7 +315,30 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                     GfsGlobal(grid ?: Grid.REFS, values)
                 } else if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status)
             }
-        }.also { globalComputed[key] = it }
+        }.also { synchronized(globalComputed) { globalComputed[key] = it } }
+    }
+
+    /**
+     * Gets the next frame of a loop ready while this one is shown (its fields decoded, its contour lines traced and turned into places), so the turn to it is
+     * only the drawing. A flat map keeps every frame of a loop already; this is for the globe and the polar maps.
+     */
+    private suspend fun prepareFrame(index: Int) {
+        val st = _state.value
+        if (!st.globe) return
+        val file = st.frames.getOrNull(index) ?: return
+        val surface = GfsCatalog.surfaceById(if (st.product == GfsHistory.SINCE_ID) "apcptot_gfs" else st.product)
+        val data = globalData(st, file)
+        if (!st.settings.contours) return
+        val (product, _) = productFor(st, surface, data.grid)
+        globeRenderer.warmContours(data.grid, data.values, product.style, product, frameKeyOf(st, file))
+    }
+
+    /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
+    private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
+        val since = st.product == GfsHistory.SINCE_ID
+        val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
+        val data = globalData(st, file)
+        globeFrameKey = frameKeyOf(st, file)
         val (product, title0) = productFor(st, surface, data.grid)
         val title = if (since) sinceTitle(st, file) else title0
         globeShown = product to data.values
@@ -413,7 +441,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         outlook.want(valid, run)
         val bitmap = withContext(Dispatchers.Default) {
             // GFS's winds are east and north already (no map axes to turn from)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, counties = st.settings.counties, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar, counties = st.settings.counties, frameKey = globeFrameKey, alerts = outlookDrawsOn(outlook, valid, run, globeProjection(st, globeW, globeH)))
         }
         update { it.copy(map = bitmap, busy = false) }
     }
@@ -541,7 +569,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
-    private fun stopPlaying() { playJob?.cancel(); playJob = null; update { it.copy(playing = false, prefetch = null) } }
+    private fun stopPlaying() { playJob?.cancel(); playJob = null; prepareJob?.cancel(); prepareJob = null; update { it.copy(playing = false, prefetch = null) } }
 
     private fun startPlaying() {
         val st = _state.value
@@ -558,6 +586,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 var done = 0
                 for (i in window) {
                     if (st.product == GfsHistory.SINCE_ID) Unit else if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
+                    if (st.globe) prepareFrame(i)           // the contour lines of every frame are made while the loop loads, so it plays smoothly from the first pass
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }
@@ -565,6 +594,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                     for (i in window) {
                         update { it.copy(index = i) }
                         showCurrent()
+                        val upcoming = window.firstOrNull { it > i } ?: window.first
+                        prepareJob?.cancel()
+                        prepareJob = viewModelScope.launch(Dispatchers.Default) { try { prepareFrame(upcoming) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
                         delay(maxOf(if (st.history) 450L else nbmDwellMillis(_state.value.frames, i, 150L), if (i == window.last) 1200L else 0L))
                     }
                 }
@@ -628,7 +660,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         return withContext(Dispatchers.Default) {
             globeRenderer.render(
                 product.grid, values, product.style, emptyList(), st.cam.copy(radius = st.cam.radius * f), side, side, 1, dark, product,
-                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) }, counties = st.settings.counties,
+                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) }, counties = st.settings.counties, frameKey = globeFrameKey,
                 alerts = outlookDrawsOn(outlook, st.file?.valid, st.file?.run, globeProjection(st.copy(cam = st.cam.copy(radius = st.cam.radius * f), polar = st.polar?.let { it.copy(radius = it.radius * f) }), side, side)),
             )
         }
