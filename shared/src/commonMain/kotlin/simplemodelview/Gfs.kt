@@ -31,7 +31,13 @@ class GfsMessage(
 }
 
 /** What a GFS product needs and how it is drawn: the messages (in this order: first is the color, or for a wind product height, u, v then the color). */
-class GfsProduct(val id: String, val title: String, val group: String, val style: Style, val convert: (Float) -> Float = { it }, val message: GfsMessage?)
+/**
+ * A conversion of one number to another (kelvin to Fahrenheit, m/s to knots). Not a `(Float) -> Float`: that is generic, so every call boxes its argument and its
+ * result, and a million-cell field is converted a few million times a frame; this one takes and gives a plain float.
+ */
+fun interface FloatMap { operator fun invoke(v: Float): Float }
+
+class GfsProduct(val id: String, val title: String, val group: String, val style: Style, val convert: FloatMap = FloatMap { it }, val message: GfsMessage?)
 
 object GfsCatalog {
     const val HEIGHTS_AND_WINDS = "Heights and winds"
@@ -55,10 +61,10 @@ object GfsCatalog {
     }
 
     /** How a color's numbers become what the style shows (temperatures in F or C, humidity as it is). */
-    fun colorConvert(colorKey: String): (Float) -> Float = when (colorKey) {
-        "t2m", "td2m" -> ::kelvinToF
-        "tlev" -> ::kelvinToC
-        else -> { v -> v }
+    fun colorConvert(colorKey: String): FloatMap = when (colorKey) {
+        "t2m", "td2m" -> FloatMap { kelvinToF(it) }
+        "tlev" -> FloatMap { kelvinToC(it) }
+        else -> FloatMap { it }
     }
 
     fun colorStyle(colorKey: String, level: Int? = null): Style = when (colorKey) {
@@ -74,8 +80,8 @@ object GfsCatalog {
 
     /** The surface fields (single messages) with their conversions. */
     val surface: List<GfsProduct> = listOf(
-        GfsProduct("t2m_gfs", "2-m Temperature", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), ::kelvinToF, GfsMessage("TMP", "2 m above ground")),
-        GfsProduct("td2m_gfs", "2-m Dewpoint", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), ::kelvinToF, GfsMessage("DPT", "2 m above ground")),
+        GfsProduct("t2m_gfs", "2-m Temperature", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), FloatMap { kelvinToF(it) }, GfsMessage("TMP", "2 m above ground")),
+        GfsProduct("td2m_gfs", "2-m Dewpoint", SURFACE, Style(Kind.Blended, Palettes.temperature(true), units = "F", digits = 0), FloatMap { kelvinToF(it) }, GfsMessage("DPT", "2 m above ground")),
         GfsProduct("pmsl_gfs", "Mean Sea-Level Pressure", SURFACE, Style(Kind.Blended, Palettes.rainbow(985.0, 1035.0), units = "hPa", digits = 0), { it / 100f }, GfsMessage("PRMSL", "mean sea level")),
         GfsProduct("pwat_gfs", "Precipitable Water", SURFACE, Style(Kind.Banded, Palettes.precipitableWater, hideBelow = 0.0, units = "in", digits = 2), { it / 25.4f }, GfsMessage("PWAT", "entire atmosphere (considered as a single layer)")),
         // accumulations: the file holds the amount of the last 6 hours (3 after day 5) and the total since the run began, under their own time texts
@@ -355,7 +361,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
                 val bytes = cropDownload(file, wanted, region, status)
                 status("Source: NOMADS (cropped)")
                 status("Decoding\u2026")
-                val decoded = splitGribMessages(bytes).map { decodeRaw(it) }
+                val decoded = decodeAll(splitGribMessages(bytes))
                 return wanted.associate { m ->
                     val spec = gfsCropSpec(m)!!
                     m.key to (decoded.firstOrNull { it.meta?.matches(spec) == true } ?: throw RefsException("NOMADS sent no ${m.variable} at ${m.level}"))
@@ -381,8 +387,14 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         val bytes = messages(file, wanted, status)
         status(if (region != null) "Source: AWS (whole fields)" else "Source: AWS")
         status("Decoding\u2026")
-        return wanted.associate { it.key to decodeRaw(bytes.getValue(it.key)) }
+        val decoded = decodeAll(wanted.map { bytes.getValue(it.key) })
+        return wanted.mapIndexed { i, m -> m.key to decoded[i] }.toMap()
     }
+
+    /** The messages decoded at the same time (the decoder is native and each message is its own job): a wind product of a level is three to eight of them. */
+    private suspend fun decodeAll(messages: List<ByteArray>): List<GridField> =
+        if (messages.size < 2) messages.map { decodeRaw(it) }
+        else kotlinx.coroutines.coroutineScope { messages.map { m -> async(kotlinx.coroutines.Dispatchers.Default) { decodeRaw(m) } }.awaitAll() }
 
     private fun decodeRaw(bytes: ByteArray): GridField = try { core.decodeGrib(bytes) } catch (e: Exception) { throw RefsException("could not decode the GFS message: ${e.message}") }
 
@@ -468,7 +480,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return out
     }
 
-    private fun plane(field: GridField, convert: (Float) -> Float, target: Grid): FloatArray {
+    private fun plane(field: GridField, convert: FloatMap, target: Grid): FloatArray {
         val v = field.values
         for (i in v.indices) v[i] = convert(v[i])
         return core.reproject(v, field.grid, target)
@@ -481,7 +493,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         return plane(field, product.convert, target)
     }
 
-    private fun converted(values: FloatArray, convert: (Float) -> Float): FloatArray = FloatArray(values.size) { convert(values[it]) }
+    private fun converted(values: FloatArray, convert: FloatMap): FloatArray = FloatArray(values.size) { convert(values[it]) }
 
     /** A surface field for the globe: the whole message on GFS's own grid (nothing is cropped or reprojected). */
     suspend fun loadFieldGlobal(file: NbmFile, product: GfsProduct, status: (String) -> Unit = {}): GfsGlobal {
@@ -498,7 +510,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         val wanted = windMessages(level, colorKey)
         val fields = fields(file, wanted, null, false, status)
         fun field(m: GfsMessage) = fields.getValue(m.key)
-        val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
+        val knots = FloatMap { it * GfsCatalog.MS_TO_KNOTS }
         val grid = field(wanted[0]).grid
         val height = field(wanted[0]).values.copyOf()
         if (level == WindProducts.STACK) {
@@ -520,7 +532,7 @@ class GfsRepository(private val http: Http, private val core: Core, private val 
         val wanted = windMessages(level, colorKey)
         val fields = fields(file, wanted, region, crop, status)
         fun field(m: GfsMessage) = fields.getValue(m.key)
-        val knots: (Float) -> Float = { it * GfsCatalog.MS_TO_KNOTS }
+        val knots = FloatMap { it * GfsCatalog.MS_TO_KNOTS }
         val height = plane(field(wanted[0]), { it }, target)
         if (level == WindProducts.STACK) {
             val longitudes = core.gridLongitudes(target)
