@@ -5,10 +5,32 @@
 #include "raster.h"
 #include <algorithm>
 #include <cmath>
+#include <thread>
+#include <vector>
 #include "grids.h"
 
 namespace Raster {
     namespace {
+        // Runs body(first, step) on a few threads, each taking every step-th row of blocks (the globe's middle rows cost more than its edges, so interleaving balances the work).
+        // The pixels of one row are written by one thread only, and the fields are read only.
+        template <class F> void parallelRows(int rows, F&& body) {
+            const unsigned hardware = std::thread::hardware_concurrency();
+            const int workers = static_cast<int>(std::min(std::max(hardware, 1u), 6u));
+            if (workers <= 1 || rows < 32) {
+                body(0, 1);
+                return;
+            }
+            std::vector<std::thread> pool;
+            pool.reserve(static_cast<size_t>(workers - 1));
+            for (int w = 1; w < workers; w += 1) {
+                pool.emplace_back([&body, w, workers]() { body(w, workers); });
+            }
+            body(0, workers);
+            for (std::thread& t : pool) {
+                t.join();
+            }
+        }
+
         uint32_t argb(int r, int g, int b) {
             return 0xFF000000u | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
         }
@@ -148,7 +170,8 @@ namespace Raster {
         const int stride = std::max(globe.stride, 1);   // >1: coarse preview while the globe is being dragged (stride x stride blocks)
         const int blocksX = (globe.width + stride - 1) / stride;
         const int blocksY = (globe.height + stride - 1) / stride;
-        for (int by = 0; by < blocksY; by += 1) {
+        parallelRows(blocksY, [&](int first, int step) {
+        for (int by = first; by < blocksY; by += step) {
             for (int bx = 0; bx < blocksX; bx += 1) {
                 const double px = bx * stride + stride / 2.0;
                 const double py = by * stride + stride / 2.0;
@@ -193,6 +216,7 @@ namespace Raster {
                 }
             }
         }
+        });
     }
 
     bool polarToLatLon(bool north, double centerLon, double edgeLat, double x, double y, double& lat, double& lon) {
@@ -216,7 +240,8 @@ namespace Raster {
         const int stride = std::max(polar.stride, 1);
         const int blocksX = (polar.width + stride - 1) / stride;
         const int blocksY = (polar.height + stride - 1) / stride;
-        for (int by = 0; by < blocksY; by += 1) {
+        parallelRows(blocksY, [&](int first, int step) {
+        for (int by = first; by < blocksY; by += step) {
             for (int bx = 0; bx < blocksX; bx += 1) {
                 const double px = bx * stride + stride / 2.0;
                 const double py = by * stride + stride / 2.0;
@@ -242,5 +267,6 @@ namespace Raster {
                 }
             }
         }
+        });
     }
 }

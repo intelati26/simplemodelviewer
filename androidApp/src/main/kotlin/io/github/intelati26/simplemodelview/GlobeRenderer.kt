@@ -109,15 +109,18 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val cy = height / 2f
         val r = (polar?.radius ?: cam.radius).toFloat()
 
-        // the sphere, lit from the upper left
-        val ocean = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = RadialGradient(cx - 0.35f * r, cy - 0.35f * r, r * 1.5f,
-                if (dark) intArrayOf(0xFF2B5278.toInt(), 0xFF10263D.toInt(), 0xFF08121F.toInt()) else intArrayOf(0xFFD6E8F7.toInt(), 0xFFA9C8E4.toInt(), 0xFF7FA6CB.toInt()),
-                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
-        }
-        canvas.drawCircle(cx, cy, r, ocean)
-
-        if (polar != null) drawPolarGraticule(canvas, polar, width, height, dark) else drawGraticule(canvas, cam, width, height, dark)
+        // what does not depend on the frame (the sphere and its graticule below the data, the map lines over it) is drawn once per view and kept: a loop at one zoom
+        // only draws its data. Not while the view is being dragged (every picture is another view), and not for a big export picture.
+        val keep = stride == 1 && width.toLong() * height <= 4_000_000L
+        val layerKey = LayerKey(cam, polar, width, height, dark, counties)
+        if (keep) {
+            if (underKey != layerKey || under == null) {
+                under?.recycle()
+                under = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { drawUnder(Canvas(it), cam, polar, width, height, dark, cx, cy, r) }
+                underKey = layerKey
+            }
+            canvas.drawBitmap(under!!, 0f, 0f, null)
+        } else drawUnder(canvas, cam, polar, width, height, dark, cx, cy, r)
 
         // data
         if (buffer.size < width * height) buffer = IntArray(width * height)
@@ -136,7 +139,16 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, if (paintLines) Paint().apply { alpha = 0x90 } else null)
         for (overlay in overlays) Timings.timed("overlay") { drawOverlay(canvas, overlay, cam, polar, width, height, stride) }
 
-        Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1, countyMode = counties) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1, countyMode = counties) }
+        Timings.timed("lines") {
+            if (keep) {
+                if (overKey != layerKey || over == null) {
+                    over?.recycle()
+                    over = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { drawLines(Canvas(it), cam, polar, width, height, dark, stride, counties) }
+                    overKey = layerKey
+                }
+                canvas.drawBitmap(over!!, 0f, 0f, null)
+            } else drawLines(canvas, cam, polar, width, height, dark, stride, counties)
+        }
         if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame, frameKey)
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
@@ -246,6 +258,28 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val sign = if (cam.north) 1 else -1
         for (lat in 30..80 step 10) polyline((-180..180 step 3).asSequence().map { (sign * lat).toDouble() to it.toDouble() })
         for (lon in -180 until 180 step 30) polyline(sequenceOf((sign * 89.9) to lon.toDouble(), (sign * cam.edgeLat) to lon.toDouble()))
+    }
+
+    private data class LayerKey(val cam: GlobeCamera, val polar: PolarCamera?, val width: Int, val height: Int, val dark: Boolean, val counties: Int)
+    private var underKey: LayerKey? = null
+    private var under: Bitmap? = null            // the sphere and the graticule
+    private var overKey: LayerKey? = null
+    private var over: Bitmap? = null             // the map lines (clear where there are none)
+
+    /** The sphere, lit from the upper left, and its graticule. */
+    private fun drawUnder(canvas: Canvas, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean, cx: Float, cy: Float, r: Float) {
+        val ocean = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(cx - 0.35f * r, cy - 0.35f * r, r * 1.5f,
+                if (dark) intArrayOf(0xFF2B5278.toInt(), 0xFF10263D.toInt(), 0xFF08121F.toInt()) else intArrayOf(0xFFD6E8F7.toInt(), 0xFFA9C8E4.toInt(), 0xFF7FA6CB.toInt()),
+                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
+        }
+        canvas.drawCircle(cx, cy, r, ocean)
+        if (polar != null) drawPolarGraticule(canvas, polar, width, height, dark) else drawGraticule(canvas, cam, width, height, dark)
+    }
+
+    private fun drawLines(canvas: Canvas, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean, stride: Int, counties: Int) {
+        if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1, countyMode = counties)
+        else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1, countyMode = counties)
     }
 
     /** One overlay field over the data: rastered like the base field into its own buffer (clear where it has nothing), then edged or drawn as crosses where it asks. */

@@ -104,6 +104,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private val globalComputed = object : LinkedHashMap<String, GfsGlobal>(4, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, GfsGlobal>?) = size > 4
     }
+    // behind the few kept for certain: more decoded frames held softly, which the system takes back when memory is short (a loop's later passes find most of their frames)
+    private val globalSoft = object : LinkedHashMap<String, java.lang.ref.SoftReference<GfsGlobal>>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, java.lang.ref.SoftReference<GfsGlobal>>?) = size > 60
+    }
     private var globeFrameKey: String? = null            // the name of the globe frame shown: its contour lines are kept under it
     private var prepareJob: Job? = null
     private var lastLoad = 0L
@@ -306,7 +310,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
         val key = frameKeyOf(st, file)
-        synchronized(globalComputed) { globalComputed[key] }?.let { return it }
+        synchronized(globalComputed) { globalComputed[key] ?: globalSoft[key]?.get()?.also { globalComputed[key] = it } }?.let { return it }
         return withContext(Dispatchers.Default) {
             Timings.timed("data") {
                 if (since) {
@@ -315,7 +319,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                     GfsGlobal(grid ?: Grid.REFS, values)
                 } else if (surface != null) repo.loadFieldGlobal(file, surface, status) else repo.loadWindGlobal(file, st.level, st.color, status)
             }
-        }.also { synchronized(globalComputed) { globalComputed[key] = it } }
+        }.also { synchronized(globalComputed) { globalComputed[key] = it; globalSoft[key] = java.lang.ref.SoftReference(it) } }
     }
 
     /**
