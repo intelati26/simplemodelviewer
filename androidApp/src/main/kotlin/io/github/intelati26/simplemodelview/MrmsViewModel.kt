@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import simplemodelview.Underlay
+import simplemodelview.SurfacePick
 import simplemodelview.BackupPlace
 import simplemodelview.FrameTarget
 import simplemodelview.Grid
@@ -516,16 +517,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun refreshOverlayFiles() {
         val st = _state.value
         val first = st.files.firstOrNull() ?: return
-        val under = underProducts(st)
-        if (st.overlays.isEmpty() && under.isEmpty()) return
+        if (st.overlays.isEmpty()) return
         val now = System.currentTimeMillis() / 1000
         val lists = HashMap<String, List<MrmsFile>>()
         for (layer in st.overlays) {
             lists[layer.product.directory] = try { repo.listFilesSince(layer.product, first.validTime - 120, now) }
-            catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-        }
-        for (p in under) {      // hourly, and late: from three hours before the first scan (see Underlay.fileFor)
-            lists[p.directory] = try { repo.listFilesSince(p, first.validTime - Underlay.LOOKBACK_SECONDS, now) }
             catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
         }
         update { it.copy(overlayFiles = lists) }
@@ -600,20 +596,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return results.joinToString("  \u00B7  ") { it.info } + note
     }
 
-    // ---- under the radar: the MRMS model temperature as a fill, the dewpoint (worked out from temperature and wet-bulb) as lines ----
-    private val tempProduct = MrmsCatalog.byId(Underlay.TEMP)
-    private val wetBulbProduct = MrmsCatalog.byId(Underlay.WETBULB)
-    private val underGrids = LinkedHashMap<Int, Grid>(8, 0.75f, true)         // a picture grid's id -> the coarse grid its surface fields are put on
-    private val pressures = LinkedHashMap<Int, FloatArray>(4, 0.75f, true)    // a grid's id -> the pressure of the ground under each cell (hPa)
-    private val dewpoints = LinkedHashMap<String, FloatArray>(4, 0.75f, true) // worked-out dewpoints, by the two files and the grid
+    // ---- under the radar: the surface analysis (RTMA, every 15 minutes; NBM when there is none), temperature as a fill and dewpoint as lines ----
+    private val surface = AppContainer.surface
+    private val underGrids = LinkedHashMap<Int, Grid>(8, 0.75f, true)          // a picture grid's id -> the coarse grid its surface fields are put on
+    private val underValues = LinkedHashMap<String, FloatArray>(8, 0.75f, true) // a field put on a grid, by file, field and grid
     private var globeUnder: GlobeOverlay? = null
     private var globeLines: List<FieldLines> = emptyList()
-
-    /** Which MRMS products the surface layers need listed and downloaded: the temperature for either, the wet-bulb for the dewpoint. */
-    private fun underProducts(st: MrmsState): List<MrmsProduct> = buildList {
-        if (st.underTemp || st.underDew) tempProduct?.let { add(it) }
-        if (st.underDew) wetBulbProduct?.let { add(it) }
-    }
 
     fun setUnderTemp(on: Boolean) = setUnder(on, _state.value.underDew)
     fun setUnderDew(on: Boolean) = setUnder(_state.value.underTemp, on)
@@ -621,16 +609,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun setUnder(temp: Boolean, dew: Boolean) {
         prefs.edit().putBoolean("mrms_under_t", temp).putBoolean("mrms_under_td", dew).apply()
         update { it.copy(underTemp = temp, underDew = dew) }
-        viewModelScope.launch {
-            refreshOverlayFiles()
-            if (shown != null && !_state.value.playing) showFrame()
-        }
+        if (shown != null && !_state.value.playing) showFrame()
     }
 
-    private fun underFile(p: MrmsProduct?, base: MrmsFile): MrmsFile? =
-        p?.let { Underlay.fileFor(_state.value.overlayFiles[it.directory].orEmpty(), base.validTime) }
+    /** The surface file for a scan (the newest analysis at or before it), or null when there is none (or no network). */
+    private suspend fun underPick(base: MrmsFile): SurfacePick? =
+        try { surface.pick(base.validTime, System.currentTimeMillis() / 1000) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
 
-    /** The grid (about 3 km) the surface fields are put on for a picture's grid: they are smooth model fields, and need no 1 km cells. The picture's own when it is not finer. */
+    /** The grid (about 3 km) the surface fields are put on for a picture's grid: the analysis is 2.5 km, and needs no 1 km cells. The picture's own when it is not finer. */
     private fun underGridFor(grid: Grid): Grid = synchronized(underGrids) {
         underGrids[grid.id]?.let { return@synchronized it }
         val a = core.gridToLatLon(grid, grid.columns / 2.0, grid.rows / 2.0)
@@ -656,41 +642,30 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return android.graphics.RectF(x(a[0]), y(b[1]), x(b[0]), y(a[1]))
     }
 
-    private class UnderTemp(val values: FloatArray, val grid: Grid, val file: MrmsFile)
-
-    /** The temperature nearest [base]'s time on [grid] (decoded at [step]), or null when there is none near it. */
-    private suspend fun underTemp(base: MrmsFile, grid: Grid, label: String, step: Int, cache: Boolean): UnderTemp? {
-        val p = tempProduct ?: return null
-        val file = underFile(p, base) ?: return null
-        val frame = try { decode(p, file, "$label|under|${grid.id}", gridCoverBox(core, grid), step, cache, FrameTarget.Onto(grid)) }
-            catch (e: CancellationException) { throw e } catch (_: Exception) { return null }
-        return UnderTemp(frame.window.values, frame.window.grid, file)
+    /** One surface field of [pick] put on [grid] (C), downloaded and decoded as needed; null when it cannot be had. */
+    private suspend fun underField(pick: SurfacePick, dew: Boolean, grid: Grid): FloatArray? {
+        val key = "${pick.url}|${if (dew) "td" else "t"}|${grid.id}"
+        synchronized(underValues) { underValues[key] }?.let { return it }
+        val values = try {
+            val field = withContext(Dispatchers.IO) { if (dew) surface.dewpoint(pick) else surface.temperature(pick) }
+            withContext(Dispatchers.Default) { core.reproject(field.values, field.grid, grid) }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { return null } catch (_: OutOfMemoryError) { return null }
+        synchronized(underValues) { underValues[key] = values; while (underValues.size > 6) underValues.remove(underValues.keys.first()) }
+        return values
     }
 
-    /** The dewpoint (C) on [t]'s grid from it and the wet-bulb nearest [base]'s time, with the ground's pressure under each cell; null when there is no wet-bulb. */
-    private suspend fun underDew(base: MrmsFile, t: UnderTemp, label: String, step: Int, cache: Boolean): Pair<FloatArray, MrmsFile>? {
-        val p = wetBulbProduct ?: return null
-        val file = underFile(p, base) ?: return null
-        val key = "${t.file.key}|${file.key}|${t.grid.id}"
-        synchronized(dewpoints) { dewpoints[key] }?.let { return it to file }
-        val tw = try { decode(p, file, "$label|under|${t.grid.id}", gridCoverBox(core, t.grid), step, cache, FrameTarget.Onto(t.grid)).window.values }
-            catch (e: CancellationException) { throw e } catch (_: Exception) { return null }
-        val pressure = pressureOn(t.grid)
-        val td = withContext(Dispatchers.Default) { Underlay.dewpointField(t.values, tw, pressure) }
-        synchronized(dewpoints) { dewpoints[key] = td; while (dewpoints.size > 3) dewpoints.remove(dewpoints.keys.first()) }
-        return td to file
+    private class UnderTemp(val values: FloatArray, val grid: Grid, val pick: SurfacePick)
+
+    /** The surface temperature for a scan on [grid], or null when there is none near it. */
+    private suspend fun underTemp(base: MrmsFile, grid: Grid): UnderTemp? {
+        val pick = underPick(base) ?: return null
+        return underField(pick, false, grid)?.let { UnderTemp(it, grid, pick) }
     }
 
-    /** The pressure of the ground under each cell of [grid] (from RTMA's ground height, kept by the app); null (1000 hPa is used) until that is had. */
-    private suspend fun pressureOn(grid: Grid): FloatArray? {
-        synchronized(pressures) { pressures[grid.id] }?.let { return it }
-        val field = (try { withContext(Dispatchers.IO) { AppContainer.terrain.field(System.currentTimeMillis() / 1000) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }) ?: return null
-        val p = withContext(Dispatchers.Default) { Underlay.pressureFromHeights(core.reproject(field.values, field.grid, grid)) }
-        synchronized(pressures) { pressures[grid.id] = p; while (pressures.size > 3) pressures.remove(pressures.keys.first()) }
-        return p
-    }
+    /** The dewpoint of the same file as [t], on its grid. */
+    private suspend fun underDew(t: UnderTemp): FloatArray? = underField(t.pick, true, t.grid)
 
-    private fun tempStyle() = tempProduct?.let { styleOf(it) } ?: Style()
+    private fun tempStyle() = MrmsCatalog.byId(Underlay.TEMP_STYLE)?.let { styleOf(it) } ?: Style()
 
     /** The temperature as a picture of its own grid, translucent, stretched over [dst] of the picture. */
     private suspend fun underFill(t: UnderTemp, dst: android.graphics.RectF): Overlay {
@@ -701,25 +676,25 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return Overlay(Bitmap.createBitmap(argb, g.columns, g.rows, Bitmap.Config.ARGB_8888), dst, bold = false)
     }
 
-    private fun dewLines(t: UnderTemp, td: Pair<FloatArray, MrmsFile>, dst: android.graphics.RectF?) =
-        FieldLines(td.first, t.grid, tempStyle(), Underlay.dewpointSpec(_state.value.units.celsius), "td|${t.file.key}|${td.second.key}|${t.grid.id}", dst)
+    private fun dewLines(t: UnderTemp, td: FloatArray, dst: android.graphics.RectF?) =
+        FieldLines(td, t.grid, tempStyle(), Underlay.dewpointSpec(_state.value.units.celsius), "td|${t.pick.url}|${t.grid.id}", dst)
 
     private fun tempShown(t: UnderTemp) =
-        ShownOverlay("T", Product(Underlay.TEMP, "Surface temperature", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { t.values }
+        ShownOverlay("T", Product("surface_t", "Surface temperature", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { t.values }
 
-    private fun dewShown(t: UnderTemp, td: Pair<FloatArray, MrmsFile>) =
-        ShownOverlay("Td", Product("dewpoint_from_wetbulb", "Dewpoint (from wet-bulb)", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { td.first }
+    private fun dewShown(t: UnderTemp, td: FloatArray) =
+        ShownOverlay("Td", Product("surface_td", "Surface dewpoint", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { td }
 
     /** The surface layers of one flat picture, all at once (a zoomed-in detail, an export). */
     private class UnderParts(val fill: Overlay?, val lines: List<FieldLines>)
 
-    private suspend fun underParts(base: MrmsFile, v: View, label: String, cache: Boolean): UnderParts {
+    private suspend fun underParts(base: MrmsFile, v: View): UnderParts {
         val st = _state.value
         if (!st.underTemp && !st.underDew) return UnderParts(null, emptyList())
-        val t = underTemp(base, underGridFor(v.grid), label, 2, cache) ?: return UnderParts(null, emptyList())
+        val t = underTemp(base, underGridFor(v.grid)) ?: return UnderParts(null, emptyList())
         val dst = rectOn(t.grid, v)
         val fill = if (st.underTemp) underFill(t, dst) else null
-        val td = if (st.underDew) underDew(base, t, label, 2, cache) else null
+        val td = if (st.underDew) underDew(t) else null
         return UnderParts(fill, listOfNotNull(td?.let { dewLines(t, it, dst) }))
     }
 
@@ -828,12 +803,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val layers = stage { globeOverlays(file, grid) }
             if (layers.isNotEmpty()) { globeLayers = layers.map { it.first }; overlayShown = layers.map { it.second }; dirty = true }
             if (st.underTemp || st.underDew) {
-                val step = tempProduct?.let { globeStep(it) } ?: 1
-                val t = stage { underTemp(file, grid, "globe", step, true) }
+                val t = stage { underTemp(file, grid) }
                 if (t != null) {
                     under += tempShown(t)
                     if (st.underTemp) { globeUnder = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY)); dirty = true }
-                    if (st.underDew) stage { underDew(file, t, "globe", step, true) }?.let { td ->
+                    if (st.underDew) stage { underDew(t) }?.let { td ->
                         globeLines = listOf(dewLines(t, td, null)); under += dewShown(t, td); dirty = true
                     }
                 }
@@ -872,17 +846,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         ov = stage { overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) } }
         if (ov.isNotEmpty()) dirty = true
         if (st.underTemp || st.underDew) {
-            val t = stage { underTemp(file, underGridFor(grid), sector.name, 2, true) }
+            val t = stage { underTemp(file, underGridFor(grid)) }
             if (t == null) underInfo += "No surface temperature near this time"
             else {
                 val dst = rectOn(t.grid, v)
                 under += tempShown(t)
-                underInfo += "T ${formatClock(t.file.validTime)}"
+                underInfo += t.pick.label
                 if (st.underTemp) { fill = underFill(t, dst); dirty = true }
                 if (st.underDew) {
-                    val td = stage { underDew(file, t, sector.name, 2, true) }
-                    if (td == null) underInfo += "no wet-bulb for the dewpoint"
-                    else { lines = listOf(dewLines(t, td, dst)); under += dewShown(t, td); underInfo += "Td ${formatClock(td.second.validTime)} from wet-bulb"; dirty = true }
+                    val td = stage { underDew(t) }
+                    if (td == null) underInfo += "no dewpoint"
+                    else { lines = listOf(dewLines(t, td, dst)); under += dewShown(t, td); dirty = true }
                 }
             }
             dirty = true      // (the read-out note changes too)
@@ -1016,7 +990,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val g2 = frame.window.grid
         val box = View("Detail", 0, 0, g2.columns, g2.rows, pixelScale(g2), 1, g2)
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
-        val under = underParts(file, box, "detail", cache = false)
+        val under = underParts(file, box)
         val synthetic = synthetic(product, g2)
         val bitmap = withMemory { withContext(Dispatchers.Default) {
             val alertShapes = alertShapesFor(file)
@@ -1236,7 +1210,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 launch {
                     val gate = Semaphore(3)
                     var done = 0
-                    val underProducts = underProducts(st)
+                    val underOn = st.underTemp || st.underDew
                     val underFetched = java.util.Collections.synchronizedSet(HashSet<String>())
                     coroutineScope {
                         launch { prefetchArchivedAlerts(window.map { st.files[it] }) }          // the warnings and watches that were in force at each frame
@@ -1245,8 +1219,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                                 try {
                                     repo.prefetch(st.files[i]); ready[i] = true
                                     for (layer in st.overlays) overlayFileFor(layer, st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
-                                    // the hourly surface files last: one download serves the scans of a whole hour
-                                    for (p in underProducts) underFile(p, st.files[i])?.takeIf { underFetched.add(it.key) }?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
+                                    // the surface analysis last: one file (two messages) serves the scans of a quarter hour
+                                    if (underOn) underPick(st.files[i])?.takeIf { underFetched.add(it.url) }?.let { pick -> try { surface.prefetch(pick) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
                                 } catch (e: CancellationException) { throw e } catch (_: Exception) { }
                             }
                             done += 1
@@ -1312,10 +1286,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             var underlay: GlobeOverlay? = null
             var fieldLines: List<FieldLines> = emptyList()
             if (st.underTemp || st.underDew) {
-                val step = tempProduct?.let { globeStep(it) } ?: 1
-                underTemp(file, frame.window.grid, "globe", step, true)?.let { t ->
+                underTemp(file, frame.window.grid)?.let { t ->
                     if (st.underTemp) underlay = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY))
-                    if (st.underDew) underDew(file, t, "globe", step, true)?.let { td -> fieldLines = listOf(dewLines(t, td, null)) }
+                    if (st.underDew) underDew(t)?.let { td -> fieldLines = listOf(dewLines(t, td, null)) }
                 }
             }
             val shapes = alertShapesFor(file)
@@ -1353,7 +1326,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
         }
         outlook.ensure(file.validTime)
-        val under = underParts(file, box, if (area == ShareArea.Screen) "screen" else sectorOf(area).name, cache = area != ShareArea.Screen)
+        val under = underParts(file, box)
         val bitmap = withContext(Dispatchers.Default) {
             renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
         }

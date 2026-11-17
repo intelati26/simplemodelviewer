@@ -1,77 +1,65 @@
 package simplemodelview
 
-import kotlin.math.abs
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class UnderlayTest {
-    @Test
-    fun saturatedAirHasItsTemperatureAsDewpoint() {
-        assertEquals(20.0, Underlay.dewpoint(20.0, 20.0, 1000.0), 0.01)
-        assertEquals(5.0, Underlay.dewpoint(5.0, 5.3, 900.0), 0.01)       // a wet-bulb above the temperature (rounding) is saturated
-    }
-
-    @Test
-    fun matchesPsychrometricTables() {
-        // 30 C with a 20 C wet-bulb at 1000 hPa: tables give a dewpoint of about 14.6 C
-        assertEquals(14.6, Underlay.dewpoint(30.0, 20.0, 1000.0), 0.5)
-        // 10 C with a 5 C wet-bulb: about -1.5 C
-        assertEquals(-1.5, Underlay.dewpoint(10.0, 5.0, 1000.0), 0.5)
-    }
-
-    @Test
-    fun lowerPressureMeansMoreMoistureForTheSameWetBulb() {
-        val sea = Underlay.dewpoint(30.0, 15.0, 1013.0)
-        val denver = Underlay.dewpoint(30.0, 15.0, Underlay.standardPressure(1609.0))
-        assertTrue(denver - sea > 1.5, "at altitude the same wet-bulb depression means a higher dewpoint ($sea vs $denver)")
-        assertTrue(abs(Underlay.dewpoint(30.0, 25.0, 1000.0) - Underlay.dewpoint(30.0, 25.0, 990.0)) < 0.2, "10 hPa barely matters")
-    }
-
-    @Test
-    fun standardAtmosphere() {
-        assertEquals(1013.25, Underlay.standardPressure(0.0), 0.01)
-        assertEquals(835.0, Underlay.standardPressure(1609.0), 3.0)
-        val p = Underlay.pressureFromHeights(floatArrayOf(Float.NaN, 0f))
-        assertEquals(1013.25f, p[0], 0.01f)
-    }
-
-    @Test
-    fun fieldKeepsMissingCells() {
-        val td = Underlay.dewpointField(floatArrayOf(20f, Float.NaN, 25f), floatArrayOf(15f, 10f, Float.NaN), null)
-        assertTrue(!td[0].isNaN() && td[0] < 15f)
-        assertTrue(td[1].isNaN() && td[2].isNaN())
-    }
-
     @Test
     fun rtmaFileNames() {
         val t = epochOf(2026, 11, 17, 12, 7, 0)
         assertEquals("https://noaa-rtma-pds.s3.amazonaws.com/rtma2p5_ru.20261117/rtma2p5_ru.t1200z.2dvaranl_ndfd.grb2", RtmaBucket.analysisUrl(t))
         assertEquals("https://noaa-rtma-pds.s3.amazonaws.com/rtma2p5_ru.20261117/rtma2p5_ru.t1215z.2dvaranl_ndfd.grb2", RtmaBucket.analysisUrl(t + 600))
+        val c = RtmaBucket.candidates(epochOf(2026, 11, 17, 0, 10, 0))
+        assertEquals(epochOf(2026, 11, 17, 0, 0, 0), c.first())
+        assertEquals(epochOf(2026, 11, 16, 23, 0, 0), c.last(), "back an hour, over midnight")
     }
 
     @Test
-    fun terrainRoundTrip() {
-        val heights = floatArrayOf(0f, 1609.4f, Float.NaN, -12f, 4300f, 3121f)
-        val back = decodeTerrain(encodeTerrain(heights, 3, 2), 3, 2)!!
-        assertEquals(1609f, back[1]); assertTrue(back[2].isNaN()); assertEquals(-12f, back[3]); assertEquals(4300f, back[4])
-        assertEquals(null, decodeTerrain(encodeTerrain(heights, 3, 2), 2, 3), "another grid's file is not read")
+    fun nbmFallbackIsTheNearestHourFromRecentRuns() {
+        val f = nbmFallbacks(epochOf(2026, 11, 17, 23, 44, 0))
+        assertEquals("https://noaa-nbm-grib2-pds.s3.amazonaws.com/blend.20261117/23/core/blend.t23z.core.f001.co.grib2" to 1, f.first())
+        assertEquals("https://noaa-nbm-grib2-pds.s3.amazonaws.com/blend.20261117/18/core/blend.t18z.core.f006.co.grib2" to 6, f.last())
+    }
+
+    private val rtmaIndex = "1:0:d=2026111723:HGT:surface:anl:\n2:100:d=2026111723:PRES:surface:anl:\n3:200:d=2026111723:TMP:2 m above ground:anl:\n" +
+        "4:300:d=2026111723:DPT:2 m above ground:anl:\n5:400:d=2026111723:UGRD:10 m above ground:anl:\n"
+
+    private class FakeHttp(val files: Map<String, String>) : Http {
+        override suspend fun get(url: String): HttpResult = files[url]?.let { HttpResult(200, it.encodeToByteArray()) } ?: HttpResult(404, ByteArray(0))
+        override suspend fun getRange(url: String, first: Long, lastInclusive: Long) = HttpResult(206, ByteArray((lastInclusive - first + 1).toInt()))
+    }
+
+    // a core whose decoded field is the message's length in degrees C (so a test can tell which byte range was asked for)
+    private class LengthCore : Core by StubCore {
+        override fun decodeGrib(message: ByteArray) = GridField(Grid(5, 2, 2), FloatArray(4) { 273.15f + message.size })
     }
 
     @Test
-    fun smoothingAveragesNeighbors() {
-        val v = smooth3(floatArrayOf(0f, 0f, 0f, 0f, 900f, 0f, 0f, 0f, 0f), 3, 3)
-        assertEquals(100f, v[4], 0.01f)
-        assertEquals(225f, v[0], 0.01f)
+    fun picksTheNewestAnalysisAtOrBeforeTheScan() = runTest {
+        val scan = epochOf(2026, 11, 17, 23, 44, 0)
+        val posted = RtmaBucket.analysisUrl(epochOf(2026, 11, 17, 23, 15, 0))       // 23:30 is not posted yet
+        val repo = SurfaceRepository(FakeHttp(mapOf("$posted.idx" to rtmaIndex)), LengthCore())
+        val pick = assertNotNull(repo.pick(scan, scan + 60))
+        assertTrue(pick.rtma)
+        assertEquals(epochOf(2026, 11, 17, 23, 15, 0), pick.valid)
+        assertEquals(100f, repo.temperature(pick).values[0], 0.01f, "TMP is bytes 200..299 (and comes back in C)")
+        assertEquals(100f, repo.dewpoint(pick).values[0], 0.01f)
     }
 
     @Test
-    fun surfaceFileIsTheNearestWithinThreeHoursBefore() {
-        fun f(h: Int) = MrmsFile("k$h", epochOf(2026, 11, 17, h, 0, 0), null, 0L)
-        val files = listOf(f(17), f(18), f(19), f(20), f(21), f(22))
-        // live: 23:44 has only the 22:00 file (they arrive ~85 minutes late)
-        assertEquals("k22", Underlay.fileFor(files, epochOf(2026, 11, 17, 23, 44, 0))?.key)
-        assertEquals("k20", Underlay.fileFor(files, epochOf(2026, 11, 17, 19, 40, 0))?.key)
-        assertEquals(null, Underlay.fileFor(files, epochOf(2026, 11, 18, 2, 0, 0)))
+    fun fallsBackToNbm() = runTest {
+        val scan = epochOf(2026, 11, 17, 23, 44, 0)
+        val nbm = nbmFallbacks(scan).first().first
+        val index = "35:1000:d=2026111723:DPT:2 m above ground:1 hour fcst:\n36:1500:d=2026111723:DPT:2 m above ground:1 hour fcst:ens std dev\n" +
+            "133:2000:d=2026111723:TMP:2 m above ground:1 hour fcst:\n134:2600:d=2026111723:TMP:2 m above ground:1 hour fcst:ens std dev\n"
+        val repo = SurfaceRepository(FakeHttp(mapOf("$nbm.idx" to index)), LengthCore())
+        val pick = assertNotNull(repo.pick(scan, scan + 60))
+        assertTrue(!pick.rtma && pick.lead == 1)
+        assertEquals(epochOf(2026, 11, 18, 0, 0, 0), pick.valid)
+        assertEquals(600f, repo.temperature(pick).values[0], 0.01f, "the plain TMP, not its spread")
+        assertEquals(500f, repo.dewpoint(pick).values[0], 0.01f)
     }
 }

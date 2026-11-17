@@ -236,18 +236,18 @@ internal fun OverlayTreeDialog(
                             Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text("Temperature fill", fontWeight = FontWeight.Bold)
-                                    Text("MRMS's hourly model temperature, translucent, under the radar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("The 2 m temperature of NOAA's surface analysis (RTMA, every 15 minutes), translucent, under the radar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Switch(checked = underTemp, onCheckedChange = onUnderTemp)
                             }
                             Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text("Dewpoint lines", fontWeight = FontWeight.Bold)
-                                    Text("Worked out from MRMS's temperature and wet-bulb, with the pressure of the ground under each place; every 10 F, the 60 F line heavier", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("The analysis' 2 m dewpoint: every 10 F, the 60 F line heavier", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Switch(checked = underDew, onCheckedChange = onUnderDew)
                             }
-                            Note("Drawn after the radar and its overlays: they show first, the surface follows as it arrives. The first dewpoint also downloads the ground's height once (about 7 MB).")
+                            Note("Drawn after the radar and its overlays: they show first, the surface follows as it arrives. Each scan takes the newest analysis at or before it (about 6 MB per field, one per 15 minutes); when there is none, the National Blend of Models' forecast for that hour.")
                         }
                     }
                     // contours
