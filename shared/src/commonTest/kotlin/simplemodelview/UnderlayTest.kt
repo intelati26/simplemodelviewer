@@ -49,4 +49,29 @@ class UnderlayTest {
         assertEquals("https://noaa-rtma-pds.s3.amazonaws.com/rtma2p5_ru.20261117/rtma2p5_ru.t1200z.2dvaranl_ndfd.grb2", RtmaBucket.analysisUrl(t))
         assertEquals("https://noaa-rtma-pds.s3.amazonaws.com/rtma2p5_ru.20261117/rtma2p5_ru.t1215z.2dvaranl_ndfd.grb2", RtmaBucket.analysisUrl(t + 600))
     }
+
+    @Test
+    fun terrainRoundTrip() {
+        val heights = floatArrayOf(0f, 1609.4f, Float.NaN, -12f, 4300f, 3121f)
+        val back = decodeTerrain(encodeTerrain(heights, 3, 2), 3, 2)!!
+        assertEquals(1609f, back[1]); assertTrue(back[2].isNaN()); assertEquals(-12f, back[3]); assertEquals(4300f, back[4])
+        assertEquals(null, decodeTerrain(encodeTerrain(heights, 3, 2), 2, 3), "another grid's file is not read")
+    }
+
+    @Test
+    fun smoothingAveragesNeighbors() {
+        val v = smooth3(floatArrayOf(0f, 0f, 0f, 0f, 900f, 0f, 0f, 0f, 0f), 3, 3)
+        assertEquals(100f, v[4], 0.01f)
+        assertEquals(225f, v[0], 0.01f)
+    }
+
+    @Test
+    fun surfaceFileIsTheNearestWithinThreeHoursBefore() {
+        fun f(h: Int) = MrmsFile("k$h", epochOf(2026, 11, 17, h, 0, 0), null, 0L)
+        val files = listOf(f(17), f(18), f(19), f(20), f(21), f(22))
+        // live: 23:44 has only the 22:00 file (they arrive ~85 minutes late)
+        assertEquals("k22", Underlay.fileFor(files, epochOf(2026, 11, 17, 23, 44, 0))?.key)
+        assertEquals("k20", Underlay.fileFor(files, epochOf(2026, 11, 17, 19, 40, 0))?.key)
+        assertEquals(null, Underlay.fileFor(files, epochOf(2026, 11, 18, 2, 0, 0)))
+    }
 }

@@ -55,9 +55,11 @@ object AppContainer {
     val probSevere by lazy { ProbSevereModel(ProbSevereRepository(http) { prefs.getString("probsevere_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val alerts by lazy { AlertsRepository(http) }
-    /** The height of the ground (RTMA, 2.5 km) for the dewpoint under the MRMS radar: downloaded once (about 7 MB) and kept with the app's files. */
+    /** The height of the ground (5 km, from RTMA) for the dewpoint under the MRMS radar: made once (a 7.5 MB download) and kept gzipped with the app's files (under 1 MB). */
     val terrain by lazy {
-        val file = File(app.filesDir, "terrain_rtma_hgt.grb2")
-        simplemodelview.RtmaTerrain(http, core, read = { file.takeIf { it.exists() }?.readBytes() }, write = { file.writeBytes(it) })
+        val file = File(app.filesDir, "terrain_5km.bin.gz")
+        simplemodelview.RtmaTerrain(http, core,
+            read = { file.takeIf { it.exists() }?.let { f -> java.util.zip.GZIPInputStream(f.inputStream()).use { it.readBytes() } } },
+            write = { bytes -> val tmp = File(file.path + ".tmp"); java.util.zip.GZIPOutputStream(tmp.outputStream()).use { it.write(bytes) }; tmp.renameTo(file) })
     }
 }

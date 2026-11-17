@@ -524,8 +524,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             lists[layer.product.directory] = try { repo.listFilesSince(layer.product, first.validTime - 120, now) }
             catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
         }
-        for (p in under) {      // hourly: from the hour before the first scan
-            lists[p.directory] = try { repo.listFilesSince(p, first.validTime - 3600, now) }
+        for (p in under) {      // hourly, and late: from three hours before the first scan (see Underlay.fileFor)
+            lists[p.directory] = try { repo.listFilesSince(p, first.validTime - Underlay.LOOKBACK_SECONDS, now) }
             catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
         }
         update { it.copy(overlayFiles = lists) }
@@ -628,7 +628,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun underFile(p: MrmsProduct?, base: MrmsFile): MrmsFile? =
-        p?.let { nearestFile(_state.value.overlayFiles[it.directory].orEmpty(), base.validTime, overlayToleranceSeconds(it)) }
+        p?.let { Underlay.fileFor(_state.value.overlayFiles[it.directory].orEmpty(), base.validTime) }
 
     /** The grid (about 3 km) the surface fields are put on for a picture's grid: they are smooth model fields, and need no 1 km cells. The picture's own when it is not finer. */
     private fun underGridFor(grid: Grid): Grid = synchronized(underGrids) {

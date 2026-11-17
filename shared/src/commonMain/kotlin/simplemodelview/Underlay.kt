@@ -19,6 +19,17 @@ object Underlay {
     const val TEMP = "Model_SurfaceTemp_00.50"
     const val WETBULB = "Model_WetBulbTemp_00.50"
 
+    /**
+     * MRMS's model fields are hourly (valid on the hour) but reach the bucket about 85 minutes after their time: the newest radar scans have no file near
+     * them. So a scan takes the file nearest its time among those from [LOOKBACK_SECONDS] before it to [AHEAD_SECONDS] after it (the newest one, an hour
+     * and more old, for live scans; the one of the nearest hour for older scans).
+     */
+    const val LOOKBACK_SECONDS = 3 * 3600L
+    const val AHEAD_SECONDS = 1800L
+
+    fun fileFor(files: List<MrmsFile>, validTime: Long): MrmsFile? =
+        files.filter { it.validTime in (validTime - LOOKBACK_SECONDS)..(validTime + AHEAD_SECONDS) }.minByOrNull { kotlin.math.abs(it.validTime - validTime) }
+
     /** How opaque the temperature fill is: the radar goes over it, and the map should still read through it. */
     const val FILL_OPACITY = 0.55
 
@@ -81,8 +92,9 @@ object RtmaBucket {
 }
 
 /**
- * The height of the ground (m) on RTMA's 2.5 km grid: one GRIB message (about 7 MB) from any recent analysis file, read once and then kept by the app
- * ([read] / [write]: the platform's file), since the ground does not move. Null while it cannot be had (no network the first time).
+ * The height of the ground (m) at 5 km: made once from RTMA's 2.5 km terrain (one GRIB message of about 7.5 MB from any recent analysis file), smoothed and
+ * put on a 5 km grid of the MRMS area, then kept by the app ([read] / [write]: the platform's file, see [encodeTerrain]) since the ground does not move.
+ * 5 km is plenty for a pressure: 100 m of height is about 11 hPa, a third of a degree F of dewpoint. Null while it cannot be had (no network the first time).
  */
 class RtmaTerrain(private val http: Http, private val core: Core, private val read: () -> ByteArray?, private val write: (ByteArray) -> Unit) {
     private var field: GridField? = null
@@ -91,18 +103,18 @@ class RtmaTerrain(private val http: Http, private val core: Core, private val re
 
     suspend fun field(nowEpoch: Long): GridField? = lock.withLock {
         field?.let { return@withLock it }
+        val grid = try { core.planLambertBox(TERRAIN_BOX[0], TERRAIN_BOX[1], TERRAIN_BOX[2], TERRAIN_BOX[3], TERRAIN_CELL_METERS) } catch (e: Exception) { return@withLock null }
         val kept = try { read() } catch (e: Exception) { null }
-        kept?.let { bytes -> decode(bytes)?.let { field = it; return@withLock it } }
+        kept?.let { decodeTerrain(it, grid.columns, grid.rows) }?.let { return@withLock GridField(grid, it).also { f -> field = f } }
         if (nowEpoch - failedAt < 600) return@withLock null           // a failed download is not tried again for ten minutes
         val bytes = download(nowEpoch)
-        if (bytes == null) { failedAt = nowEpoch; return@withLock null }
-        val decoded = decode(bytes) ?: run { failedAt = nowEpoch; return@withLock null }
-        try { write(bytes) } catch (e: Exception) { }
-        field = decoded
-        decoded
+        val full = bytes?.let { try { core.decodeGrib(it) } catch (e: Exception) { null } }
+        if (full == null) { failedAt = nowEpoch; return@withLock null }
+        // a 3 x 3 mean first, so the 5 km cells take the mean height around them rather than one 2.5 km cell (or the highest of a few)
+        val values = core.reproject(smooth3(full.values, full.grid.columns, full.grid.rows), full.grid, grid)
+        try { write(encodeTerrain(values, grid.columns, grid.rows)) } catch (e: Exception) { }
+        GridField(grid, values).also { field = it }
     }
-
-    private fun decode(bytes: ByteArray): GridField? = try { core.decodeGrib(bytes) } catch (e: Exception) { null }
 
     /** The surface height message of an analysis an hour or more old (surely uploaded), trying earlier hours when one is missing. */
     private suspend fun download(nowEpoch: Long): ByteArray? {
@@ -125,4 +137,57 @@ class RtmaTerrain(private val http: Http, private val core: Core, private val re
         }
         return null
     }
+}
+
+/** The area of the kept terrain (west, south, east, north): the MRMS domain and a margin. */
+val TERRAIN_BOX = doubleArrayOf(-131.0, 19.0, -59.0, 56.0)
+const val TERRAIN_CELL_METERS = 5000.0
+
+/** The kept terrain: "TRN1", columns, rows, then each height in whole metres as a 16-bit number (big-endian; -32768 where there is none). */
+fun encodeTerrain(values: FloatArray, columns: Int, rows: Int): ByteArray {
+    val n = columns * rows
+    val out = ByteArray(12 + 2 * n)
+    "TRN1".encodeToByteArray().copyInto(out)
+    fun int(at: Int, v: Int) { out[at] = (v ushr 24).toByte(); out[at + 1] = (v ushr 16).toByte(); out[at + 2] = (v ushr 8).toByte(); out[at + 3] = v.toByte() }
+    int(4, columns); int(8, rows)
+    for (i in 0 until n) {
+        val h = values.getOrElse(i) { Float.NaN }
+        val v = if (h.isNaN()) -32768 else kotlin.math.round(h).toInt().coerceIn(-32767, 32767)
+        out[12 + 2 * i] = (v shr 8).toByte(); out[13 + 2 * i] = v.toByte()
+    }
+    return out
+}
+
+/** The heights of a kept terrain, or null when the bytes are not one of [columns] x [rows]. */
+fun decodeTerrain(bytes: ByteArray, columns: Int, rows: Int): FloatArray? {
+    if (bytes.size < 12 || bytes.decodeToString(0, 4) != "TRN1") return null
+    fun int(at: Int) = ((bytes[at].toInt() and 255) shl 24) or ((bytes[at + 1].toInt() and 255) shl 16) or ((bytes[at + 2].toInt() and 255) shl 8) or (bytes[at + 3].toInt() and 255)
+    if (int(4) != columns || int(8) != rows) return null
+    val n = columns * rows
+    if (bytes.size < 12 + 2 * n) return null
+    return FloatArray(n) { i ->
+        val v = ((bytes[12 + 2 * i].toInt() shl 8) or (bytes[13 + 2 * i].toInt() and 255)).toShort().toInt()
+        if (v == -32768) Float.NaN else v.toFloat()
+    }
+}
+
+/** A 3 x 3 mean of a grid (NaN cells left out; a cell with no values around it stays NaN). */
+fun smooth3(values: FloatArray, columns: Int, rows: Int): FloatArray {
+    val out = FloatArray(values.size)
+    for (r in 0 until rows) for (c in 0 until columns) {
+        var sum = 0.0
+        var count = 0
+        for (dr in -1..1) {
+            val rr = r + dr
+            if (rr < 0 || rr >= rows) continue
+            for (dc in -1..1) {
+                val cc = c + dc
+                if (cc < 0 || cc >= columns) continue
+                val v = values[rr * columns + cc]
+                if (!v.isNaN()) { sum += v; count += 1 }
+            }
+        }
+        out[r * columns + c] = if (count == 0) Float.NaN else (sum / count).toFloat()
+    }
+    return out
 }
