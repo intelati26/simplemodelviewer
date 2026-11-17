@@ -103,6 +103,8 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
         product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null, alerts: List<AlertDraw> = emptyList(),
         counties: Int = 0, overlays: List<GlobeOverlay> = emptyList(), baseHalo: Boolean = false, frameKey: String? = null,
+        /** A field under the data (the MRMS temperature) and lines of another field over everything but the alerts (the dewpoint). */
+        underlay: GlobeOverlay? = null, fieldLines: List<FieldLines> = emptyList(),
     ): Bitmap {
         val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -132,7 +134,8 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val paintLines = product != null && PaintballLines.isPaintballLines(product.id)
         val rasterStyle = if (paintLines) Style(Kind.Paintball, units = "members") else style
         val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
-        val baseDomain = if (baseHalo) 0 else domain          // an edged swath is only the shapes, not the whole domain
+        val baseDomain = if (baseHalo || underlay != null) 0 else domain          // an edged swath is only the shapes, not the whole domain; a field underneath shows instead
+        if (underlay != null) Timings.timed("underlay") { drawOverlay(canvas, underlay, cam, polar, width, height, stride) }
         Timings.timed("raster") {
             if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, baseDomain, rasterStyle, memberRgb, buffer)
             else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, baseDomain, rasterStyle, memberRgb, buffer)
@@ -153,6 +156,11 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
             } else drawLines(canvas, cam, polar, width, height, dark, stride, counties)
         }
         if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame, frameKey)
+        for (f in fieldLines) Timings.timed("contours") {
+            val key = "field|${f.key}|${f.grid.id}"
+            val geo = cachedGeo(key) ?: traceGeo(f.grid, f.values, f.style, f.spec, null).also { putGeo(key, it) }
+            drawContourLines(canvas, projectedContours(geo) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, f.spec.color, dark, width)
+        }
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 

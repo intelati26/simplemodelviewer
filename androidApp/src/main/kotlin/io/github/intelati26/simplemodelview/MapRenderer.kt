@@ -34,12 +34,22 @@ class Overlay(
  */
 class AlertDraw(val rings: List<FloatArray>, val color: Int, val dashed: Boolean, val fill: Boolean, val combined: Boolean = false, val open: Boolean = false, val hatch: Int = 1, val strong: Boolean = false, val shade: Boolean = false, val heavy: Boolean = false)   // 1 = "/", 2 = "\\", 3 = both
 
+/**
+ * Contour lines of a second field (the dewpoint under the MRMS radar): [values] on [grid] (the picture's own grid), shown in [style]'s units at [spec]'s levels.
+ * [key] names the field and frame, so its lines are traced once and reused while it stays the same (an hourly field under a loop of 2-minute scans).
+ * [dst]: the field is on a coarser grid of its own (a smooth model field needs no 1 km cells), whose whole extent covers this rectangle of the picture;
+ * null: it is on the picture's grid. The globe ignores it (it places every line by latitude and longitude).
+ */
+class FieldLines(val values: FloatArray, val grid: simplemodelview.Grid, val style: Style, val spec: ContourSpec, val key: String, val dst: android.graphics.RectF? = null)
+
 /** How many barbs the density levels (1 to 5) put across a picture's width: 10 (sparse) to 42, about what SPC's mesoanalysis charts draw across the country; the default is 24. */
 internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 10f; 2 -> 16f; 3 -> 24f; 4 -> 34f; else -> 42f }
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
 class MapRenderer(private val core: Core, private val lines: MapLines) {
-    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f): Bitmap {
+    fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f,
+               /** A field under the data (the MRMS temperature): stretched over the whole picture, smoothly, before the data is drawn. */
+               underlay: Overlay? = null, fieldLines: List<FieldLines> = emptyList()): Bitmap {
         val pictureStart = System.nanoTime()
         val w = view.pixelWidth
         val h = view.pixelHeight
@@ -53,6 +63,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
+        if (underlay != null) Timings.timed("underlay") { canvas.drawBitmap(underlay.bitmap, null, underlay.dst, Paint().apply { isFilterBitmap = true }) }
         if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)   // the member cells go over the contours
         canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, if (paintLines) Paint().apply { alpha = 0x90 } else null)
         for (overlay in overlays) {
@@ -70,9 +81,36 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         WindProducts.planeLevel(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity, barbZoom)
         }
+        for (f in fieldLines) Timings.timed("contours") { drawContourLines(canvas, fieldLinesFor(f, view), f.spec.color, dark, w) }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
         return bitmap
+    }
+
+    // the traced lines of the last few fields and views (a loop over an hourly field draws the same lines on every frame of the hour)
+    private val fieldLineCache = LinkedHashMap<Pair<String, View>, List<ContourLine>>(8, 0.75f, true)
+
+    private fun fieldLinesFor(f: FieldLines, view: View): List<ContourLine> = synchronized(fieldLineCache) {
+        val key = f.key to view
+        fieldLineCache[key] ?: traceField(f, view).also {
+            fieldLineCache[key] = it
+            while (fieldLineCache.size > 6) fieldLineCache.remove(fieldLineCache.keys.first())
+        }
+    }
+
+    private fun traceField(f: FieldLines, view: View): List<ContourLine> {
+        val dst = f.dst ?: return Contours.lines(f.values, f.grid, view, f.style, f.spec)
+        val g = f.grid
+        val whole = View("field", 0, 0, g.columns, g.rows, 1, 1, g)
+        val sx = dst.width() / g.columns
+        val sy = dst.height() / g.rows
+        return Contours.lines(f.values, g, whole, f.style, f.spec).map { line ->
+            val p = line.points
+            val q = FloatArray(p.size)
+            var k = 0
+            while (k + 1 < p.size) { q[k] = dst.left + p[k] * sx; q[k + 1] = dst.top + p[k + 1] * sy; k += 2 }
+            ContourLine(line.level, line.bold, q, line.label, line.labelAt, line.closed)
+        }
     }
 
     /** Lines of the share of members at or above the threshold (10 / 30 / 50 / 70 / 90 %), blurred over a neighborhood; one color per level, the 50 % line heavier. */

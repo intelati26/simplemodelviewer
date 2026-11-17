@@ -55,7 +55,7 @@ import simplemodelview.overlayThresholdChoices
 /** One line for the strip under the map: what is drawn over it ("Overlays: Rotation, Warnings, Day 2 tornado, LightningCast"), or "Overlays: none". */
 internal fun overlaySummary(
     layers: List<OverlayLayer>, alertKinds: Set<AlertKind>, outlook: OutlookState, valid: Long?, lightning: LightningState, contours: Boolean = false,
-    probSevere: ProbSevereState = ProbSevereState(),
+    probSevere: ProbSevereState = ProbSevereState(), surface: String? = null,
 ): String {
     val now = System.currentTimeMillis() / 1000
     val parts = buildList {
@@ -65,6 +65,7 @@ internal fun overlaySummary(
         if (lightning.enabled) add("LightningCast")
         if (probSevere.enabled) add("ProbSevere")
         if (contours) add("Contours")
+        surface?.let { add(it) }
     }
     return if (parts.isEmpty()) "Overlays: none" else "Overlays: " + parts.joinToString(", ")
 }
@@ -83,6 +84,8 @@ internal fun OverlayTreeDialog(
     lightning: LightningState, onLightning: (Boolean) -> Unit, onLightningLink: () -> Unit = {},
     probSevere: ProbSevereState = ProbSevereState(), onProbSevere: (Boolean) -> Unit = {}, onProbSevereLink: () -> Unit = {},
     contours: Boolean, contoursAvailable: Boolean, onContours: (Boolean) -> Unit,
+    /** The surface layers under the radar (MRMS page only; null: not offered): the temperature fill and the dewpoint lines. */
+    underTemp: Boolean? = null, onUnderTemp: (Boolean) -> Unit = {}, underDew: Boolean = false, onUnderDew: (Boolean) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var open by remember { mutableStateOf(emptySet<String>()) }
@@ -225,6 +228,27 @@ internal fun OverlayTreeDialog(
                         if (probSevere.busy) Note("Reading\u2026")
                         if (probSevere.enabled) probSevere.note?.let { Note(it, true) }
                         Note("Unofficial copy: use the NWS warnings for decisions.")
+                    }
+                    // the surface under the radar
+                    if (underTemp != null) {
+                        val summary = listOfNotNull("T".takeIf { underTemp }, "Td".takeIf { underDew }).joinToString(" + ").ifEmpty { "off" }
+                        TreeNode("Surface", summary, "surface" in open, { toggle("surface") }) {
+                            Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Temperature fill", fontWeight = FontWeight.Bold)
+                                    Text("MRMS's hourly model temperature, translucent, under the radar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(checked = underTemp, onCheckedChange = onUnderTemp)
+                            }
+                            Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Dewpoint lines", fontWeight = FontWeight.Bold)
+                                    Text("Worked out from MRMS's temperature and wet-bulb, with the pressure of the ground under each place; every 10 F, the 60 F line heavier", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(checked = underDew, onCheckedChange = onUnderDew)
+                            }
+                            Note("Drawn after the radar and its overlays: they show first, the surface follows as it arrives. The first dewpoint also downloads the ground's height once (about 7 MB).")
+                        }
                     }
                     // contours
                     TreeNode("Contours", if (!contoursAvailable) "none for this field" else if (contours) "on" else "off", "contours" in open, { toggle("contours") }) {

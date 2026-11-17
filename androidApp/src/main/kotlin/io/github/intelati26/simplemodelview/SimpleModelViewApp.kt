@@ -55,4 +55,9 @@ object AppContainer {
     val probSevere by lazy { ProbSevereModel(ProbSevereRepository(http) { prefs.getString("probsevere_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val alerts by lazy { AlertsRepository(http) }
+    /** The height of the ground (RTMA, 2.5 km) for the dewpoint under the MRMS radar: downloaded once (about 7 MB) and kept with the app's files. */
+    val terrain by lazy {
+        val file = File(app.filesDir, "terrain_rtma_hgt.grb2")
+        simplemodelview.RtmaTerrain(http, core, read = { file.takeIf { it.exists() }?.readBytes() }, write = { file.writeBytes(it) })
+    }
 }

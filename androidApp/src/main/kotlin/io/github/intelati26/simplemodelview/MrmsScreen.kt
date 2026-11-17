@@ -172,7 +172,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             val contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null
             // every overlay lives in one tree popup, so the strip under the map is a single line
             TextButton(onClick = { overlayTree = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
-                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable, probSevereState), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable, probSevereState, listOfNotNull("T".takeIf { s.underTemp }, "Td".takeIf { s.underDew }).joinToString(" + ").ifEmpty { null }), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
@@ -278,6 +278,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         onProbSevereLink = { probSevereLink = true },
         contours = s.settings.contours, contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null,
         onContours = { vm.setSettings(s.settings.copy(contours = it)) },
+        underTemp = s.underTemp, onUnderTemp = vm::setUnderTemp, underDew = s.underDew, onUnderDew = vm::setUnderDew,
         onDismiss = { overlayTree = false },
     )
     s.alertDetail?.let { (title, text) ->
