@@ -56,7 +56,10 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     private fun cachedGeo(key: String): List<GeoLine>? = synchronized(geoLock) { geoCache[key] }
 
+    /** Keeps a frame's lines; over the budget the new ones are not kept (rather than the oldest dropped): a loop is a circle, and the frames kept stay kept. */
     private fun putGeo(key: String, lines: List<GeoLine>) = synchronized(geoLock) {
+        val size = lines.sumOf { it.points.size.toLong() }
+        if (key !in geoCache && geoCacheSize + size > GEO_BUDGET) return@synchronized
         geoCache.put(key, lines)?.let { old -> geoCacheSize -= old.sumOf { it.points.size.toLong() } }
         geoCacheSize += lines.sumOf { it.points.size.toLong() }
         val it = geoCache.entries.iterator()
@@ -190,9 +193,38 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     private fun level(windLevel: Int, values: FloatArray, cells: Int) = windLevel == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
 
+    private val affines = HashMap<Grid, DoubleArray>()
+    private val notAffine = HashSet<Grid>()
+
+    /**
+     * For a latitude / longitude grid (GFS, MRMS): lat = a + col b + row c, lon = d + col e + row f, checked against the core at a far cell; null for a projected
+     * grid. A contour line's vertices then become places with no call into the core each (a frame has a hundred thousand of them).
+     */
+    private fun affineOf(grid: Grid): DoubleArray? = synchronized(affines) {
+        affines[grid]?.let { return@synchronized it }
+        if (grid in notAffine) return@synchronized null
+        val o = core.gridToLatLon(grid, 0.0, 0.0); val x = core.gridToLatLon(grid, 1.0, 0.0); val y = core.gridToLatLon(grid, 0.0, 1.0)
+        val a = doubleArrayOf(o[0], x[0] - o[0], y[0] - o[0], o[1], x[1] - o[1], y[1] - o[1])
+        val col = (grid.columns - 1) * 0.83; val row = (grid.rows - 1) * 0.71
+        val far = core.gridToLatLon(grid, col, row)
+        val ok = kotlin.math.abs(a[0] + col * a[1] + row * a[2] - far[0]) < 1e-6 && kotlin.math.abs(a[3] + col * a[4] + row * a[5] - far[1]) < 1e-6
+        if (ok) { affines[grid] = a; a } else { notAffine += grid; null }
+    }
+
     private fun toLatLon(grid: Grid, whole: View, line: ContourLine): FloatArray {
         val p = line.points
         val out = FloatArray(p.size)
+        val a = affineOf(grid)
+        if (a != null) {
+            var k = 0
+            while (k + 1 < p.size) {
+                val col = p[k] - 0.5 + whole.col0
+                val row = whole.row0 + whole.rows - 0.5 - p[k + 1]
+                out[k] = (a[0] + col * a[1] + row * a[2]).toFloat(); out[k + 1] = (a[3] + col * a[4] + row * a[5]).toFloat()
+                k += 2
+            }
+            return out
+        }
         var i = 0
         while (i + 1 < p.size) {
             val col = p[i] - 0.5 + whole.col0

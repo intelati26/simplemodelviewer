@@ -38,7 +38,7 @@ import java.io.File
 import kotlin.math.floor
 
 /** The windows of the globe the GFS page shows (Lambert boxes of the REFS projection, like the sectors of the other pages). */
-/** How many bytes of drawn globe pictures a loop keeps (a 24 hour loop on a phone screen is 25 pictures of about 7 MB). */
+/** The least memory the drawn globe pictures of a loop may use; a phone with more memory gets a sixth of it, up to 768 MB (see frameBudget). */
 private const val FRAME_BUDGET = 192L * 1024 * 1024
 
 internal val GFS_SECTORS = listOf(
@@ -119,13 +119,28 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private val frameCache = LinkedHashMap<String, CachedFrame>(32, 0.75f, true)
     private var frameCacheBytes = 0L
 
+    /** How many bytes of pictures to keep: a sixth of the phone's memory, from 192 to 768 MB (a high-resolution screen's picture is 15 MB: a 24 hour loop is 25 of them). */
+    private val frameBudget: Long = try {
+        val am = getApplication<Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        (info.totalMem / 6).coerceIn(FRAME_BUDGET, 768L * 1024 * 1024)
+    } catch (_: Exception) { FRAME_BUDGET }
+
+    private fun cacheHasRoom(bytes: Long) = synchronized(frameCache) { frameCacheBytes + bytes <= frameBudget }
+
     private fun cacheGet(key: String): CachedFrame? = synchronized(frameCache) { frameCache[key] }
 
-    private fun cachePut(key: String, frame: CachedFrame) = synchronized(frameCache) {
+    /**
+     * Keeps a picture. [evict]: make room by dropping the least recently used ones; without it (a loop playing) a picture that does not fit is not kept, since a
+     * loop shows its frames in a circle and dropping the oldest would drop exactly the one wanted next: the frames that fit stay, every pass.
+     */
+    private fun cachePut(key: String, frame: CachedFrame, evict: Boolean = true) = synchronized(frameCache) {
+        val bytes = frame.bitmap.allocationByteCount.toLong()
+        if (!evict && key !in frameCache && frameCacheBytes + bytes > frameBudget) return@synchronized
         frameCache.put(key, frame)?.let { frameCacheBytes -= it.bitmap.allocationByteCount }
-        frameCacheBytes += frame.bitmap.allocationByteCount
+        frameCacheBytes += bytes
         val it = frameCache.entries.iterator()
-        while (frameCacheBytes > FRAME_BUDGET && frameCache.size > 1 && it.hasNext()) {
+        while (frameCacheBytes > frameBudget && frameCache.size > 1 && it.hasNext()) {
             val eldest = it.next()
             if (eldest.key == key) continue
             frameCacheBytes -= eldest.value.bitmap.allocationByteCount
@@ -366,10 +381,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         // the whole picture too: a loop that fits the memory is drawn once, here, and played from these
         if (render && globeW > 0) {
             val key = pictureKey(st, file)
-            if (cacheGet(key) == null) {
+            if (cacheGet(key) == null && cacheHasRoom(globeW.toLong() * globeH * 4)) {
                 val title = if (since) sinceTitle(st, file) else title0
                 val bitmap = withContext(Dispatchers.Default) { renderGlobeBitmap(st, product, data.values, file, frameKeyOf(st, file), 1) }
-                cachePut(key, CachedFrame(bitmap, product, title))
+                cachePut(key, CachedFrame(bitmap, product, title), evict = false)
             }
         }
     }
@@ -498,7 +513,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val file = st.file
         val frameKey = globeFrameKey
         val bitmap = withContext(Dispatchers.Default) { renderGlobeBitmap(st, product, values, file, frameKey, stride) }
-        if (stride == 1 && file != null && frameKey != null) cachePut(pictureKey(st, file), CachedFrame(bitmap, product, st.title))
+        if (stride == 1 && file != null && frameKey != null) cachePut(pictureKey(st, file), CachedFrame(bitmap, product, st.title), evict = !st.playing)
         update { it.copy(map = bitmap, busy = false) }
     }
 
@@ -644,11 +659,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
                 // download the frames' messages first (they are kept, so playing them is fast), then play
                 val surface = GfsCatalog.surfaceById(st.product)
                 val count = window.count()
-                val fits = st.globe && globeW > 0 && count.toLong() * globeW * globeH * 4 <= FRAME_BUDGET
                 var done = 0
                 for (i in window) {
                     if (st.product == GfsHistory.SINCE_ID) Unit else if (st.globe) repo.prefetch(st.frames[i], st.level, st.color, surface, null, false) else repo.prefetch(st.frames[i], st.level, st.color, surface, regionFor(st), st.settings.gfsCrop)
-                    if (st.globe) prepareFrame(i, render = fits)           // the contour lines (and, when the loop fits the memory, the whole picture) of every frame are made while it loads
+                    if (st.globe) prepareFrame(i, render = true)           // the contour lines and the whole picture of every frame (as many as fit the memory) are made while it loads
                     done += 1
                     update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
                 }
