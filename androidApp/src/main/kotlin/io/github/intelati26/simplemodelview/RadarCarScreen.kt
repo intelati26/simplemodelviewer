@@ -47,6 +47,7 @@ internal class RadarCarScreen(carContext: CarContext) : Screen(carContext) {
     private val surfaceCallback = object : SurfaceCallback {
         override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {
             surface = surfaceContainer.surface; width = surfaceContainer.width; height = surfaceContainer.height
+            CarLog.add(carContext, "Map surface given: ${width} x ${height}")
             draw()
         }
         override fun onVisibleAreaChanged(visibleArea: Rect) { visible = visibleArea; draw() }
@@ -69,7 +70,16 @@ internal class RadarCarScreen(carContext: CarContext) : Screen(carContext) {
         })
     }
 
-    override fun onGetTemplate(): Template {
+    /** The template, or a plain pane saying what went wrong (and a line in the car log) when the host or the library refuses it. */
+    override fun onGetTemplate(): Template = try {
+        radarTemplate()
+    } catch (e: Exception) {
+        CarLog.add(carContext, "Template refused: ${e.javaClass.simpleName}: ${e.message}")
+        PaneTemplate.Builder(Pane.Builder().addRow(Row.Builder().setTitle("The radar screen could not be shown").addText(e.message ?: e.javaClass.simpleName).build()).build())
+            .setHeader(Header.Builder().setTitle("simplemodelview").setStartHeaderAction(Action.APP_ICON).build()).build()
+    }
+
+    private fun radarTemplate(): Template {
         val now = System.currentTimeMillis() / 1000
         val valid = radar.validTime
         val pane = Pane.Builder()

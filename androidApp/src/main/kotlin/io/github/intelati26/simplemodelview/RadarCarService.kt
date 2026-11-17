@@ -15,16 +15,26 @@ import androidx.car.app.validation.HostValidator
  * docs/android-auto.md.
  */
 class RadarCarService : CarAppService() {
+    override fun onCreate() {
+        super.onCreate()
+        CarLog.add(this, "Android Auto started the car service")
+    }
+
     // any host while the app is a debug build (the Desktop Head Unit); in a release build only the hosts the library lists as Google's
     override fun createHostValidator(): HostValidator =
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
         else HostValidator.Builder(applicationContext).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
 
     override fun onCreateSession(): Session = object : Session() {
+        init { CarLog.add(this@RadarCarService, "Session opened by " + (hostInfo?.packageName ?: "an unknown host")) }
+
         // the map template needs car API level 7; an older Android Auto would hide the whole app silently if the manifest demanded it, so the manifest asks
         // for level 1 and this says what is wrong instead
-        override fun onCreateScreen(intent: Intent): Screen =
-            if (carContext.carAppApiLevel >= RADAR_API_LEVEL) RadarCarScreen(carContext) else CarInfoScreen(carContext, "Update Android Auto: the radar needs car API level $RADAR_API_LEVEL, this host has ${carContext.carAppApiLevel}.")
+        override fun onCreateScreen(intent: Intent): Screen {
+            val level = carContext.carAppApiLevel
+            CarLog.add(this@RadarCarService, "Screen asked for: car API level $level, " + if (level >= RADAR_API_LEVEL) "radar" else "too old for the radar")
+            return if (level >= RADAR_API_LEVEL) RadarCarScreen(carContext) else CarInfoScreen(carContext, "Update Android Auto: the radar needs car API level $RADAR_API_LEVEL, this host has $level.")
+        }
     }
 
     private companion object { const val RADAR_API_LEVEL = 7 }
@@ -49,7 +59,27 @@ internal fun carAppStatus(context: Context): String {
     val permissions = listOf("androidx.car.app.MAP_TEMPLATES", "androidx.car.app.ACCESS_SURFACE")
         .joinToString(", ") { it.substringAfterLast('.') + if (context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED) " yes" else " NO" }
     val auto = try { pm.getPackageInfo("com.google.android.projection.gearhead", 0).versionName ?: "?" } catch (e: Exception) { null }
+    val log = CarLog.read(context)
     return "Car service: " + (if (service == null) "NOT FOUND" else "found ($categories)") +
         "\nPermissions: $permissions" +
-        "\nAndroid Auto: " + (auto ?: "not installed (or not visible)")
+        "\nAndroid Auto: " + (auto ?: "not installed (or not visible)") +
+        "\nCar log: " + (if (log.isBlank()) "Android Auto has never started the car app on this phone (it is hidden before it is asked for)" else "\n$log")
+}
+
+/**
+ * What happened between Android Auto and the car app, kept on the phone (Android Auto itself logs nothing a phone can read): when the host started the
+ * service, opened a session, asked for a screen, and any template it could not be given. The last fifteen lines, shown in Settings.
+ */
+internal object CarLog {
+    private const val KEY = "car_log"
+
+    private fun prefs(context: Context) = context.getSharedPreferences("simplemodelview", Context.MODE_PRIVATE)
+
+    fun add(context: Context, line: String) {
+        val stamp = java.text.SimpleDateFormat("MMM d HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        val lines = (prefs(context).getString(KEY, "").orEmpty().split('\n').filter { it.isNotBlank() } + "$stamp  $line").takeLast(15)
+        prefs(context).edit().putString(KEY, lines.joinToString("\n")).apply()
+    }
+
+    fun read(context: Context): String = prefs(context).getString(KEY, "").orEmpty()
 }
