@@ -38,7 +38,7 @@ import java.io.File
 import kotlin.math.floor
 
 /** The windows of the globe the GFS page shows (Lambert boxes of the REFS projection, like the sectors of the other pages). */
-/** The least memory the drawn globe pictures of a loop may use; a phone with more memory gets a sixth of it, up to 768 MB (see frameBudget). */
+/** The least storage the drawn globe pictures of a loop may use; with more free space they get a quarter of it, up to 2 GB (see frameBudget). */
 private const val FRAME_BUDGET = 192L * 1024 * 1024
 
 internal val GFS_SECTORS = listOf(
@@ -112,40 +112,64 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, java.lang.ref.SoftReference<GfsGlobal>>?) = size > 60
     }
     /**
-     * Whole drawn pictures of globe and polar frames, for playing a loop at one view: a loop draws each frame once (while it loads) and then only swaps pictures.
-     * The key names everything a picture depends on (frame, product, view, size, look, outlook); held up to [FRAME_BUDGET] bytes, the least recently used going first.
+     * Whole drawn pictures of globe and polar frames, for playing a loop at one view, kept on the phone's storage (not in memory): a loop draws each frame once
+     * (while it loads), writes its pixels to a file, and then only reads pictures back (a raw picture of 15 MB reads in a few milliseconds from flash). The key names
+     * everything a picture depends on (frame, product, view, size, look, outlook). The folder is emptied when the page starts.
      */
-    private class CachedFrame(val bitmap: Bitmap, val product: Product, val title: String)
-    private val frameCache = LinkedHashMap<String, CachedFrame>(32, 0.75f, true)
+    private class StoredFrame(val file: File, val bytes: Long, val width: Int, val height: Int, val product: Product, val title: String)
+    private val frameDir = File(getApplication<Application>().cacheDir, "loop-frames").apply { deleteRecursively(); mkdirs() }
+    private val frameCache = LinkedHashMap<String, StoredFrame>(32, 0.75f, true)
     private var frameCacheBytes = 0L
+    private var frameSerial = 0
 
-    /** How many bytes of pictures to keep: a sixth of the phone's memory, from 192 to 768 MB (a high-resolution screen's picture is 15 MB: a 24 hour loop is 25 of them). */
-    private val frameBudget: Long = try {
-        val am = getApplication<Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        val info = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
-        (info.totalMem / 6).coerceIn(FRAME_BUDGET, 768L * 1024 * 1024)
-    } catch (_: Exception) { FRAME_BUDGET }
+    /** How much storage the pictures may take: a quarter of what is free, from 256 MB to 2 GB (a 24 hour loop on a high-resolution screen is about 400 MB). */
+    private val frameBudget: Long = try { (frameDir.usableSpace / 4).coerceIn(FRAME_BUDGET, 2048L * 1024 * 1024) } catch (_: Exception) { FRAME_BUDGET }
 
     private fun cacheHasRoom(bytes: Long) = synchronized(frameCache) { frameCacheBytes + bytes <= frameBudget }
 
-    private fun cacheGet(key: String): CachedFrame? = synchronized(frameCache) { frameCache[key] }
+    private fun cacheGet(key: String): StoredFrame? = synchronized(frameCache) { frameCache[key] }
 
     /**
-     * Keeps a picture. [evict]: make room by dropping the least recently used ones; without it (a loop playing) a picture that does not fit is not kept, since a
-     * loop shows its frames in a circle and dropping the oldest would drop exactly the one wanted next: the frames that fit stay, every pass.
+     * Writes a picture and keeps it. [evict]: make room by deleting the least recently used ones; without it (a loop playing) a picture that does not fit is not
+     * kept, since a loop shows its frames in a circle and dropping the oldest would drop exactly the one wanted next: the frames that fit stay, every pass.
      */
-    private fun cachePut(key: String, frame: CachedFrame, evict: Boolean = true) = synchronized(frameCache) {
-        val bytes = frame.bitmap.allocationByteCount.toLong()
-        if (!evict && key !in frameCache && frameCacheBytes + bytes > frameBudget) return@synchronized
-        frameCache.put(key, frame)?.let { frameCacheBytes -= it.bitmap.allocationByteCount }
-        frameCacheBytes += bytes
-        val it = frameCache.entries.iterator()
-        while (frameCacheBytes > frameBudget && frameCache.size > 1 && it.hasNext()) {
-            val eldest = it.next()
-            if (eldest.key == key) continue
-            frameCacheBytes -= eldest.value.bitmap.allocationByteCount
-            it.remove()                // (not recycled: the picture may be on screen)
+    private fun cachePut(key: String, bitmap: Bitmap, product: Product, title: String, evict: Boolean = true) {
+        val bytes = bitmap.byteCount.toLong()
+        if (!evict && !cacheHasRoom(bytes) && cacheGet(key) == null) return
+        val file = synchronized(frameCache) { File(frameDir, "f${frameSerial++}.argb") }
+        try {
+            val buffer = java.nio.ByteBuffer.allocateDirect(bitmap.byteCount)
+            bitmap.copyPixelsToBuffer(buffer)
+            buffer.flip()
+            java.io.FileOutputStream(file).channel.use { ch -> while (buffer.hasRemaining()) ch.write(buffer) }
+        } catch (_: Exception) { file.delete(); return } catch (_: OutOfMemoryError) { file.delete(); return }
+        val dropped = ArrayList<File>()
+        synchronized(frameCache) {
+            frameCache.put(key, StoredFrame(file, bytes, bitmap.width, bitmap.height, product, title))?.let { frameCacheBytes -= it.bytes; dropped += it.file }
+            frameCacheBytes += bytes
+            val it = frameCache.entries.iterator()
+            while (frameCacheBytes > frameBudget && frameCache.size > 1 && it.hasNext()) {
+                val eldest = it.next()
+                if (eldest.key == key) continue
+                frameCacheBytes -= eldest.value.bytes
+                dropped += eldest.value.file
+                it.remove()
+            }
         }
+        dropped.forEach { it.delete() }
+    }
+
+    /** A stored picture read back (mapped from its file straight into a new bitmap), or null when the file is gone. */
+    private fun readStored(f: StoredFrame): Bitmap? = try {
+        java.io.RandomAccessFile(f.file, "r").channel.use { ch ->
+            val map = ch.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0, ch.size())
+            Bitmap.createBitmap(f.width, f.height, Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(map) }
+        }
+    } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null }
+
+    override fun onCleared() {
+        super.onCleared()
+        frameDir.deleteRecursively()
     }
 
     private fun pictureKey(st: GfsState, file: NbmFile) =
@@ -378,13 +402,16 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val data = globalData(st, file)
         val (product, title0) = productFor(st, surface, data.grid)
         if (st.settings.contours) globeRenderer.warmContours(data.grid, data.values, product.style, product, frameKeyOf(st, file))
-        // the whole picture too: a loop that fits the memory is drawn once, here, and played from these
+        // the whole picture too: drawn once, here, written to storage, and played from there (as many frames as the storage budget holds)
         if (render && globeW > 0) {
             val key = pictureKey(st, file)
             if (cacheGet(key) == null && cacheHasRoom(globeW.toLong() * globeH * 4)) {
                 val title = if (since) sinceTitle(st, file) else title0
-                val bitmap = withContext(Dispatchers.Default) { renderGlobeBitmap(st, product, data.values, file, frameKeyOf(st, file), 1) }
-                cachePut(key, CachedFrame(bitmap, product, title), evict = false)
+                withContext(Dispatchers.Default) {
+                    val bitmap = renderGlobeBitmap(st, product, data.values, file, frameKeyOf(st, file), 1)
+                    cachePut(key, bitmap, product, title, evict = false)
+                    bitmap.recycle()                // (never on screen: only its file is kept)
+                }
             }
         }
     }
@@ -392,11 +419,14 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     /** The whole globe for the frame: whole fields on GFS's own grid (no crop), drawn on the sphere. */
     private suspend fun showGlobeFrame(st: GfsState, file: NbmFile) {
         if (st.playing) cacheGet(pictureKey(st, file))?.let { c ->
-            // a loop playing: the picture drawn ahead, nothing decoded (a tap waits until it is paused: see stopPlaying)
-            globeShown = null
-            globeFrameKey = frameKeyOf(st, file)
-            update { it.copy(map = c.bitmap, style = c.product.style, title = c.title, busy = false, loadStatus = null) }
-            return
+            // a loop playing: the picture drawn ahead, read back from storage, nothing decoded (a tap waits until it is paused: see stopPlaying)
+            val bitmap = withContext(Dispatchers.IO) { Timings.timed("stored") { readStored(c) } }
+            if (bitmap != null) {
+                globeShown = null
+                globeFrameKey = frameKeyOf(st, file)
+                update { it.copy(map = bitmap, style = c.product.style, title = c.title, busy = false, loadStatus = null) }
+                return
+            }
         }
         val since = st.product == GfsHistory.SINCE_ID
         val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
@@ -513,7 +543,12 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val file = st.file
         val frameKey = globeFrameKey
         val bitmap = withContext(Dispatchers.Default) { renderGlobeBitmap(st, product, values, file, frameKey, stride) }
-        if (stride == 1 && file != null && frameKey != null) cachePut(pictureKey(st, file), CachedFrame(bitmap, product, st.title), evict = !st.playing)
+        if (stride == 1 && file != null && frameKey != null) {
+            val key = pictureKey(st, file)
+            val title = st.title
+            // written beside the screen (the picture is only read): the next pass of a loop, or a turn back to this frame, reads it instead of drawing it
+            viewModelScope.launch(Dispatchers.IO) { if (cacheGet(key) == null) cachePut(key, bitmap, product, title, evict = !st.playing) }
+        }
         update { it.copy(map = bitmap, busy = false) }
     }
 
