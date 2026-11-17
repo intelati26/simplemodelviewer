@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The car probe: the debug app's car service without the map permissions, under its own name. If Android Auto lists this one and not the debug app, the
+     map permissions are what hides the car app; if it lists neither, Android Auto on the phone does not take apps from unknown sources. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" tools:node="remove" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" tools:node="remove" />
+    <application android:label="SMV car probe" tools:replace="android:label">
+        <service android:name=".RadarCarService" android:label="SMV car probe" tools:replace="android:label" />
+    </application>
+</manifest>

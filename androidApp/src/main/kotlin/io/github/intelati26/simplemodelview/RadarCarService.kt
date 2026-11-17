@@ -33,6 +33,9 @@ class RadarCarService : CarAppService() {
         override fun onCreateScreen(intent: Intent): Screen {
             val level = carContext.carAppApiLevel
             CarLog.add(this@RadarCarService, "Screen asked for: car API level $level, " + if (level >= RADAR_API_LEVEL) "radar" else "too old for the radar")
+            // the car probe build has no map permissions: it only says that Android Auto found it
+            if (carContext.checkSelfPermission("androidx.car.app.MAP_TEMPLATES") != PackageManager.PERMISSION_GRANTED)
+                return CarInfoScreen(carContext, "Car probe: Android Auto lists and starts this app (car API level $level). The map permissions are what it objects to in the radar app.")
             return if (level >= RADAR_API_LEVEL) RadarCarScreen(carContext) else CarInfoScreen(carContext, "Update Android Auto: the radar needs car API level $RADAR_API_LEVEL, this host has $level.")
         }
     }

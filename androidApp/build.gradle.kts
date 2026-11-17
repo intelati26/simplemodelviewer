@@ -25,6 +25,14 @@ android {
     externalNativeBuild { cmake { path = file("../core/CMakeLists.txt") } }
 
     buildTypes {
+        // a second app beside the debug one, to find why Android Auto does not list the car app: the same car service without the map permissions (a plain
+        // text screen), under its own package and name; see docs/android-auto.md
+        create("carprobe") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".carprobe"
+            versionNameSuffix = "-carprobe"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -59,6 +67,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.car.app:app:1.7.0")          // Android Auto: the points-of-interest category (RadarCarService)
+    implementation("androidx.car.app:app-projected:1.7.0")   // the Android Auto (phone projection) side of the library, as Google's sample car apps have it
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 

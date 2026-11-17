@@ -17,11 +17,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       # ANDROID_HOME is set on GitHub's runners, which also enables the :androidApp module in settings.gradle.kts
       - name: Shared tests and debug APK
-        run: ./gradlew :shared:jvmTest :androidApp:assembleDebug :androidApp:lintDebug --stacktrace
+        run: ./gradlew :shared:jvmTest :androidApp:assembleDebug :androidApp:assembleCarprobe :androidApp:lintDebug --stacktrace
       - uses: actions/upload-artifact@v7
         with:
           name: simplemodelview-debug-apk
           path: androidApp/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v7
+        with:
+          name: simplemodelview-carprobe-apk
+          path: androidApp/build/outputs/apk/carprobe/*.apk
       - name: Attach the APK to the release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
