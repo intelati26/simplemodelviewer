@@ -76,6 +76,7 @@ import simplemodelview.formatPlus
 private const val MRMS_DISCLAIMER = "Data: NOAA/NSSL MRMS. Experimental viewer, not a warning or decision-support tool."
 
 /** The MRMS page: composite reflectivity, rotation tracks and 24 h rainfall (and variants) over the same map machinery as the REFS page. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
@@ -83,6 +84,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf(false) }
     var overlayTree by remember { mutableStateOf(false) }
+    var pickRain by remember { mutableStateOf(false) }
     var overlayPicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
@@ -137,12 +139,22 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     AssistChip(onClick = { picker = true }, label = { Text(s.product.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("mrms", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true })
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = vm::dismissNotice) { Text("OK") }
+                    }
+                }
+                s.rainSince?.let { since ->
+                    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Rainfall since ${formatClock(since, 0)}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                            s.rainInfo?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                        }
+                        TextButton(onClick = { vm.setRainSince(since) }, enabled = !s.busy) { Text("Update") }
+                        TextButton(onClick = { vm.setRainSince(null) }) { Text("Radar") }
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -266,6 +278,47 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         )
     }
     s.station?.let { StationDialog(it, s.units.celsius, onDismiss = vm::closeStation) }
+    if (pickRain) {
+        val now = System.currentTimeMillis()
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = now / 86_400_000L * 86_400_000L,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis in (now - 400L * 86_400_000L)..now
+            },
+        )
+        var hour by remember { mutableStateOf(((now / 3_600_000L) % 24).toInt().let { (it - 6 + 24) % 24 }) }
+        var minute by remember { mutableStateOf(0) }
+        var hourMenu by remember { mutableStateOf(false) }
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickRain = false },
+            confirmButton = {
+                TextButton(
+                    enabled = state.selectedDateMillis != null,
+                    onClick = { val d = state.selectedDateMillis ?: return@TextButton; pickRain = false; vm.setRainSince(d / 1000L + hour * 3600L + minute * 60L) },
+                ) { Text("Add up") }
+            },
+            dismissButton = { TextButton(onClick = { pickRain = false }) { Text("Cancel") } },
+        ) {
+            androidx.compose.foundation.layout.FlowRow(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Last", Modifier.align(Alignment.CenterVertically))
+                for (h in listOf(1, 3, 6, 12, 24, 48, 72)) androidx.compose.material3.AssistChip(
+                    onClick = { pickRain = false; vm.setRainSince(now / 1000L - h * 3600L) }, label = { Text("$h h") },
+                )
+            }
+            androidx.compose.material3.DatePicker(state, modifier = Modifier.weight(1f, fill = false), title = { Text("Rainfall from \u2026 to now (UTC)", Modifier.padding(start = 24.dp, top = 16.dp)) })
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Time (UTC)", Modifier.padding(end = 8.dp))
+                Box {
+                    androidx.compose.material3.AssistChip(onClick = { hourMenu = true }, label = { Text("%02d".format(hour) + " \u25BE") })
+                    DropdownMenu(expanded = hourMenu, onDismissRequest = { hourMenu = false }) {
+                        for (h in 0..23) DropdownMenuItem(text = { Text("%02d".format(h)) }, onClick = { hour = h; hourMenu = false })
+                    }
+                }
+                Text(":", Modifier.padding(horizontal = 4.dp))
+                for (m in listOf(0, 15, 30, 45)) androidx.compose.material3.FilterChip(selected = minute == m, onClick = { minute = m }, label = { Text("%02d".format(m)) }, modifier = Modifier.padding(end = 4.dp))
+            }
+        }
+    }
     if (overlayTree) OverlayTreeDialog(
         layers = s.overlays, styles = s.overlayStyles,
         onRadarNone = { vm.pickOverlay(null) }, onRadarCombo = vm::pickOverlayCombo,
@@ -320,11 +373,12 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
-internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (onRain != null) DropdownMenuItem(text = { Text("Rainfall since a date and time\u2026") }, onClick = { open = false; onRain() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

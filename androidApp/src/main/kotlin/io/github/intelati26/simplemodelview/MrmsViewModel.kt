@@ -117,6 +117,8 @@ data class MrmsState(
     val underDew: Boolean = false,                    // surface dewpoint lines over the picture
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
     val station: StationDetail? = null,               // the station tapped: its reports and chart
+    val rainSince: Long? = null,                      // the rainfall total from this time to now is shown instead of the radar (epoch seconds)
+    val rainInfo: String? = null,                     // the span the total covers and its sources, or what is missing
     val alertKinds: Set<AlertKind> = emptySet(),      // which alert layers are on (none by default)
     val alertShapes: List<AlertShape> = emptyList(),  // everything read for those layers
     val alertsAsOf: Long? = null,                     // when they were read (epoch seconds)
@@ -629,6 +631,68 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeStation() = update { it.copy(station = null) }
 
+    // ---- rainfall from a time to now: multi-sensor totals for the whole hours, radar-only for the rest ----
+    /** Shows the rainfall total from [since] to now (null: back to the radar). On the flat map. */
+    fun setRainSince(since: Long?) {
+        stopPlaying()
+        update { it.copy(rainSince = since, rainInfo = null, globe = if (since != null) false else it.globe, crosshair = null, readout = null, tapLatLon = null) }
+        showFrame()
+    }
+
+    /** The newest file time of an MRMS product (one listing), or null. */
+    private suspend fun newestOf(id: String): Long? {
+        val p = MrmsCatalog.byId(id) ?: return null
+        return try { repo.listFiles(p, System.currentTimeMillis() / 1000).lastOrNull()?.validTime } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+    }
+
+    private suspend fun showRain(st: MrmsState, since: Long) {
+        update { it.copy(busy = true, error = null, rainInfo = "Finding the newest totals\u2026") }
+        val multiEnd = newestOf("MultiSensor_QPE_01H_Pass2_00.00") ?: newestOf("MultiSensor_QPE_01H_Pass1_00.00")
+        val radarEnd = newestOf("RadarOnly_QPE_15M_00.00") ?: (System.currentTimeMillis() / 1000)
+        val plan = simplemodelview.RainSince.plan(since, multiEnd, radarEnd)
+        if (plan.pieces.isEmpty()) { update { it.copy(busy = false, rainInfo = "Nothing to add yet: the start is after the newest radar total.") }; return }
+        val sector = st.sector
+        val box = sectorBox(sector)
+        var grid: Grid? = null
+        var sum: FloatArray? = null
+        var missing = 0
+        var fellBack = 0
+        for ((k, piece) in plan.pieces.withIndex()) {
+            update { it.copy(rainInfo = "Adding ${k + 1} of ${plan.pieces.size}: ${formatClock(piece.start)} \u2192 ${formatClock(piece.end)}") }
+            var added = false
+            for ((n, dir) in piece.directories.withIndex()) {
+                val p = MrmsCatalog.byId(dir) ?: continue
+                val file = MrmsFile(simplemodelview.RainSince.key(dir, piece.end), piece.end, null, 0)
+                val frame = try {
+                    decode(p, file, "rain|${sector.name}", box, stepFor(p, sector), cache = false, target = grid?.let { FrameTarget.Onto(it) } ?: FrameTarget.Planned)
+                } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
+                if (grid == null) { grid = frame.window.grid; sum = frame.window.values.copyOf() } else simplemodelview.RainSince.addInto(sum!!, frame.window.values)
+                if (piece.multiSensor && dir.startsWith("RadarOnly")) fellBack += 1
+                added = true
+                break
+            }
+            if (!added) missing += 1
+        }
+        val g = grid ?: run { update { it.copy(busy = false, rainInfo = "The rainfall totals could not be read.") }; return }
+        val values = sum!!
+        val styleProduct = MrmsCatalog.byId("MultiSensor_QPE_72H_Pass2_00.00") ?: st.product
+        val product = Product("rain_since", "Rainfall since ${formatClock(plan.start, 0)}", styleProduct.group, styleOf(styleProduct), hasMembers = false, timeDimension = null, grid = g)
+        val v = View(sector.name, 0, 0, g.columns, g.rows, pixelScale(g), 1, g)
+        val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(product, product.style, values, emptyList(), v, dark, contours = false, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity) } }
+        view = v
+        shownGrid = g
+        shown = product to values
+        shownOverlays = emptyList()
+        val sources = buildString {
+            append("${formatClock(plan.start, 0)} \u2192 ${formatClock(plan.end, 0)}")
+            if (plan.multiFrom != null && plan.multiTo != null) append("  \u00B7  multi-sensor ${formatClock(plan.multiFrom, 0)} \u2192 ${formatClock(plan.multiTo, 0)}, radar-only the rest") else append("  \u00B7  radar-only")
+            if (fellBack > 0) append("  \u00B7  $fellBack multi-sensor total${if (fellBack > 1) "s" else ""} missing, radar-only used")
+            if (missing > 0) append("  \u00B7  $missing piece${if (missing > 1) "s" else ""} missing (not counted)")
+        }
+        update { it.copy(map = bitmap, detail = null, style = product.style, busy = false, rainInfo = sources, overlayStyles = emptyList(), overlayInfo = null) }
+        _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
+    }
+
     fun setUnderTemp(on: Boolean) = setUnder(on, _state.value.underDew)
     fun setUnderDew(on: Boolean) = setUnder(_state.value.underTemp, on)
 
@@ -802,6 +866,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun showCurrent() {
         val st = _state.value
+        if (st.rainSince != null) { showRain(st, st.rainSince); return }
         val file = st.file ?: return
         val product = st.product
         update { it.copy(busy = true, error = null) }
