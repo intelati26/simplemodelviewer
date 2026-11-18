@@ -40,7 +40,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -216,7 +215,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         s.forecastHour?.let { "f${it.toString().padStart(2, '0')}" }).joinToString("   "),
                     Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
+                if (s.busy && s.map != null) BusySpinner(Modifier.padding(end = 2.dp))
                 SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
                 TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
             }
@@ -231,7 +230,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                     }
                     s.map != null || s.globe -> if (s.globe) GlobeView(s, vm) else MapView(s, vm)
-                    else -> CircularProgressIndicator()
+                    else -> BusySpinner(big = true)
                 }
             }
         }

@@ -16,7 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -59,7 +58,7 @@ internal fun BoxScope.MinimalChrome(
         ) { Box(contentAlignment = Alignment.Center) { Text("☰", style = MaterialTheme.typography.titleLarge) } }
         if (summary.isNotEmpty() || busy) Surface(shape = RoundedCornerShape(16.dp), color = panel) {
             Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                if (busy) BusySpinner(size = 14.dp)
                 Text(summary, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -119,7 +118,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "National Blend of Models globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "National Blend of Models map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
-                else -> CircularProgressIndicator()
+                else -> BusySpinner(big = true)
             }
         }
         val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
@@ -147,7 +146,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                         s.file?.let { nbmFrameLabel(it) + "   frame ${s.index + 1}/${s.frames.size}" } ?: "",
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
+                    if (s.busy && s.map != null) BusySpinner(Modifier.padding(end = 2.dp))
                     AssistChip(
                         onClick = { cyclePicker = true },
                         label = { Text(s.cycle?.let { "Run " + it.shortLabel + (if (it.grib) " · GRIB" else "") + (if (s.following) "" else " · set") } ?: "Run") },
