@@ -159,7 +159,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         for (f in fieldLines) Timings.timed("contours") {
             val key = "field|${f.key}|${f.grid.id}"
             val geo = cachedGeo(key) ?: traceGeo(f.grid, f.values, f.style, f.spec, null).also { putGeo(key, it) }
-            drawContourLines(canvas, projectedContours(geo) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, f.spec.color, dark, width)
+            drawContourLines(canvas, projectedContours(geo, width, height) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, f.spec.color, dark, width)
         }
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
@@ -189,7 +189,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
                     if (geoKey != key) { Timings.timed("contours") { geoLines = traceGeo(grid, values, style, spec, wind) }; geoKey = key }
                     geoLines
                 }
-                drawContourLines(canvas, projectedContours(lines) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
+                drawContourLines(canvas, projectedContours(lines, width, height) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
             }
         }
         if (windLevel != null) {
@@ -245,26 +245,58 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon, a label on the longest piece of each level. */
-    private fun projectedContours(lines: List<GeoLine>, project: (Double, Double) -> DoubleArray?): List<ContourLine> {
-        val out = ArrayList<ContourLine>()
+    /**
+     * The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon. Labels as on the flat map: one per level, on its
+     * longest piece, and at most two more on pieces that cross a good part of the picture (far from the level's other labels); the many small rings of a
+     * noisy field (a dewpoint analysis) get none.
+     */
+    private fun projectedContours(lines: List<GeoLine>, width: Int, height: Int, project: (Double, Double) -> DoubleArray?): List<ContourLine> {
+        class Piece(val line: GeoLine, val pts: FloatArray, val length: Float)
+        val pieces = ArrayList<Piece>()
         for (line in lines) {
-            val pieces = ArrayList<FloatArray>()
             var current = ArrayList<Float>()
+            fun close() { if (current.size >= 4) { val pts = current.toFloatArray(); pieces += Piece(line, pts, screenLength(pts)) }; current = ArrayList() }
             var i = 0
             while (i + 1 < line.points.size) {
                 val p = project(line.points[i].toDouble(), line.points[i + 1].toDouble())
-                if (p == null) { if (current.size >= 4) pieces += current.toFloatArray(); current = ArrayList() }
-                else { current.add(p[0].toFloat()); current.add(p[1].toFloat()) }
+                if (p == null) close() else { current.add(p[0].toFloat()); current.add(p[1].toFloat()) }
                 i += 2
             }
-            if (current.size >= 4) pieces += current.toFloatArray()
-            val best = pieces.indices.maxByOrNull { pieces[it].size } ?: continue
-            pieces.forEachIndexed { k, pts ->
-                val mid = if (k == best && pts.size >= 24) (pts.size / 4) * 2 else -1
-                out.add(ContourLine(line.level, line.bold, pts, line.label, mid, false))
+            close()
+        }
+        val labelAt = HashMap<Piece, Int>()
+        val far = maxOf(width, height) / 4f
+        for ((_, ofLevel) in pieces.groupBy { it.line.level }) {
+            val placed = ArrayList<FloatArray>()
+            for ((rank, piece) in ofLevel.sortedByDescending { it.length }.withIndex()) {
+                if (placed.size >= 3 || piece.pts.size < 24) break
+                if (rank > 0 && piece.length < width * 0.4f) break
+                val at = labelPoint(piece.pts, width, height) ?: continue
+                val x = piece.pts[at]; val y = piece.pts[at + 1]
+                if (placed.any { kotlin.math.hypot(it[0] - x, it[1] - y) < far }) continue
+                placed += floatArrayOf(x, y)
+                labelAt[piece] = at
             }
         }
-        return out
+        return pieces.map { ContourLine(it.line.level, it.line.bold, it.pts, it.line.label, labelAt[it] ?: -1, false) }
+    }
+
+    private fun screenLength(pts: FloatArray): Float {
+        var sum = 0f
+        var i = 2
+        while (i + 1 < pts.size) { sum += kotlin.math.hypot(pts[i] - pts[i - 2], pts[i + 1] - pts[i - 1]); i += 2 }
+        return sum
+    }
+
+    /** A vertex of [pts] for the label, inside the picture with a margin: the middle, else a quarter or three quarters along; null when none is. */
+    private fun labelPoint(pts: FloatArray, width: Int, height: Int): Int? {
+        val n = pts.size / 2
+        val margin = 24f
+        for (f in listOf(0.5, 0.25, 0.75)) {
+            val k = (n * f).toInt().coerceIn(0, n - 1) * 2
+            if (pts[k] in margin..(width - margin) && pts[k + 1] in margin..(height - margin)) return k
+        }
+        return null
     }
 
     private fun drawGraticule(canvas: Canvas, cam: GlobeCamera, width: Int, height: Int, dark: Boolean) {
@@ -379,6 +411,6 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
             paintGeo = Contours.lines(share, grid, whole, Style(), spec, smoothing = 1, levelsOverride = PaintballLines.levels).map { GeoLine(it.level, it.bold, it.label, toLatLon(grid, whole, it)) }
             paintKey = key
         }
-        drawPaintballContourLines(canvas, projectedContours(paintGeo) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, dark, width)
+        drawPaintballContourLines(canvas, projectedContours(paintGeo, width, height) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, dark, width)
     }
 }
