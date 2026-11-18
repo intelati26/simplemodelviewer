@@ -936,26 +936,26 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         suspend fun <T> stage(load: suspend () -> T): T = staged(progressive, { paint(final = false) }, load)
         ov = stage { overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) } }
         if (ov.isNotEmpty()) dirty = true
+        // priority: the surface temperature, then the station reports, then the dewpoint lines (drawn in their own places: the plots stay on top)
+        val t = if (st.underTemp || st.underDew) stage { underTemp(file, underGridFor(grid)) } else null
         if (st.underTemp || st.underDew) {
-            val t = stage { underTemp(file, underGridFor(grid)) }
             if (t == null) underInfo += "No surface temperature near this time"
             else {
-                val dst = rectOn(t.grid, v)
                 under += tempShown(t)
                 underInfo += t.pick.label
-                if (st.underTemp) { fill = underFill(t, dst); dirty = true }
-                if (st.underDew) {
-                    val td = stage { underDew(t) }
-                    if (td == null) underInfo += "no dewpoint"
-                    else { lines = listOf(dewLines(t, td, dst)); under += dewShown(t, td); dirty = true }
-                }
+                if (st.underTemp) { fill = underFill(t, rectOn(t.grid, v)); dirty = true }
             }
             dirty = true      // (the read-out note changes too)
         }
-        if (st.stations) {       // last: the station plots
+        if (st.stations) {
             plots = stage { plotsFor(file, v, sectorBox(sector, 0.5)) }
             if (plots.isNotEmpty()) dirty = true
         } else shownPlots = emptyList()
+        if (st.underDew && t != null) {
+            val td = stage { underDew(t) }
+            if (td == null) underInfo += "no dewpoint"
+            else { lines = listOf(dewLines(t, td, rectOn(t.grid, v))); under += dewShown(t, td); dirty = true }
+        }
         paint(final = true)
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
         scheduleDetail()
