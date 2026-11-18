@@ -55,4 +55,6 @@ object AppContainer {
     val probSevere by lazy { ProbSevereModel(ProbSevereRepository(http) { prefs.getString("probsevere_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val alerts by lazy { AlertsRepository(http) }
+    /** The surface analysis under the MRMS radar: RTMA (every 15 minutes), NBM when there is none; its messages are kept with the other GRIB messages. */
+    val surface by lazy { simplemodelview.SurfaceRepository(http, core, gribStore) }
 }

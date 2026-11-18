@@ -19,6 +19,12 @@ import simplemodelview.View
 import simplemodelview.WindProducts
 import simplemodelview.globeForward
 
+/** A second field on the globe (the surface temperature under the MRMS radar): its [values] on [grid], drawn with [style]. */
+class GlobeOverlay(
+    val grid: Grid, val values: FloatArray, val style: Style, val marker: Boolean = false, val markerScale: Float = 1f,
+    val halo: Boolean = false, val markerColor: Int? = null,
+)
+
 /** Draws the globe picture: space, a shaded sphere, a graticule, the data wrapped onto it and the border lines. */
 class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private var buffer = IntArray(0)
@@ -28,6 +34,9 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: DoubleArray)
     private var geoKey: Any? = null
     private var geoLines: List<GeoLine> = emptyList()
+    private var layerBuffer = IntArray(0)
+    // the lines of the last few second fields (the surface dewpoint under the MRMS radar), by their key
+    private val fieldGeo = LinkedHashMap<String, List<GeoLine>>(4, 0.75f, true)
 
     /**
      * Draws the globe. [product] (with [contours] and [barbDensity]) adds what the flat map draws over its data: the field's contour lines, and for the wind
@@ -37,6 +46,8 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     fun render(
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
         product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null, alerts: List<AlertDraw> = emptyList(),
+        /** A field under the data (the surface temperature) and lines of another field over everything but the alerts (the dewpoint). */
+        underlay: GlobeOverlay? = null, fieldLines: List<FieldLines> = emptyList(),
     ): Bitmap {
         val pictureStart = System.nanoTime()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -59,7 +70,13 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         // data
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
-        val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
+        val domain = if (underlay != null) 0 else if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()      // a field underneath shows instead of the domain's shade
+        if (underlay != null) Timings.timed("underlay") {
+            if (layerBuffer.size < width * height) layerBuffer = IntArray(width * height)
+            if (polar != null) core.renderPolar(underlay.grid, underlay.values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, 0, underlay.style, memberRgb, layerBuffer)
+            else core.renderGlobe(underlay.grid, underlay.values, width, height, cam.radius, cam.lat, cam.lon, stride, 0, underlay.style, memberRgb, layerBuffer)
+            canvas.drawBitmap(layerBuffer, 0, width, 0, 0, width, height, true, null)
+        }
         Timings.timed("raster") {
             if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, domain, style, memberRgb, buffer)
             else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
@@ -68,6 +85,13 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
         Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
         if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame)
+        for (f in fieldLines) Timings.timed("contours") {
+            val geo = fieldGeo[f.key] ?: run {
+                val whole = View("field", 0, 0, f.grid.columns, f.grid.rows, 1, 1, f.grid)
+                Contours.lines(f.values, f.grid, whole, f.style, f.spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(f.grid, whole, line)) }
+            }.also { fieldGeo[f.key] = it; while (fieldGeo.size > 4) fieldGeo.remove(fieldGeo.keys.first()) }
+            drawContourLines(canvas, projectedContours(geo) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, f.spec.color, dark, width)
+        }
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
 
@@ -96,7 +120,7 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
                     Timings.timed("contours") { geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) } }
                     geoKey = key
                 }
-                drawContourLines(canvas, projectedContours { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
+                drawContourLines(canvas, projectedContours(geoLines) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
             }
         }
         if (windLevel != null) {
@@ -123,9 +147,9 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon, a label on the longest piece of each level. */
-    private fun projectedContours(project: (Double, Double) -> DoubleArray?): List<ContourLine> {
+    private fun projectedContours(lines: List<GeoLine>, project: (Double, Double) -> DoubleArray?): List<ContourLine> {
         val out = ArrayList<ContourLine>()
-        for (line in geoLines) {
+        for (line in lines) {
             val pieces = ArrayList<FloatArray>()
             var current = ArrayList<Float>()
             var i = 0

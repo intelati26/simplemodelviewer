@@ -18,6 +18,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import simplemodelview.Underlay
+import simplemodelview.SurfacePick
 import simplemodelview.BackupPlace
 import simplemodelview.FrameTarget
 import simplemodelview.Grid
@@ -110,6 +113,8 @@ data class MrmsState(
     val overlayFiles: Map<String, List<MrmsFile>> = emptyMap(),   // per overlay product directory: the files in the span of the radar frames
     val overlayStyles: List<Style> = emptyList(),     // as drawn (units, minimum, opacity), for the legend
     val overlayInfo: String? = null,                  // which overlay files are on the picture, or why one is missing
+    val underTemp: Boolean = false,                   // the surface temperature drawn under the radar (a translucent fill)
+    val underDew: Boolean = false,                    // surface dewpoint lines over the picture
     val alertKinds: Set<AlertKind> = emptySet(),      // which alert layers are on (none by default)
     val alertShapes: List<AlertShape> = emptyList(),  // everything read for those layers
     val alertsAsOf: Long? = null,                     // when they were read (epoch seconds)
@@ -121,6 +126,9 @@ data class MrmsState(
     val overlayName: String get() = overlayName(overlays)
     val file: MrmsFile? get() = files.getOrNull(index)
 }
+
+/** How long a layer may take before the picture so far is shown while it loads (see MrmsViewModel.showCurrent). */
+private const val STAGE_WAIT_MS = 120L
 
 class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
@@ -159,6 +167,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             settings = readSettings(),
             units = readUnits(),
             loopLength = prefs.getInt("mrms_loop_frames", 0),
+            underTemp = prefs.getBoolean("mrms_under_t", false),
+            underDew = prefs.getBoolean("mrms_under_td", false),
         )
     )
     val state: StateFlow<MrmsState> = _state
@@ -566,6 +576,111 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return results.joinToString("  \u00B7  ") { it.info } + note
     }
 
+    // ---- under the radar: the surface analysis (RTMA, every 15 minutes; NBM when there is none), temperature as a fill and dewpoint as lines ----
+    private val surface = AppContainer.surface
+    private val underGrids = LinkedHashMap<Int, Grid>(8, 0.75f, true)          // a picture grid's id -> the coarse grid its surface fields are put on
+    private val underValues = LinkedHashMap<String, FloatArray>(8, 0.75f, true) // a field put on a grid, by file, field and grid
+    private var globeUnder: GlobeOverlay? = null
+    private var globeLines: List<FieldLines> = emptyList()
+
+    fun setUnderTemp(on: Boolean) = setUnder(on, _state.value.underDew)
+    fun setUnderDew(on: Boolean) = setUnder(_state.value.underTemp, on)
+
+    private fun setUnder(temp: Boolean, dew: Boolean) {
+        prefs.edit().putBoolean("mrms_under_t", temp).putBoolean("mrms_under_td", dew).apply()
+        update { it.copy(underTemp = temp, underDew = dew) }
+        if (shown != null && !_state.value.playing) showFrame()
+    }
+
+    /** The surface file for a scan (the newest analysis at or before it), or null when there is none (or no network). */
+    private suspend fun underPick(base: MrmsFile): SurfacePick? =
+        try { surface.pick(base.validTime, System.currentTimeMillis() / 1000) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+
+    /** The grid (about 3 km) the surface fields are put on for a picture's grid: the analysis is 2.5 km, and needs no 1 km cells. The picture's own when it is not finer. */
+    private fun underGridFor(grid: Grid): Grid = synchronized(underGrids) {
+        underGrids[grid.id]?.let { return@synchronized it }
+        val a = core.gridToLatLon(grid, grid.columns / 2.0, grid.rows / 2.0)
+        val b = core.gridToLatLon(grid, grid.columns / 2.0 + 1.0, grid.rows / 2.0)
+        val cellMeters = 111_000.0 * Math.hypot(b[0] - a[0], (b[1] - a[1]) * Math.cos(Math.toRadians(a[0])))
+        val g = if (cellMeters >= 2500.0) grid
+            else (try { core.planLambertCrop(grid, 0.0, 0.0, grid.columns - 1.0, grid.rows - 1.0, 3000.0) } catch (e: Exception) { null }) ?: grid
+        underGrids[grid.id] = g
+        while (underGrids.size > 8) underGrids.remove(underGrids.keys.first())
+        g
+    }
+
+    /** Where the whole of [coarse] lies on the picture of [v], in its pixels (both grids are in the same projection: a scale and a shift). */
+    private fun rectOn(coarse: Grid, v: View): android.graphics.RectF {
+        if (coarse.id == v.grid.id) return android.graphics.RectF(0f, 0f, v.pixelWidth.toFloat(), v.pixelHeight.toFloat())
+        val sw = core.gridToLatLon(coarse, -0.5, -0.5)
+        val ne = core.gridToLatLon(coarse, coarse.columns - 0.5, coarse.rows - 0.5)
+        val a = core.latLonToGrid(v.grid, sw[0], sw[1])
+        val b = core.latLonToGrid(v.grid, ne[0], ne[1])
+        val s = v.scale.toDouble() / v.step
+        fun x(c: Double) = ((c - v.col0 + 0.5) * s).toFloat()
+        fun y(r: Double) = ((v.row0 + v.rows - 0.5 - r) * s).toFloat()
+        return android.graphics.RectF(x(a[0]), y(b[1]), x(b[0]), y(a[1]))
+    }
+
+    /** One surface field of [pick] put on [grid] (C), downloaded and decoded as needed; null when it cannot be had. */
+    private suspend fun underField(pick: SurfacePick, dew: Boolean, grid: Grid): FloatArray? {
+        val key = "${pick.url}|${if (dew) "td" else "t"}|${grid.id}"
+        synchronized(underValues) { underValues[key] }?.let { return it }
+        val values = try {
+            val field = withContext(Dispatchers.IO) { if (dew) surface.dewpoint(pick) else surface.temperature(pick) }
+            withContext(Dispatchers.Default) { core.reproject(field.values, field.grid, grid) }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { return null } catch (_: OutOfMemoryError) { return null }
+        synchronized(underValues) { underValues[key] = values; while (underValues.size > 6) underValues.remove(underValues.keys.first()) }
+        return values
+    }
+
+    private class UnderTemp(val values: FloatArray, val grid: Grid, val pick: SurfacePick)
+
+    /** The surface temperature for a scan on [grid], or null when there is none near it. */
+    private suspend fun underTemp(base: MrmsFile, grid: Grid): UnderTemp? {
+        val pick = underPick(base) ?: return null
+        return underField(pick, false, grid)?.let { UnderTemp(it, grid, pick) }
+    }
+
+    /** The dewpoint of the same file as [t], on its grid. */
+    private suspend fun underDew(t: UnderTemp): FloatArray? = underField(t.pick, true, t.grid)
+
+    private fun tempStyle() = MrmsCatalog.byId(Underlay.TEMP_STYLE)?.let { styleOf(it) } ?: Style()
+
+    /** The temperature as a picture of its own grid, translucent, stretched over [dst] of the picture. */
+    private suspend fun underFill(t: UnderTemp, dst: android.graphics.RectF): Overlay {
+        val g = t.grid
+        val one = View("under", 0, 0, g.columns, g.rows, 1, 1, g)
+        val argb = IntArray(g.cells)
+        withContext(Dispatchers.Default) { core.render(t.values, one, tempStyle().copy(opacity = Underlay.FILL_OPACITY), IntArray(10), argb) }
+        return Overlay(Bitmap.createBitmap(argb, g.columns, g.rows, Bitmap.Config.ARGB_8888), dst, bold = false)
+    }
+
+    private fun dewLines(t: UnderTemp, td: FloatArray, dst: android.graphics.RectF?) =
+        FieldLines(td, t.grid, tempStyle(), Underlay.dewpointSpec(_state.value.units.celsius), "td|${t.pick.url}|${t.grid.id}", dst)
+
+    private fun tempShown(t: UnderTemp) =
+        ShownOverlay("T", Product("surface_t", "Surface temperature", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { t.values }
+
+    private fun dewShown(t: UnderTemp, td: FloatArray) =
+        ShownOverlay("Td", Product("surface_td", "Surface dewpoint", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { td }
+
+    /** The surface layers of one flat picture, all at once (a zoomed-in detail, an export). */
+    private class UnderParts(val fill: Overlay?, val lines: List<FieldLines>)
+
+    private suspend fun underParts(base: MrmsFile, v: View): UnderParts {
+        val st = _state.value
+        if (!st.underTemp && !st.underDew) return UnderParts(null, emptyList())
+        val t = underTemp(base, underGridFor(v.grid)) ?: return UnderParts(null, emptyList())
+        val dst = rectOn(t.grid, v)
+        val fill = if (st.underTemp) underFill(t, dst) else null
+        val td = if (st.underDew) underDew(t) else null
+        return UnderParts(fill, listOfNotNull(td?.let { dewLines(t, it, dst) }))
+    }
+
+    private fun joinInfo(overlays: String?, under: List<String>): String? =
+        (listOfNotNull(overlays) + under).joinToString("  \u00B7  ").ifEmpty { null }
+
     fun pickSector(sector: Sector) {
         prefs.edit().putString("mrms_sector", sector.name).apply()
         stopPlaying()
@@ -634,18 +749,47 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun sectorBox(sector: Sector, margin: Double = 0.05) =
         doubleArrayOf(sector.west - margin, sector.south - margin, sector.east + margin, sector.north + margin)
 
+    /**
+     * Shows the current file. The layers come in order of priority, each shown as soon as it is ready: the radar field, its overlays, the temperature
+     * underneath, the dewpoint lines. A layer that is already at hand (cached) is not shown on its own; only one that has to be downloaded or decoded first
+     * lets the picture so far be shown while it is fetched. A playing loop shows each frame once, whole.
+     */
     private suspend fun showCurrent() {
         val st = _state.value
         val file = st.file ?: return
         val product = st.product
         update { it.copy(busy = true, error = null) }
+        val progressive = !st.playing
         if (st.globe) {
             outlook.want(file.validTime)
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
-            shownGrid = frame.window.grid
-            shown = synthetic(product, frame.window.grid) to frame.window.values
+            val grid = frame.window.grid
+            shownGrid = grid
+            shown = synthetic(product, grid) to frame.window.values
+            globeUnder = null; globeLines = emptyList(); shownOverlays = emptyList()
             update { it.copy(style = styleOf(product), cellKilometers = frame.window.sourceCellDegrees * globeStep(product) * 111.0) }
-            if (globeW > 0) renderGlobeNow(1) else update { it.copy(busy = false) }
+            var dirty = true
+            val under = ArrayList<ShownOverlay>()
+            suspend fun paint(final: Boolean) {
+                if (dirty) {
+                    dirty = false
+                    shownOverlays = under
+                    if (globeW > 0) renderGlobeNow(1, busy = !final)
+                }
+                if (final) update { it.copy(busy = false) }
+            }
+            suspend fun <T> stage(load: suspend () -> T): T = staged(progressive, { paint(final = false) }, load)
+            if (st.underTemp || st.underDew) {
+                val t = stage { underTemp(file, grid) }
+                if (t != null) {
+                    under += tempShown(t)
+                    if (st.underTemp) { globeUnder = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY)); dirty = true }
+                    if (st.underDew) stage { underDew(t) }?.let { td ->
+                        globeLines = listOf(dewLines(t, td, null)); under += dewShown(t, td); dirty = true
+                    }
+                }
+            }
+            paint(final = true)
             return
         }
         val sector = st.sector
@@ -655,17 +799,57 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val grid = window.grid
         val v = View(sector.name, 0, 0, grid.columns, grid.rows, pixelScale(grid), 1, grid)
         val synthetic = synthetic(product, grid)
-        val ov = overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) }
         outlook.want(file.validTime)
         val alertShapes = alertShapesFor(file)
-        val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product)) } }
         view = v
         shownGrid = grid
         shown = synthetic to window.values
-        shownOverlays = ov.map { it.shown }
-        update { it.copy(map = bitmap, detail = null, style = synthetic.style, busy = false, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = st.overlays.map { l -> styleForLayer(l) }, overlayInfo = overlayInfoFor(ov)) }
+        var ov: List<OverlayResult> = emptyList()
+        var fill: Overlay? = null
+        var lines: List<FieldLines> = emptyList()
+        val under = ArrayList<ShownOverlay>()
+        val underInfo = ArrayList<String>()
+        var dirty = true
+        suspend fun paint(final: Boolean) {
+            if (dirty) {
+                dirty = false
+                val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product), underlay = fill, fieldLines = lines) } }
+                shownOverlays = ov.map { it.shown } + under
+                val styles = st.overlays.map { l -> styleForLayer(l) } + listOfNotNull(fill?.let { tempStyle() })
+                update { it.copy(map = bitmap, detail = null, style = synthetic.style, busy = !final, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = styles, overlayInfo = joinInfo(overlayInfoFor(ov), underInfo)) }
+            } else if (final) update { it.copy(busy = false) }
+        }
+        suspend fun <T> stage(load: suspend () -> T): T = staged(progressive, { paint(final = false) }, load)
+        ov = stage { overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) } }
+        if (ov.isNotEmpty()) dirty = true
+        if (st.underTemp || st.underDew) {
+            val t = stage { underTemp(file, underGridFor(grid)) }
+            if (t == null) underInfo += "No surface temperature near this time"
+            else {
+                val dst = rectOn(t.grid, v)
+                under += tempShown(t)
+                underInfo += t.pick.label
+                if (st.underTemp) { fill = underFill(t, dst); dirty = true }
+                if (st.underDew) {
+                    val td = stage { underDew(t) }
+                    if (td == null) underInfo += "no dewpoint"
+                    else { lines = listOf(dewLines(t, td, dst)); under += dewShown(t, td); dirty = true }
+                }
+            }
+            dirty = true      // (the read-out note changes too)
+        }
+        paint(final = true)
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
         scheduleDetail()
+    }
+
+    /** Runs [load]; when it is not done within a moment (a download, a decode), [showSoFar] first shows what is ready. Not progressive: just [load]. */
+    private suspend fun <T> staged(progressive: Boolean, showSoFar: suspend () -> Unit, load: suspend () -> T): T {
+        if (!progressive) return load()
+        return coroutineScope {
+            val job = async { load() }
+            withTimeoutOrNull(STAGE_WAIT_MS) { job.await() } ?: run { showSoFar(); job.await() }
+        }
     }
 
     private fun synthetic(product: MrmsProduct, grid: Grid) =
@@ -776,10 +960,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val g2 = frame.window.grid
         val box = View("Detail", 0, 0, g2.columns, g2.rows, pixelScale(g2), 1, g2)
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
+        val under = underParts(file, box)
         val synthetic = synthetic(product, g2)
         val bitmap = withMemory { withContext(Dispatchers.Default) {
             val alertShapes = alertShapesFor(file)
-            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box, alertShapes) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product))
+            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box, alertShapes) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product), underlay = under.fill, fieldLines = under.lines)
         } }
         val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
         return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
@@ -849,7 +1034,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun renderGlobeNow(stride: Int) {
+    private suspend fun renderGlobeNow(stride: Int, busy: Boolean = false) {
         val (product, values) = shown ?: return
         if (globeW == 0 || values.size < product.grid.cells) return
         val st = _state.value
@@ -858,9 +1043,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val alertShapes = if (file == null) emptyList() else alertShapesFor(file)
         val bitmap = withContext(Dispatchers.Default) {
             val alerts = if (file == null) emptyList() else alertDrawsWith(alertShapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
-            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts)
+            globeRenderer.render(product.grid, values, product.style, emptyList(), st.cam, globeW, globeH, stride, dark, product, st.settings.contours, st.settings.barbDensity, alerts = alerts, underlay = globeUnder, fieldLines = globeLines)
         }
-        update { it.copy(map = bitmap, busy = false) }
+        update { it.copy(map = bitmap, busy = busy) }
     }
 
     // ---- places (bookmarks) ----
@@ -995,11 +1180,18 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 launch {
                     val gate = Semaphore(3)
                     var done = 0
+                    val underOn = st.underTemp || st.underDew
+                    val underFetched = java.util.Collections.synchronizedSet(HashSet<String>())
                     coroutineScope {
                         launch { prefetchArchivedAlerts(window.map { st.files[it] }) }          // the warnings and watches that were in force at each frame
                         for (i in window) launch {
                             gate.withPermit {
-                                try { repo.prefetch(st.files[i]); ready[i] = true; for (layer in st.overlays) overlayFileFor(layer, st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } } } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                                try {
+                                    repo.prefetch(st.files[i]); ready[i] = true
+                                    for (layer in st.overlays) overlayFileFor(layer, st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
+                                    // the surface analysis last: one file (two messages) serves the scans of a quarter hour
+                                    if (underOn) underPick(st.files[i])?.takeIf { underFetched.add(it.url) }?.let { pick -> try { surface.prefetch(pick) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
+                                } catch (e: CancellationException) { throw e } catch (_: Exception) { }
                             }
                             done += 1
                             update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
@@ -1058,8 +1250,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (area == ShareArea.Globe && globeW > 0) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             val size = 1500
+            var underlay: GlobeOverlay? = null
+            var fieldLines: List<FieldLines> = emptyList()
+            if (st.underTemp || st.underDew) {
+                underTemp(file, frame.window.grid)?.let { t ->
+                    if (st.underTemp) underlay = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY))
+                    if (st.underDew) underDew(t)?.let { td -> fieldLines = listOf(dewLines(t, td, null)) }
+                }
+            }
             val bitmap = withContext(Dispatchers.Default) {
-                globeRenderer.render(frame.window.grid, frame.window.values, style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity)
+                globeRenderer.render(frame.window.grid, frame.window.values, style, emptyList(), st.cam.copy(radius = st.cam.radius * size / globeW), size, size * globeH / globeW, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity, underlay = underlay, fieldLines = fieldLines)
             }
             return bitmap to style
         }
@@ -1088,8 +1288,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
         }
         outlook.ensure(file.validTime)
+        val under = underParts(file, box)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
         }
         return bitmap to style
     }
