@@ -20,7 +20,6 @@ import androidx.compose.material3.AlertDialog
 import simplemodelview.formatUtc
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
@@ -98,7 +97,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "GFS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap, polar = s.polar, onPolarGesture = vm::polarGesture)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
-                else -> CircularProgressIndicator()
+                else -> BusySpinner(big = true)
             }
         }
         Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) {
@@ -146,7 +145,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         s.file?.let { nbmFrameLabel(it) + "   frame ${s.index + 1}/${s.frames.size}" + (s.source?.let { src -> "   \u00B7 " + src } ?: "") } ?: "",
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
+                    if (s.busy && s.map != null) BusySpinner(Modifier.padding(end = 2.dp))
                     var runMenu by remember { mutableStateOf(false) }
                     Box {
                         AssistChip(onClick = { runMenu = true }, label = { Text(if (s.history) (s.historyRange?.let { r -> formatUtc(r.first).take(10) + "…" } ?: "History ${s.historyDays} d") else s.cycle?.let { "Run " + it.shortLabel + if (s.following) "" else " · set" } ?: "Run") }, modifier = Modifier.height(32.dp))

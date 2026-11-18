@@ -7,7 +7,10 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import simplemodelview.ContourLine
+import simplemodelview.ContourSpec
 import simplemodelview.Contours
+import simplemodelview.Kind
+import simplemodelview.PaintballLines
 import simplemodelview.Core
 import simplemodelview.GlobeCamera
 import simplemodelview.Grid
@@ -19,7 +22,14 @@ import simplemodelview.View
 import simplemodelview.WindProducts
 import simplemodelview.globeForward
 
-/** A second field on the globe (the surface temperature under the MRMS radar): its [values] on [grid], drawn with [style]. */
+/** The side of the square a globe or polar picture is saved at, and of a loop frame (before the video size scales it). */
+internal const val GLOBE_EXPORT_SIDE = 3000
+internal const val GLOBE_LOOP_SIDE = 2000
+
+/** How many coordinates of contour lines a globe renderer keeps for the frames of a loop (4 bytes each). */
+private const val GEO_BUDGET = 12_000_000L
+
+/** A second field over the globe's data (the MRMS overlays): its [values] on [grid], drawn with [style]; [marker] fields are a cross per cell, [halo] ones edged and haloed. */
 class GlobeOverlay(
     val grid: Grid, val values: FloatArray, val style: Style, val marker: Boolean = false, val markerScale: Float = 1f,
     val halo: Boolean = false, val markerColor: Int? = null,
@@ -29,14 +39,60 @@ class GlobeOverlay(
 class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     private var buffer = IntArray(0)
     private val alertPainter = MapRenderer(core, lines)
+    private var layerBuffer = IntArray(0)
 
     /** A contour line in latitude / longitude (lat0, lon0, lat1, lon1, ...), so any camera can project it. */
-    private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: DoubleArray)
+    private class GeoLine(val level: Double, val bold: Boolean, val label: String, val points: FloatArray)       // (float is a metre or so: half the memory of a double)
     private var geoKey: Any? = null
     private var geoLines: List<GeoLine> = emptyList()
-    private var layerBuffer = IntArray(0)
-    // the lines of the last few second fields (the surface dewpoint under the MRMS radar), by their key
-    private val fieldGeo = LinkedHashMap<String, List<GeoLine>>(4, 0.75f, true)
+
+    /**
+     * The contour lines of frames a loop plays, by the frame's name: tracing a field and turning every vertex into a latitude / longitude is the costly part of a
+     * frame, and a loop shows the same frames again and again. Kept until about [GEO_BUDGET] coordinates (some 50 MB) are held, the least recently used going first.
+     */
+    private val geoCache = LinkedHashMap<String, List<GeoLine>>(32, 0.75f, true)
+    private var geoCacheSize = 0L
+    private val geoLock = Any()
+
+    private fun cachedGeo(key: String): List<GeoLine>? = synchronized(geoLock) { geoCache[key] }
+
+    /** Keeps a frame's lines; over the budget the new ones are not kept (rather than the oldest dropped): a loop is a circle, and the frames kept stay kept. */
+    private fun putGeo(key: String, lines: List<GeoLine>) = synchronized(geoLock) {
+        val size = lines.sumOf { it.points.size.toLong() }
+        if (key !in geoCache && geoCacheSize + size > GEO_BUDGET) return@synchronized
+        geoCache.put(key, lines)?.let { old -> geoCacheSize -= old.sumOf { it.points.size.toLong() } }
+        geoCacheSize += lines.sumOf { it.points.size.toLong() }
+        val it = geoCache.entries.iterator()
+        while (geoCacheSize > GEO_BUDGET && geoCache.size > 1 && it.hasNext()) {
+            val eldest = it.next()
+            if (eldest.key == key) continue
+            geoCacheSize -= eldest.value.sumOf { l -> l.points.size.toLong() }
+            it.remove()
+        }
+    }
+
+    /** What decides which contour lines a frame has: the spec of its product, and for a wind product the height plane. Null when it has none. */
+    private fun contourSpecFor(grid: Grid, values: FloatArray, style: Style, product: Product): Pair<ContourSpec, Int?>? {
+        val windLevel = WindProducts.planeLevel(product.id)?.takeIf { WindProducts.hasPlanes(values, grid.cells) }
+        val spec = if (windLevel != null) Contours.specFor("z${if (windLevel == WindProducts.STACK) 500 else windLevel}", "m") else Contours.specFor(product.id, style.units)
+        return spec?.let { it to windLevel }
+    }
+
+    private fun traceGeo(grid: Grid, values: FloatArray, style: Style, spec: ContourSpec, windLevel: Int?): List<GeoLine> {
+        val field = if (windLevel != null) WindProducts.plane(values, grid.cells, WindProducts.HEIGHT) else values
+        val cstyle = if (windLevel != null) Style() else style
+        // the lines are traced on the whole grid (pixels of a one-pixel-per-cell view), then every vertex becomes a latitude / longitude
+        val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
+        return Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) }
+    }
+
+    /** Makes the contour lines of a frame ahead of its turn (a loop prepares the next frame while this one is shown): [frameKey] is the name [render] is given. Not locked: it runs beside a picture. */
+    fun warmContours(grid: Grid, values: FloatArray, style: Style, product: Product, frameKey: String) {
+        val key = "$frameKey|${product.id}"
+        if (cachedGeo(key) != null) return
+        val (spec, windLevel) = contourSpecFor(grid, values, style, product) ?: return
+        putGeo(key, traceGeo(grid, values, style, spec, windLevel))
+    }
 
     /**
      * Draws the globe. [product] (with [contours] and [barbDensity]) adds what the flat map draws over its data: the field's contour lines, and for the wind
@@ -46,7 +102,8 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     fun render(
         grid: Grid, values: FloatArray, style: Style, members: List<String>, cam: GlobeCamera, width: Int, height: Int, stride: Int, dark: Boolean,
         product: Product? = null, contours: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, windInTrueFrame: Boolean = false, polar: PolarCamera? = null, alerts: List<AlertDraw> = emptyList(),
-        /** A field under the data (the surface temperature) and lines of another field over everything but the alerts (the dewpoint). */
+        counties: Int = 0, overlays: List<GlobeOverlay> = emptyList(), baseHalo: Boolean = false, frameKey: String? = null,
+        /** A field under the data (the MRMS temperature) and lines of another field over everything but the alerts (the dewpoint). */
         underlay: GlobeOverlay? = null, fieldLines: List<FieldLines> = emptyList(),
     ): Bitmap {
         val pictureStart = System.nanoTime()
@@ -57,40 +114,52 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val cy = height / 2f
         val r = (polar?.radius ?: cam.radius).toFloat()
 
-        // the sphere, lit from the upper left
-        val ocean = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = RadialGradient(cx - 0.35f * r, cy - 0.35f * r, r * 1.5f,
-                if (dark) intArrayOf(0xFF2B5278.toInt(), 0xFF10263D.toInt(), 0xFF08121F.toInt()) else intArrayOf(0xFFD6E8F7.toInt(), 0xFFA9C8E4.toInt(), 0xFF7FA6CB.toInt()),
-                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
-        }
-        canvas.drawCircle(cx, cy, r, ocean)
-
-        if (polar != null) drawPolarGraticule(canvas, polar, width, height, dark) else drawGraticule(canvas, cam, width, height, dark)
+        // what does not depend on the frame (the sphere and its graticule below the data, the map lines over it) is drawn once per view and kept: a loop at one zoom
+        // only draws its data. Not while the view is being dragged (every picture is another view), and not for a big export picture.
+        val keep = stride == 1 && width.toLong() * height <= 4_000_000L
+        val layerKey = LayerKey(cam, polar, width, height, dark, counties)
+        if (keep) {
+            if (underKey != layerKey || under == null) {
+                under?.recycle()
+                under = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { drawUnder(Canvas(it), cam, polar, width, height, dark, cx, cy, r) }
+                underKey = layerKey
+            }
+            canvas.drawBitmap(under!!, 0f, 0f, null)
+        } else drawUnder(canvas, cam, polar, width, height, dark, cx, cy, r)
 
         // data
         if (buffer.size < width * height) buffer = IntArray(width * height)
         val memberRgb = IntArray(10) { Palettes.memberColors[members.getOrNull(it)] ?: 0x808080 }
-        val domain = if (underlay != null) 0 else if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()      // a field underneath shows instead of the domain's shade
-        if (underlay != null) Timings.timed("underlay") {
-            if (layerBuffer.size < width * height) layerBuffer = IntArray(width * height)
-            if (polar != null) core.renderPolar(underlay.grid, underlay.values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, 0, underlay.style, memberRgb, layerBuffer)
-            else core.renderGlobe(underlay.grid, underlay.values, width, height, cam.radius, cam.lat, cam.lon, stride, 0, underlay.style, memberRgb, layerBuffer)
-            canvas.drawBitmap(layerBuffer, 0, width, 0, 0, width, height, true, null)
-        }
+        // a member-probability contour product: the members' paintball under lines of the share of members, as the flat map has it
+        val paintLines = product != null && PaintballLines.isPaintballLines(product.id)
+        val rasterStyle = if (paintLines) Style(Kind.Paintball, units = "members") else style
+        val domain = if (dark) 0x66FFFFFF else 0x99FFFFFF.toInt()
+        val baseDomain = if (baseHalo || underlay != null) 0 else domain          // an edged swath is only the shapes, not the whole domain; a field underneath shows instead
+        if (underlay != null) Timings.timed("underlay") { drawOverlay(canvas, underlay, cam, polar, width, height, stride) }
         Timings.timed("raster") {
-            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, domain, style, memberRgb, buffer)
-            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, domain, style, memberRgb, buffer)
+            if (polar != null) core.renderPolar(grid, values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, baseDomain, rasterStyle, memberRgb, buffer)
+            else core.renderGlobe(grid, values, width, height, cam.radius, cam.lat, cam.lon, stride, baseDomain, rasterStyle, memberRgb, buffer)
         }
-        canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, null)
+        if (baseHalo) alertPainter.haloPixels(buffer, width, height)
+        if (paintLines) Timings.timed("contours") { drawPaintball(canvas, grid, values, members.size, cam, polar, width, height, dark) }
+        canvas.drawBitmap(buffer, 0, width, 0, 0, width, height, true, if (paintLines) Paint().apply { alpha = 0x90 } else null)
+        for (overlay in overlays) Timings.timed("overlay") { drawOverlay(canvas, overlay, cam, polar, width, height, stride) }
 
-        Timings.timed("lines") { if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1) else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1) }
-        if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame)
+        Timings.timed("lines") {
+            if (keep) {
+                if (overKey != layerKey || over == null) {
+                    over?.recycle()
+                    over = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { drawLines(Canvas(it), cam, polar, width, height, dark, stride, counties) }
+                    overKey = layerKey
+                }
+                canvas.drawBitmap(over!!, 0f, 0f, null)
+            } else drawLines(canvas, cam, polar, width, height, dark, stride, counties)
+        }
+        if (product != null) decorate(canvas, grid, values, style, product, cam, polar, width, height, dark, contours, barbDensity, windInTrueFrame, frameKey)
         for (f in fieldLines) Timings.timed("contours") {
-            val geo = fieldGeo[f.key] ?: run {
-                val whole = View("field", 0, 0, f.grid.columns, f.grid.rows, 1, 1, f.grid)
-                Contours.lines(f.values, f.grid, whole, f.style, f.spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(f.grid, whole, line)) }
-            }.also { fieldGeo[f.key] = it; while (fieldGeo.size > 4) fieldGeo.remove(fieldGeo.keys.first()) }
-            drawContourLines(canvas, projectedContours(geo) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, f.spec.color, dark, width)
+            val key = "field|${f.key}|${f.grid.id}"
+            val geo = cachedGeo(key) ?: traceGeo(f.grid, f.values, f.style, f.spec, null).also { putGeo(key, it) }
+            drawContourLines(canvas, projectedContours(geo, width, height) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, f.spec.color, dark, width)
         }
         if (alerts.isNotEmpty()) Timings.timed("alerts") { alertPainter.drawAlerts(canvas, alerts, width) }       // watches, warnings and outlooks over everything
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
@@ -104,23 +173,23 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
     /** The contour lines and the barbs of [product] on the sphere, drawn by the code the flat map uses. */
     private fun decorate(
         canvas: Canvas, grid: Grid, values: FloatArray, style: Style, product: Product, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean,
-        contours: Boolean, barbDensity: Int, trueFrame: Boolean,
+        contours: Boolean, barbDensity: Int, trueFrame: Boolean, frameKey: String? = null,
     ) {
         val cells = grid.cells
         val windLevel = WindProducts.planeLevel(product.id)?.takeIf { WindProducts.hasPlanes(values, cells) }
         if (contours) {
-            val spec = if (windLevel != null) Contours.specFor("z${if (windLevel == WindProducts.STACK) 500 else windLevel}", "m") else Contours.specFor(product.id, style.units)
-            if (spec != null) {
-                val key = Triple(values, product.id, grid)
-                if (geoKey != key) {
-                    val field = if (windLevel != null) WindProducts.plane(values, cells, WindProducts.HEIGHT) else values
-                    val cstyle = if (windLevel != null) Style() else style
-                    // the lines are traced on the whole grid (pixels of a one-pixel-per-cell view), then every vertex becomes a latitude / longitude
-                    val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
-                    Timings.timed("contours") { geoLines = Contours.lines(field, grid, whole, cstyle, spec).map { line -> GeoLine(line.level, line.bold, line.label, toLatLon(grid, whole, line)) } }
-                    geoKey = key
+            val found = contourSpecFor(grid, values, style, product)
+            if (found != null) {
+                val (spec, wind) = found
+                val lines: List<GeoLine> = if (frameKey != null) {
+                    val key = "$frameKey|${product.id}"
+                    cachedGeo(key) ?: Timings.timed("contours") { traceGeo(grid, values, style, spec, wind) }.also { putGeo(key, it) }
+                } else {
+                    val key = Triple(values, product.id, grid)
+                    if (geoKey != key) { Timings.timed("contours") { geoLines = traceGeo(grid, values, style, spec, wind) }; geoKey = key }
+                    geoLines
                 }
-                drawContourLines(canvas, projectedContours(geoLines) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
+                drawContourLines(canvas, projectedContours(lines, width, height) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, spec.color, dark, width)
             }
         }
         if (windLevel != null) {
@@ -132,41 +201,102 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
 
     private fun level(windLevel: Int, values: FloatArray, cells: Int) = windLevel == WindProducts.STACK && WindProducts.isStackFrame(values, cells)
 
-    private fun toLatLon(grid: Grid, whole: View, line: ContourLine): DoubleArray {
+    private val affines = HashMap<Grid, DoubleArray>()
+    private val notAffine = HashSet<Grid>()
+
+    /**
+     * For a latitude / longitude grid (GFS, MRMS): lat = a + col b + row c, lon = d + col e + row f, checked against the core at a far cell; null for a projected
+     * grid. A contour line's vertices then become places with no call into the core each (a frame has a hundred thousand of them).
+     */
+    private fun affineOf(grid: Grid): DoubleArray? = synchronized(affines) {
+        affines[grid]?.let { return@synchronized it }
+        if (grid in notAffine) return@synchronized null
+        val o = core.gridToLatLon(grid, 0.0, 0.0); val x = core.gridToLatLon(grid, 1.0, 0.0); val y = core.gridToLatLon(grid, 0.0, 1.0)
+        val a = doubleArrayOf(o[0], x[0] - o[0], y[0] - o[0], o[1], x[1] - o[1], y[1] - o[1])
+        val col = (grid.columns - 1) * 0.83; val row = (grid.rows - 1) * 0.71
+        val far = core.gridToLatLon(grid, col, row)
+        val ok = kotlin.math.abs(a[0] + col * a[1] + row * a[2] - far[0]) < 1e-6 && kotlin.math.abs(a[3] + col * a[4] + row * a[5] - far[1]) < 1e-6
+        if (ok) { affines[grid] = a; a } else { notAffine += grid; null }
+    }
+
+    private fun toLatLon(grid: Grid, whole: View, line: ContourLine): FloatArray {
         val p = line.points
-        val out = DoubleArray(p.size)
+        val out = FloatArray(p.size)
+        val a = affineOf(grid)
+        if (a != null) {
+            var k = 0
+            while (k + 1 < p.size) {
+                val col = p[k] - 0.5 + whole.col0
+                val row = whole.row0 + whole.rows - 0.5 - p[k + 1]
+                out[k] = (a[0] + col * a[1] + row * a[2]).toFloat(); out[k + 1] = (a[3] + col * a[4] + row * a[5]).toFloat()
+                k += 2
+            }
+            return out
+        }
         var i = 0
         while (i + 1 < p.size) {
             val col = p[i] - 0.5 + whole.col0
             val row = whole.row0 + whole.rows - 0.5 - p[i + 1]
             val ll = core.gridToLatLon(grid, col, row)
-            out[i] = ll[0]; out[i + 1] = ll[1]
+            out[i] = ll[0].toFloat(); out[i + 1] = ll[1].toFloat()
             i += 2
         }
         return out
     }
 
     /** The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon, a label on the longest piece of each level. */
-    private fun projectedContours(lines: List<GeoLine>, project: (Double, Double) -> DoubleArray?): List<ContourLine> {
-        val out = ArrayList<ContourLine>()
+    /**
+     * The contour lines as the camera sees them, in picture pixels: broken where a line goes over the horizon. Labels as on the flat map: one per level, on its
+     * longest piece, and at most two more on pieces that cross a good part of the picture (far from the level's other labels); the many small rings of a
+     * noisy field (a dewpoint analysis) get none.
+     */
+    private fun projectedContours(lines: List<GeoLine>, width: Int, height: Int, project: (Double, Double) -> DoubleArray?): List<ContourLine> {
+        class Piece(val line: GeoLine, val pts: FloatArray, val length: Float)
+        val pieces = ArrayList<Piece>()
         for (line in lines) {
-            val pieces = ArrayList<FloatArray>()
             var current = ArrayList<Float>()
+            fun close() { if (current.size >= 4) { val pts = current.toFloatArray(); pieces += Piece(line, pts, screenLength(pts)) }; current = ArrayList() }
             var i = 0
             while (i + 1 < line.points.size) {
-                val p = project(line.points[i], line.points[i + 1])
-                if (p == null) { if (current.size >= 4) pieces += current.toFloatArray(); current = ArrayList() }
-                else { current.add(p[0].toFloat()); current.add(p[1].toFloat()) }
+                val p = project(line.points[i].toDouble(), line.points[i + 1].toDouble())
+                if (p == null) close() else { current.add(p[0].toFloat()); current.add(p[1].toFloat()) }
                 i += 2
             }
-            if (current.size >= 4) pieces += current.toFloatArray()
-            val best = pieces.indices.maxByOrNull { pieces[it].size } ?: continue
-            pieces.forEachIndexed { k, pts ->
-                val mid = if (k == best && pts.size >= 24) (pts.size / 4) * 2 else -1
-                out.add(ContourLine(line.level, line.bold, pts, line.label, mid, false))
+            close()
+        }
+        val labelAt = HashMap<Piece, Int>()
+        val far = maxOf(width, height) / 4f
+        for ((_, ofLevel) in pieces.groupBy { it.line.level }) {
+            val placed = ArrayList<FloatArray>()
+            for ((rank, piece) in ofLevel.sortedByDescending { it.length }.withIndex()) {
+                if (placed.size >= 3 || piece.pts.size < 24) break
+                if (rank > 0 && piece.length < width * 0.4f) break
+                val at = labelPoint(piece.pts, width, height) ?: continue
+                val x = piece.pts[at]; val y = piece.pts[at + 1]
+                if (placed.any { kotlin.math.hypot(it[0] - x, it[1] - y) < far }) continue
+                placed += floatArrayOf(x, y)
+                labelAt[piece] = at
             }
         }
-        return out
+        return pieces.map { ContourLine(it.line.level, it.line.bold, it.pts, it.line.label, labelAt[it] ?: -1, false) }
+    }
+
+    private fun screenLength(pts: FloatArray): Float {
+        var sum = 0f
+        var i = 2
+        while (i + 1 < pts.size) { sum += kotlin.math.hypot(pts[i] - pts[i - 2], pts[i + 1] - pts[i - 1]); i += 2 }
+        return sum
+    }
+
+    /** A vertex of [pts] for the label, inside the picture with a margin: the middle, else a quarter or three quarters along; null when none is. */
+    private fun labelPoint(pts: FloatArray, width: Int, height: Int): Int? {
+        val n = pts.size / 2
+        val margin = 24f
+        for (f in listOf(0.5, 0.25, 0.75)) {
+            val k = (n * f).toInt().coerceIn(0, n - 1) * 2
+            if (pts[k] in margin..(width - margin) && pts[k + 1] in margin..(height - margin)) return k
+        }
+        return null
     }
 
     private fun drawGraticule(canvas: Canvas, cam: GlobeCamera, width: Int, height: Int, dark: Boolean) {
@@ -200,5 +330,87 @@ class GlobeRenderer(private val core: Core, private val lines: MapLines) {
         val sign = if (cam.north) 1 else -1
         for (lat in 30..80 step 10) polyline((-180..180 step 3).asSequence().map { (sign * lat).toDouble() to it.toDouble() })
         for (lon in -180 until 180 step 30) polyline(sequenceOf((sign * 89.9) to lon.toDouble(), (sign * cam.edgeLat) to lon.toDouble()))
+    }
+
+    private data class LayerKey(val cam: GlobeCamera, val polar: PolarCamera?, val width: Int, val height: Int, val dark: Boolean, val counties: Int)
+    private var underKey: LayerKey? = null
+    private var under: Bitmap? = null            // the sphere and the graticule
+    private var overKey: LayerKey? = null
+    private var over: Bitmap? = null             // the map lines (clear where there are none)
+
+    /** The sphere, lit from the upper left, and its graticule. */
+    private fun drawUnder(canvas: Canvas, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean, cx: Float, cy: Float, r: Float) {
+        val ocean = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(cx - 0.35f * r, cy - 0.35f * r, r * 1.5f,
+                if (dark) intArrayOf(0xFF2B5278.toInt(), 0xFF10263D.toInt(), 0xFF08121F.toInt()) else intArrayOf(0xFFD6E8F7.toInt(), 0xFFA9C8E4.toInt(), 0xFF7FA6CB.toInt()),
+                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
+        }
+        canvas.drawCircle(cx, cy, r, ocean)
+        if (polar != null) drawPolarGraticule(canvas, polar, width, height, dark) else drawGraticule(canvas, cam, width, height, dark)
+    }
+
+    private fun drawLines(canvas: Canvas, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean, stride: Int, counties: Int) {
+        if (polar != null) lines.drawPolar(canvas, polar, width, height, dark, detailed = stride == 1, countyMode = counties)
+        else lines.drawGlobe(canvas, cam, width, height, dark, detailed = stride == 1, countyMode = counties)
+    }
+
+    /** One overlay field over the data: rastered like the base field into its own buffer (clear where it has nothing), then edged or drawn as crosses where it asks. */
+    private fun drawOverlay(canvas: Canvas, ov: GlobeOverlay, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, stride: Int) {
+        if (layerBuffer.size < width * height) layerBuffer = IntArray(width * height)
+        val rgb = IntArray(10)
+        if (polar != null) core.renderPolar(ov.grid, ov.values, width, height, polar.radius, polar.lon, polar.edgeLat, polar.north, stride, 0, ov.style, rgb, layerBuffer)
+        else core.renderGlobe(ov.grid, ov.values, width, height, cam.radius, cam.lat, cam.lon, stride, 0, ov.style, rgb, layerBuffer)
+        if (ov.marker) { drawMarkers(canvas, ov, cam, polar, width, height); return }
+        if (ov.halo && stride == 1) alertPainter.haloPixels(layerBuffer, width, height)
+        canvas.drawBitmap(layerBuffer, 0, width, 0, 0, width, height, true, null)
+    }
+
+    /** A cross for each cell that shows (strikes), in the overlay's color there (or the marker color), on a dark rim: the flat map's look. */
+    private fun drawMarkers(canvas: Canvas, ov: GlobeOverlay, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int) {
+        val g = ov.grid
+        val st = ov.style
+        val f = if (st.factor == 0.0) 1.0 else st.factor
+        val unit = maxOf(1f, width / 900f) * ov.markerScale
+        val arm = 3.4f * unit
+        val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.9f * unit; strokeCap = Paint.Cap.BUTT }
+        val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3.7f * unit; strokeCap = Paint.Cap.BUTT; color = Color.BLACK }
+        var drawn = 0
+        for (r in 0 until g.rows) {
+            for (c in 0 until g.columns) {
+                val raw = ov.values[r * g.columns + c]
+                if (raw.isNaN()) continue
+                val shown = raw * f + st.offset
+                if (shown < st.hideBelow) continue
+                val ll = core.gridToLatLon(g, c.toDouble(), r.toDouble())
+                val p = (if (polar != null) polar.project(width, height, ll[0], ll[1]) else globeForward(cam, width, height, ll[0], ll[1])) ?: continue
+                val x = p[0].toFloat(); val y = p[1].toFloat()
+                if (x < -arm || y < -arm || x > width + arm || y > height + arm) continue
+                val sampled = if (x >= 0 && y >= 0 && x < width && y < height) layerBuffer[y.toInt() * width + x.toInt()] else 0
+                val alpha = if (sampled ushr 24 == 0) 255 else sampled ushr 24
+                ink.color = ov.markerColor?.let { (alpha shl 24) or it } ?: if (sampled ushr 24 == 0) Color.WHITE else sampled
+                rim.alpha = maxOf(alpha * 2 / 3, 90)
+                canvas.drawLine(x - arm, y, x + arm, y, rim); canvas.drawLine(x, y - arm, x, y + arm, rim)
+                canvas.drawLine(x - arm, y, x + arm, y, ink); canvas.drawLine(x, y - arm, x, y + arm, ink)
+                drawn += 1
+                if (drawn >= 20_000) return                     // a storm-wide burst: enough to read
+            }
+        }
+    }
+
+    private var paintKey: Any? = null
+    private var paintGeo: List<GeoLine> = emptyList()
+
+    /** Lines of the share of members at or above the threshold: traced once per frame on the whole grid (the neighborhood and blur are the costly part), then projected. */
+    private fun drawPaintball(canvas: Canvas, grid: Grid, mask: FloatArray, memberCount: Int, cam: GlobeCamera, polar: PolarCamera?, width: Int, height: Int, dark: Boolean) {
+        if (mask.size < grid.cells) return
+        val key = Triple(mask, grid, memberCount)
+        if (paintKey != key) {
+            val share = PaintballLines.blur(PaintballLines.neighborhoodPercent(mask, grid.columns, grid.rows, memberCount.takeIf { it > 0 } ?: 10, PaintballLines.NEIGHBORHOOD), grid.columns, grid.rows, PaintballLines.BLUR_RADIUS)
+            val whole = View("globe", 0, 0, grid.columns, grid.rows, 1, 1, grid)
+            val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
+            paintGeo = Contours.lines(share, grid, whole, Style(), spec, smoothing = 1, levelsOverride = PaintballLines.levels).map { GeoLine(it.level, it.bold, it.label, toLatLon(grid, whole, it)) }
+            paintKey = key
+        }
+        drawPaintballContourLines(canvas, projectedContours(paintGeo, width, height) { la, lo -> if (polar != null) polar.project(width, height, la, lo) else globeForward(cam, width, height, la, lo) }, dark, width)
     }
 }

@@ -22,7 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -111,7 +110,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
         val line = listOfNotNull(s.station?.let { id -> id + (s.stationName?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") }, s.sources.takeIf { it.isNotEmpty() }).joinToString("   ")
         if (line.isNotEmpty() || s.busy) Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(s.status ?: line, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (s.busy) CircularProgressIndicator(Modifier.padding(start = 6.dp).height(16.dp).width(16.dp), strokeWidth = 2.dp)
+            if (s.busy) BusySpinner(Modifier.padding(start = 2.dp))
         }
         val table = s.table
         when {
@@ -122,7 +121,7 @@ internal fun PointScreen(vm: PointViewModel, onOpen: (String) -> Unit, onSynopti
                 Text(s.error!!, color = MaterialTheme.colorScheme.error)
                 Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
             }
-            table == null -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            table == null -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { BusySpinner(big = true) }
             else -> {
                 s.error?.let { Text(it, Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 PointBody(table, s.upper, placeZone(s.zone), s.selected, vm::select, Modifier.weight(1f))

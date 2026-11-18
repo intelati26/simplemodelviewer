@@ -38,11 +38,43 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val conta
         })
         .build().also { it.dispatcher.maxRequestsPerHost = 4 }
 
+    /** One request, listed in [DownloadMonitor] while it runs: the body is read in pieces so the list can show its progress. */
     private fun call(url: String, range: String?): HttpResult {
         val builder = Request.Builder().url(url)
         if (range != null) builder.header("Range", range)
-        client.newCall(builder.build()).execute().use { response ->
-            return HttpResult(response.code, response.body?.bytes() ?: ByteArray(0), response.headers.getDate("Last-Modified")?.time?.div(1000))
+        val id = DownloadMonitor.start(url, range)
+        try {
+            client.newCall(builder.build()).execute().use { response ->
+                val cached = response.networkResponse == null && response.cacheResponse != null
+                val body = response.body
+                val total = body?.contentLength() ?: -1L
+                DownloadMonitor.update(id) { it.copy(state = DownloadEntry.State.Downloading, total = total, status = response.code) }
+                val bytes = if (body == null) ByteArray(0) else {
+                    val out = java.io.ByteArrayOutputStream(if (total in 1..Int.MAX_VALUE.toLong()) total.toInt() else 64 * 1024)
+                    val buffer = ByteArray(64 * 1024)
+                    val input = body.byteStream()
+                    var received = 0L
+                    var shown = 0L
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        out.write(buffer, 0, n)
+                        received += n
+                        val t = System.currentTimeMillis()
+                        if (t - shown > 250) { shown = t; val r = received; DownloadMonitor.update(id) { it.copy(received = r) } }
+                    }
+                    out.toByteArray()
+                }
+                val ok = response.code in 200..299 || response.code == 304
+                DownloadMonitor.update(id) {
+                    it.copy(received = bytes.size.toLong(), total = if (it.total < 0) bytes.size.toLong() else it.total, finished = System.currentTimeMillis(),
+                        state = if (!ok) DownloadEntry.State.Failed else if (cached) DownloadEntry.State.Cached else DownloadEntry.State.Done)
+                }
+                return HttpResult(response.code, bytes, response.headers.getDate("Last-Modified")?.time?.div(1000))
+            }
+        } catch (e: IOException) {
+            DownloadMonitor.update(id) { it.copy(state = DownloadEntry.State.Failed, finished = System.currentTimeMillis()) }
+            throw e
         }
     }
 

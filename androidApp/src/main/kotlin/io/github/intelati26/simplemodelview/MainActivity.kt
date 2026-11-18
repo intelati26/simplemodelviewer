@@ -40,7 +40,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -112,6 +111,7 @@ class MainActivity : ComponentActivity() {
     private val nbmViewModel: NbmViewModel by viewModels()
     private val gfsViewModel: GfsViewModel by viewModels()
     private val pointViewModel: PointViewModel by viewModels()
+    private val analysisViewModel: AnalysisViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,7 +120,7 @@ class MainActivity : ComponentActivity() {
         val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point").firstOrNull { it == start } ?: "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point", "analysis").firstOrNull { it == start } ?: "spc") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
                     // the page menu opens any page; the page being opened reads the favorites, places and settings the others may have changed
                     val go: (String) -> Unit = { p ->
                         open(p)
-                        when (p) { "spc" -> viewModel.reloadFromPrefs(); "mrms" -> mrmsViewModel.reloadFromPrefs(); "nbm" -> nbmViewModel.reloadFromPrefs() }
+                        when (p) { "spc" -> viewModel.reloadFromPrefs(); "mrms" -> mrmsViewModel.reloadFromPrefs(); "nbm" -> nbmViewModel.reloadFromPrefs(); "analysis" -> analysisViewModel.reloadFromPrefs() }
                     }
                     // the extended point view opens the synoptic set up of a time on the REFS page, or on the GFS page beyond its range
                     val toSynoptic: (Long, Cycle?) -> Unit = { valid, run ->
@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if (page == "point") PointScreen(pointViewModel, go, toSynoptic)
                     else if (page == "gfs") GfsScreen(gfsViewModel, go)
+                    else if (page == "analysis") AnalysisScreen(analysisViewModel, go)
                     else if (page == "nbm") NbmScreen(nbmViewModel, go)
                     else if (page == "mrms") MrmsScreen(mrmsViewModel, go)
                     else {
@@ -216,7 +217,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         s.forecastHour?.let { "f${it.toString().padStart(2, '0')}" }).joinToString("   "),
                     Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                if (s.busy && s.map != null) CircularProgressIndicator(Modifier.padding(end = 6.dp).size(16.dp), strokeWidth = 2.dp)
+                if (s.busy && s.map != null) BusySpinner(Modifier.padding(end = 2.dp))
                 SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = { vm.setGlobe(false); vm.pickSector(it) })
                 TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
             }
@@ -231,7 +232,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                     }
                     s.map != null || s.globe -> if (s.globe) GlobeView(s, vm) else MapView(s, vm)
-                    else -> CircularProgressIndicator()
+                    else -> BusySpinner(big = true)
                 }
             }
         }

@@ -122,25 +122,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val share = PaintballLines.blur(PaintballLines.neighborhoodPercent(mask, grid.columns, grid.rows, memberNames.size.takeIf { it > 0 } ?: 10, PaintballLines.NEIGHBORHOOD), grid.columns, grid.rows, PaintballLines.BLUR_RADIUS)
         val spec = ContourSpec(10.0, boldEvery = 50.0, labelSuffix = "%")
         val lines = Contours.lines(share, product.grid, view, Style(), spec, smoothing = 1, levelsOverride = PaintballLines.levels)
-        val width = maxOf(2.2f, pictureWidth / 600f)
-        val halo = if (dark) 0xDD000000.toInt() else 0xEEFFFFFF.toInt()
-        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = maxOf(11f, pictureWidth / 90f); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
-        for (c in lines.sortedBy { it.level }) {
-            val path = android.graphics.Path()
-            path.moveTo(c.points[0], c.points[1])
-            var i = 2
-            while (i + 1 < c.points.size) { path.lineTo(c.points[i], c.points[i + 1]); i += 2 }
-            val w = if (c.bold) width * 1.8f else width
-            line.strokeWidth = w + 4f; line.color = halo; canvas.drawPath(path, line)
-            line.strokeWidth = w; line.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawPath(path, line)
-        }
-        for (c in lines) if (c.labelAt >= 0) {
-            val x = c.points[c.labelAt]; val y = c.points[c.labelAt + 1]
-            if (x < 0 || y < 0 || x > pictureWidth) continue
-            text.style = Paint.Style.STROKE; text.strokeWidth = 4f; text.color = halo; canvas.drawText(c.label, x, y + text.textSize / 3, text)
-            text.style = Paint.Style.FILL; text.color = 0xFF000000.toInt() or PaintballLines.levelColor(c.level); canvas.drawText(c.label, x, y + text.textSize / 3, text)
-        }
+        drawPaintballContourLines(canvas, lines, dark, pictureWidth)
     }
 
     /** A wind product's height contours (from its height plane) and barbs (from its u / v planes), over the speed colors. */
@@ -293,6 +275,9 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
 
     /** Edge width in picture pixels: 2 on a small picture, 3 on a large one. */
     private fun edgeFor(pictureWidth: Int) = 1 + maxOf(1, pictureWidth / 1200)
+
+    /** A picture's shapes (pixels with any opacity) edged in black and haloed in white, grown first on a wide picture: the globe's hail swaths and rotation tracks. */
+    internal fun haloPixels(px: IntArray, w: Int, h: Int) { grow(px, w, h, growFor(w)); outline(px, w, h, edgeFor(w)) }
 
     /** The overlay drawn at picture resolution, its shapes edged in black and haloed in white (see [outline]). */
     private fun drawHaloed(canvas: Canvas, overlay: Overlay, w: Int, h: Int) {

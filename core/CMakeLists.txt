@@ -17,7 +17,8 @@ endif()
 add_library(spcrefs_core STATIC
     src/blosc_decode.cpp src/chunk_decode.cpp src/raster.cpp src/grids.cpp src/mrms_decode.cpp src/geotiff_decode.cpp src/grib_decode.cpp src/c_api.cpp)
 target_include_directories(spcrefs_core PUBLIC include PRIVATE src)
-target_link_libraries(spcrefs_core PRIVATE zstd_decoder ${CORE_ZLIB})
+find_package(Threads REQUIRED)
+target_link_libraries(spcrefs_core PRIVATE zstd_decoder ${CORE_ZLIB} Threads::Threads)
 
 # Android: the JNI bridge the app loads as libsimplemodelview_jni.so
 if(ANDROID)
