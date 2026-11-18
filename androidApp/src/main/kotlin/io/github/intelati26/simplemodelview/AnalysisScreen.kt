@@ -54,6 +54,7 @@ private const val ANALYSIS_DISCLAIMER = "Data: NOAA/NWS RTMA and URMA surface an
 
 private fun frameLabel(f: AnalysisFrame) = formatUtc(f.valid).let { if (f.quarterHourly) it else it }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 /** The surface analysis page: RTMA / URMA fields at 2.5 km, the last six hours every 15 minutes or any span of the past every hour. */
 @Composable
 internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
