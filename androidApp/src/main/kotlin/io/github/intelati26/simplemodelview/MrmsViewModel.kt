@@ -115,6 +115,8 @@ data class MrmsState(
     val overlayInfo: String? = null,                  // which overlay files are on the picture, or why one is missing
     val underTemp: Boolean = false,                   // the surface temperature drawn under the radar (a translucent fill)
     val underDew: Boolean = false,                    // surface dewpoint lines over the picture
+    val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
+    val station: StationDetail? = null,               // the station tapped: its reports and chart
     val alertKinds: Set<AlertKind> = emptySet(),      // which alert layers are on (none by default)
     val alertShapes: List<AlertShape> = emptyList(),  // everything read for those layers
     val alertsAsOf: Long? = null,                     // when they were read (epoch seconds)
@@ -129,6 +131,9 @@ data class MrmsState(
 
 /** How long a layer may take before the picture so far is shown while it loads (see MrmsViewModel.showCurrent). */
 private const val STAGE_WAIT_MS = 120L
+
+/** A tapped station: its report, then its last day of reports and its 5-minute wind as they arrive. */
+data class StationDetail(val metar: simplemodelview.Metar, val history: List<simplemodelview.Metar>?, val fiveMinute: List<simplemodelview.FiveMinute>?, val error: String?)
 
 class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
@@ -169,6 +174,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             loopLength = prefs.getInt("mrms_loop_frames", 0),
             underTemp = prefs.getBoolean("mrms_under_t", false),
             underDew = prefs.getBoolean("mrms_under_td", false),
+            stations = prefs.getBoolean("mrms_stations", false),
         )
     )
     val state: StateFlow<MrmsState> = _state
@@ -583,6 +589,46 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private var globeUnder: GlobeOverlay? = null
     private var globeLines: List<FieldLines> = emptyList()
 
+    // ---- METAR stations: the last thing drawn, from the Aviation Weather Center ----
+    private val metars = AppContainer.metars
+    private var shownPlots: List<StationPlot> = emptyList()
+
+    fun setStations(on: Boolean) {
+        prefs.edit().putBoolean("mrms_stations", on).apply()
+        update { it.copy(stations = on) }
+        if (shown != null && !_state.value.playing) showFrame()
+    }
+
+    /** The reports in force at [time] inside the lat / lon box [box] (west, south, east, north), the bulk file read again when it is a few minutes old. */
+    private suspend fun stationReports(time: Long, box: DoubleArray): List<simplemodelview.Metar> {
+        val now = System.currentTimeMillis() / 1000
+        if (now - time < 3 * 3600) try { metars.refresh(now) } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        return metars.at(time, box[0], box[1], box[2], box[3])
+    }
+
+    private suspend fun plotsFor(file: MrmsFile, v: View, box: DoubleArray): List<StationPlot> {
+        if (!_state.value.stations) return emptyList()
+        val reports = stationReports(file.validTime, box)
+        return withContext(Dispatchers.Default) { stationPlots(core, reports, v, _state.value.units.celsius) }
+    }
+
+    /** Opens a station: its last day of reports (AWC) and its 5-minute wind (IEM, which AWC does not carry), for the chart. */
+    fun openStation(m: simplemodelview.Metar) {
+        update { it.copy(station = StationDetail(m, null, null, null)) }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis() / 1000
+            val history = try { metars.history(m.id, 24, now) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                update { it.copy(station = it.station?.takeIf { s -> s.metar.id == m.id }?.copy(error = e.message ?: "could not read the reports")) }
+                emptyList()
+            }
+            update { it.copy(station = it.station?.takeIf { s -> s.metar.id == m.id }?.copy(history = history)) }
+            val five = try { metars.fiveMinute(m.id, now - 24 * 3600, now) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+            update { it.copy(station = it.station?.takeIf { s -> s.metar.id == m.id }?.copy(fiveMinute = five)) }
+        }
+    }
+
+    fun closeStation() = update { it.copy(station = null) }
+
     fun setUnderTemp(on: Boolean) = setUnder(on, _state.value.underDew)
     fun setUnderDew(on: Boolean) = setUnder(_state.value.underTemp, on)
 
@@ -807,14 +853,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         var ov: List<OverlayResult> = emptyList()
         var fill: Overlay? = null
         var lines: List<FieldLines> = emptyList()
+        var plots: List<StationPlot> = emptyList()
         val under = ArrayList<ShownOverlay>()
         val underInfo = ArrayList<String>()
         var dirty = true
         suspend fun paint(final: Boolean) {
             if (dirty) {
                 dirty = false
-                val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product), underlay = fill, fieldLines = lines) } }
+                val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, ov.map { it.layer }, alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product), underlay = fill, fieldLines = lines, stations = plots) } }
                 shownOverlays = ov.map { it.shown } + under
+                shownPlots = plots
                 val styles = st.overlays.map { l -> styleForLayer(l) } + listOfNotNull(fill?.let { tempStyle() })
                 update { it.copy(map = bitmap, detail = null, style = synthetic.style, busy = !final, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = styles, overlayInfo = joinInfo(overlayInfoFor(ov), underInfo)) }
             } else if (final) update { it.copy(busy = false) }
@@ -838,6 +886,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             }
             dirty = true      // (the read-out note changes too)
         }
+        if (st.stations) {       // last: the station plots
+            plots = stage { plotsFor(file, v, sectorBox(sector, 0.5)) }
+            if (plots.isNotEmpty()) dirty = true
+        } else shownPlots = emptyList()
         paint(final = true)
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
         scheduleDetail()
@@ -878,6 +930,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val (product, values) = shown ?: return
         val v = view ?: return
         if (fx !in 0f..1f || fy !in 0f..1f) { clearTap(); return }
+        if (_state.value.stations && shownPlots.isNotEmpty()) {
+            val px = fx * v.pixelWidth; val py = fy * v.pixelHeight
+            val reach = stationTextSize(v.pixelWidth) * 1.6f
+            shownPlots.minByOrNull { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) }
+                ?.takeIf { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) <= reach * reach }?.let { openStation(it.metar) }
+        }
         val column = floor(fx * v.cols).toInt().coerceIn(0, v.cols - 1)
         val row = v.rows - 1 - floor(fy * v.rows).toInt().coerceIn(0, v.rows - 1)
         val (lat, lon) = core.gridToLatLon(product.grid, column.toDouble(), row.toDouble())
@@ -961,10 +1019,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val box = View("Detail", 0, 0, g2.columns, g2.rows, pixelScale(g2), 1, g2)
         val ov = overlayLayers(file, "detail", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, w.west, w.east, 3500, false) }
         val under = underParts(file, box)
+        val plots = plotsFor(file, box, coords)
         val synthetic = synthetic(product, g2)
         val bitmap = withMemory { withContext(Dispatchers.Default) {
             val alertShapes = alertShapesFor(file)
-            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box, alertShapes) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product), underlay = under.fill, fieldLines = under.lines)
+            renderer.render(synthetic, synthetic.style, frame.window.values, emptyList(), box, dark, ov.map { it.layer }, alertDraws(box, alertShapes) + outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, halo = mrmsHasHalo(product), underlay = under.fill, fieldLines = under.lines, stations = plots)
         } }
         val cols = v.grid.columns.toFloat(); val rows = v.grid.rows.toFloat()
         return DetailLayer(bitmap, (w.colMin / cols).toFloat(), (1.0 - (w.rowMax + 1.0) / rows).toFloat(), ((w.colMax + 1.0) / cols).toFloat(), (1.0 - w.rowMin / rows).toFloat(), frame.window.sourceCellDegrees * step * 111.0)
@@ -1289,8 +1348,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         outlook.ensure(file.validTime)
         val under = underParts(file, box)
+        val plots = plotsFor(file, box, gridCoverBox(core, box.grid))
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, stations = plots, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
         }
         return bitmap to style
     }

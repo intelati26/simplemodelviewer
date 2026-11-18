@@ -49,7 +49,7 @@ internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 10
 class MapRenderer(private val core: Core, private val lines: MapLines) {
     fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f,
                /** A field under the data (the MRMS temperature): stretched over the whole picture, smoothly, before the data is drawn. */
-               underlay: Overlay? = null, fieldLines: List<FieldLines> = emptyList()): Bitmap {
+               underlay: Overlay? = null, fieldLines: List<FieldLines> = emptyList(), stations: List<StationPlot> = emptyList()): Bitmap {
         val pictureStart = System.nanoTime()
         val w = view.pixelWidth
         val h = view.pixelHeight
@@ -83,6 +83,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         }
         for (f in fieldLines) Timings.timed("contours") { drawContourLines(canvas, fieldLinesFor(f, view), f.spec.color, dark, w) }
         if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
+        if (stations.isNotEmpty()) Timings.timed("stations") { drawStationPlots(canvas, stations, dark, w) }
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
         return bitmap
     }

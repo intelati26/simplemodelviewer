@@ -56,5 +56,7 @@ object AppContainer {
     val lightning by lazy { LightningCastModel(LightningCastRepository(http) { prefs.getString("lightningcast_url", null)?.takeIf { it.isNotBlank() } }, prefs) }
     val alerts by lazy { AlertsRepository(http) }
     /** The surface analysis under the MRMS radar: RTMA (every 15 minutes), NBM when there is none; its messages are kept with the other GRIB messages. */
+    /** METAR reports from the Aviation Weather Center (the bulk file is gzipped). */
+    val metars by lazy { simplemodelview.MetarRepository(http) { bytes -> java.util.zip.GZIPInputStream(bytes.inputStream()).use { it.readBytes() } } }
     val surface by lazy { simplemodelview.SurfaceRepository(http, core, gribStore) }
 }

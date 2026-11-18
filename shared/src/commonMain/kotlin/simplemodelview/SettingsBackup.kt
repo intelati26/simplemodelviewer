@@ -31,7 +31,7 @@ object BackupPrefs {
         "u_celsius" to bool(), "u_km" to bool(), "u_metric_length" to bool(), "video_size" to text(), "loop_from_shown" to bool(),
         "loop_frames" to int(0, 1000), "mrms_loop_frames" to int(0, 1000), "gfs_loop_hours" to int(-1000, 1000), "nbm_loop_hours" to int(-1000, 1000), "gfs_history_days" to int(1, 2000),
         "page" to text(), "product" to text(), "sector" to text(), "member_name" to text(), "wind_color" to text(), "wind_level" to int(10, 1000),
-        "mrms_product" to text(), "mrms_sector" to text(), "mrms_overlays" to text(), "mrms_alerts" to text(), "overlay_hail" to text(), "overlay_rotation" to text(), "outlook_type" to text(), "mrms_under_t" to bool(), "mrms_under_td" to bool(),
+        "mrms_product" to text(), "mrms_sector" to text(), "mrms_overlays" to text(), "mrms_alerts" to text(), "overlay_hail" to text(), "overlay_rotation" to text(), "outlook_type" to text(), "mrms_under_t" to bool(), "mrms_under_td" to bool(), "mrms_stations" to bool(),
         "gfs_product" to text(), "gfs_sector" to text(), "gfs_level" to int(10, 1000), "gfs_color" to text(), "nbm_product" to text(), "nbm_sector" to text(),
     )
 
