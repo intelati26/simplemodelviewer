@@ -683,6 +683,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         shownGrid = g
         shown = product to values
         shownOverlays = emptyList()
+        shownPlots = emptyList()          // (no station plots over the total)
         val sources = buildString {
             append("${formatClock(plan.start, 0)} \u2192 ${formatClock(plan.end, 0)}")
             if (plan.multiFrom != null && plan.multiTo != null) append("  \u00B7  multi-sensor ${formatClock(plan.multiFrom, 0)} \u2192 ${formatClock(plan.multiTo, 0)}, radar-only the rest") else append("  \u00B7  radar-only")
