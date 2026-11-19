@@ -26,6 +26,10 @@ class SimpleModelViewApp : Application() {
                 p.edit().apply { if (!p.contains("favorites")) putStringSet("favorites", old); remove("favourites") }.apply()
             }
         }
+        // a first launch has no saved places: Norman, OK is the one to start with, so the Extended page has a forecast to show (deleting it, or every place, is kept)
+        AppContainer.prefs.let { p ->
+            if (!p.contains("places")) p.edit().putString("places", simplemodelview.encodePlaces(listOf(simplemodelview.Place("Norman, OK", 35.2220, -97.4395)))).apply()
+        }
         // location-based alerts were removed: drop any job a development build scheduled
         androidx.work.WorkManager.getInstance(this).cancelUniqueWork("alerts")
         AppContainer.prefs.edit().remove("rules").remove("alert_status").apply()

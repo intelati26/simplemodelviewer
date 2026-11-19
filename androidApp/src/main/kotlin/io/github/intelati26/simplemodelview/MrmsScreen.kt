@@ -298,23 +298,26 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             },
             dismissButton = { TextButton(onClick = { pickRain = false }) { Text("Cancel") } },
         ) {
+            // (the dialog's content slot stacks its children on one another, so they go in one scrolling column)
+            Column(Modifier.verticalScroll(rememberScrollState())) {
             androidx.compose.foundation.layout.FlowRow(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Last", Modifier.align(Alignment.CenterVertically))
                 for (h in listOf(1, 3, 6, 12, 24, 48, 72)) androidx.compose.material3.AssistChip(
                     onClick = { pickRain = false; vm.setRainSince(now / 1000L - h * 3600L) }, label = { Text("$h h") },
                 )
             }
-            androidx.compose.material3.DatePicker(state, modifier = Modifier.weight(1f, fill = false), title = { Text("Rainfall from \u2026 to now (UTC)", Modifier.padding(start = 24.dp, top = 16.dp)) })
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Time (UTC)", Modifier.padding(end = 8.dp))
+            androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.Center) {
+                Text("Time (UTC)", Modifier.align(Alignment.CenterVertically).padding(end = 4.dp))
                 Box {
                     androidx.compose.material3.AssistChip(onClick = { hourMenu = true }, label = { Text("%02d".format(hour) + " \u25BE") })
                     DropdownMenu(expanded = hourMenu, onDismissRequest = { hourMenu = false }) {
                         for (h in 0..23) DropdownMenuItem(text = { Text("%02d".format(h)) }, onClick = { hour = h; hourMenu = false })
                     }
                 }
-                Text(":", Modifier.padding(horizontal = 4.dp))
+                Text(":", Modifier.align(Alignment.CenterVertically))
                 for (m in listOf(0, 15, 30, 45)) androidx.compose.material3.FilterChip(selected = minute == m, onClick = { minute = m }, label = { Text("%02d".format(m)) }, modifier = Modifier.padding(end = 4.dp))
+            }
+            androidx.compose.material3.DatePicker(state, title = { Text("Rainfall from \u2026 to now (UTC)", Modifier.padding(start = 24.dp, top = 16.dp)) })
             }
         }
     }
