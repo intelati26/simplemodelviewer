@@ -256,7 +256,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** One look at the server: if a newer scan exists, add it (and follow it when the newest was on screen). Never shows an error. */
     private suspend fun checkForNewer() {
         val st = _state.value
-        if (st.playing || st.busy || st.error != null || st.files.isEmpty()) return
+        if (st.playing || st.busy || st.error != null || st.files.isEmpty() || st.rainSince != null) return
         try {
             val files = repo.listFiles(st.product, System.currentTimeMillis() / 1000)
             lastLoad = System.currentTimeMillis()
@@ -299,10 +299,24 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun pickProduct(picked: MrmsProduct) {
+        if (picked.rainDays > 0) {
+            // a long rainfall total: added up from the newest whole hour back (not kept as the product to open with: it is not on the server)
+            stopPlaying(); frameJob?.cancel()
+            val end = System.currentTimeMillis() / 1000 / 3600 * 3600
+            update { it.copy(product = picked, rainSince = end - picked.rainDays * 86400L, rainInfo = null, globe = false, crosshair = null, readout = null, tapLatLon = null) }
+            showFrame()
+            return
+        }
         val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
-        update { it.copy(product = product, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(product = product, rainSince = null, rainInfo = null, crosshair = null, readout = null, tapLatLon = null) }
         load()
+    }
+
+    /** The total on screen again from the newest data (a long total is counted back from the newest hour again). */
+    fun updateRain() {
+        val st = _state.value
+        if (st.product.rainDays > 0) pickProduct(st.product) else setRainSince(st.rainSince)
     }
 
     /** Chooses the height of a 3D mosaic field (an index into its levels): the newest scans of that height's directory are loaded. */
@@ -654,6 +668,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- rainfall from a time to now: multi-sensor totals for the whole hours, radar-only for the rest ----
     /** Shows the rainfall total from [since] to now (null: back to the radar). On the flat map. */
     fun setRainSince(since: Long?) {
+        if (since == null && _state.value.product.rainDays > 0) { pickProduct(MrmsCatalog.default); return }       // (back from a long total: to the radar)
         stopPlaying()
         update { it.copy(rainSince = since, rainInfo = null, globe = if (since != null) false else it.globe, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()

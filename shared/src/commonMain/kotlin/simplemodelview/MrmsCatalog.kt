@@ -173,6 +173,8 @@ object MrmsCatalog {
             add(product("MultiSensor_QPE_${d}H_Pass2_00.00", "$h h Rainfall (multi-sensor, best)", PRECIP, rainfall, 60, Pool.Mean))
             add(product("MultiSensor_QPE_${d}H_Pass1_00.00", "$h h Rainfall (multi-sensor, quicker)", PRECIP, rainfall, 60, Pool.Mean))
         }
+        // the long totals are added up from the 72-hour multi-sensor files, so they are not directories: [MrmsProduct.rainDays] marks them
+        for (days in listOf(3, 14, 30)) add(product("RainTotal_${days}D", "$days-day Rainfall total (multi-sensor)", PRECIP, rainfall, 60, Pool.Mean).copy(rainDays = days))
 
         // flash flooding (FLASH): -999 / -9999 no coverage
         for (h in listOf("01H", "03H", "06H")) add(product("FLASH_QPE_FFG${h}_00.00", "Rainfall / flash-flood guidance, ${h.removeSuffix("H").trimStart('0')} h", FLASH, ffgRatio, 2, missing = -500.0))

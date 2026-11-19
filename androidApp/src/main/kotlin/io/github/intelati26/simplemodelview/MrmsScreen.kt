@@ -152,7 +152,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                             Text("Rainfall since ${formatClock(since, 0)}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
                             s.rainInfo?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
                         }
-                        TextButton(onClick = { vm.setRainSince(since) }, enabled = !s.busy) { Text("Update") }
+                        TextButton(onClick = vm::updateRain, enabled = !s.busy) { Text("Update") }
                         TextButton(onClick = { vm.setRainSince(null) }) { Text("Radar") }
                     }
                 }

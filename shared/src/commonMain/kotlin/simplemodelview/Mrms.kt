@@ -20,6 +20,8 @@ data class MrmsProduct(
     /** The 3D mosaic families have one server directory per height (km above sea level); [level] is the chosen index into this list. */
     val levels: List<Double> = emptyList(),
     val level: Int = 0,
+    /** Not a server directory: a rainfall total of this many days up to now, added up from the multi-sensor totals (see [RainSince]); 0 for the ordinary products. */
+    val rainDays: Int = 0,
 ) {
     /** The server directory this product's files are in: [id], plus the chosen height ("MergedZdr_03.00") for the 3D mosaic families. */
     val directory: String get() = if (levels.isEmpty()) id else "${id}_${levelName(levels[level.coerceIn(0, levels.size - 1)])}"
