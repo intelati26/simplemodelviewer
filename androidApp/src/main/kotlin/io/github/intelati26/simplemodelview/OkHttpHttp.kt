@@ -32,6 +32,10 @@ class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val conta
             val url = response.request.url.toString()
             // an MRMS scan file never changes either (its name carries the scan time)
             // model data and scans never change, and are kept for 24 hours after they were downloaded (then fetched again if wanted); the disk cache's size is the Settings choice
+            // the day cache keeps the finished days (RainDayStore): the midnight 24 h multi-sensor file is read once for that, and not kept here as well
+            if (response.isSuccessful && "noaa-mrms-pds" in url && "MultiSensor_QPE_24H_Pass2" in url && url.endsWith("-000000.grib2.gz")) {
+                return@Interceptor response.newBuilder().removeHeader("Pragma").header("Cache-Control", "no-store").build()
+            }
             if (response.isSuccessful && (".zarr/" in url && !url.endsWith("/.zgroup") || "noaa-mrms-pds" in url && url.endsWith(".grib2.gz") || url.endsWith(".tif"))) {
                 response.newBuilder().removeHeader("Pragma").header("Cache-Control", "public, max-age=86400").build()
             } else response
