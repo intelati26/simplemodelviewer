@@ -141,6 +141,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.mrms
+    private val rainDays = RainDayStore(File(getApplication<Application>().cacheDir, "rain-days"))
     private val alertsRepo = AppContainer.alerts
     private val outlook = AppContainer.outlook
     private val renderer = MapRenderer(core, AppContainer.lines)
@@ -680,6 +681,27 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return try { repo.listFiles(p, System.currentTimeMillis() / 1000).lastOrNull()?.validTime } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
     }
 
+    /**
+     * A whole UTC day from the day cache, filled (from the day's 24 h multi-sensor Pass 2 total, the final one) when it is not there yet; null when that file
+     * is not available (not yet posted, no network) or cannot be read, and the caller falls back to ordinary files.
+     */
+    private suspend fun dayFrame(piece: simplemodelview.RainSince.Piece, box: DoubleArray, sector: Sector, grid: Grid?): MrmsFrame? {
+        val dir = "MultiSensor_QPE_24H_Pass2_00.00"
+        val p = MrmsCatalog.byId(dir) ?: return null
+        val file = MrmsFile(simplemodelview.RainSince.key(dir, piece.end), piece.end, null, 0)
+        return try {
+            var day = withContext(Dispatchers.IO) { rainDays.read(piece.end) }
+            if (day == null) {
+                val bytes = repo.download(file)
+                day = withMemory { withContext(Dispatchers.Default) { simplemodelview.RainDayFile.build(core, bytes, DeflatePacker, p.missingAtOrBelow) } }
+                val made = day
+                withContext(Dispatchers.IO) { rainDays.write(piece.end, made) }
+            }
+            val d = day!!
+            withMemory { withContext(Dispatchers.Default) { repo.loadFrameFromDay(p, file, d, DeflatePacker, box[0], box[1], box[2], box[3], stepFor(p, sector), grid?.let { FrameTarget.Onto(it) } ?: FrameTarget.Planned) } }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+    }
+
     private suspend fun showRain(st: MrmsState, since: Long) {
         update { it.copy(busy = true, error = null, rainInfo = "Finding the newest totals\u2026") }
         val multiEnd = newestOf("MultiSensor_QPE_01H_Pass2_00.00") ?: newestOf("MultiSensor_QPE_01H_Pass1_00.00")
@@ -695,7 +717,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         for ((k, piece) in plan.pieces.withIndex()) {
             update { it.copy(rainInfo = "Adding ${k + 1} of ${plan.pieces.size}: ${formatClock(piece.start)} \u2192 ${formatClock(piece.end)}") }
             var added = false
-            for ((n, dir) in piece.directories.withIndex()) {
+            if (piece.isDay) {
+                val frame = dayFrame(piece, box, sector, grid)
+                if (frame != null) {
+                    if (grid == null) { grid = frame.window.grid; sum = frame.window.values.copyOf() } else simplemodelview.RainSince.addInto(sum!!, frame.window.values)
+                    added = true
+                }
+            }
+            if (!added) for ((n, dir) in piece.directories.withIndex()) {
                 val p = MrmsCatalog.byId(dir) ?: continue
                 val file = MrmsFile(simplemodelview.RainSince.key(dir, piece.end), piece.end, null, 0)
                 val frame = try {

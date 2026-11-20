@@ -74,6 +74,9 @@ interface Core {
     /** A window of a Lambert [base] grid (cells [colMin]..[colMax] x [rowMin]..[rowMax]) with cells of [cellMeters], in the same projection; null if [base] is not a Lambert grid. */
     fun planLambertCrop(base: Grid, colMin: Double, rowMin: Double, colMax: Double, rowMax: Double, cellMeters: Double): Grid? = throw UnsupportedOperationException()
 
+    /** A regular latitude / longitude grid (row 0 = south), by the centers of its south-west cell and its cell sizes; the same definition gives the same grid. */
+    fun defineLatLonGrid(columns: Int, rows: Int, southLat: Double, westLon: Double, dLat: Double, dLon: Double): Grid = throw UnsupportedOperationException()
+
     /** Resamples [values] of grid [from] onto grid [to] (nearest cell; NaN where [to] lies outside [from]). */
     fun reproject(values: FloatArray, from: Grid, to: Grid): FloatArray = throw UnsupportedOperationException()
 

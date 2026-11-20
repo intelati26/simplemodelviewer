@@ -145,6 +145,11 @@ JNIEXPORT jfloatArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCo
     return out;
 }
 
+JNIEXPORT jint JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_defineLatLonGridNative(
+    JNIEnv *, jobject, jint columns, jint rows, jdouble southLat, jdouble westLon, jdouble dLat, jdouble dLon) {
+    return spc_define_latlon_grid(columns, rows, southLat, westLon, dLat, dLon);
+}
+
 JNIEXPORT jintArray JNICALL Java_io_github_intelati26_simplemodelview_NativeCore_planLambertBoxNative(
     JNIEnv * env, jobject, jdouble west, jdouble south, jdouble east, jdouble north, jdouble cell) {
     int columns = 0, rows = 0;

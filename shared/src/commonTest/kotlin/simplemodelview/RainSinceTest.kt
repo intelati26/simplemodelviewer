@@ -19,10 +19,26 @@ class RainSinceTest {
         assertEquals(p.end, at)
         val multi = p.pieces.filter { it.multiSensor }
         assertEquals(41 * 60, multi.sumOf { it.minutes })                  // 18Z to 11Z two days later
-        assertEquals(listOf(1, 1, 3, 12, 24), multi.map { it.minutes / 60 }, "few files (MRMS has no 2 h total)")
+        assertEquals(listOf(6, 24, 1, 1, 3, 6), multi.map { it.minutes / 60 }, "6 h to midnight, the whole day, then 11 h (MRMS has no 2 h total)")
+        assertEquals(listOf(false, true, false, false, false, false), multi.map { it.isDay })
+        assertEquals(t(18, 0, 0), multi.first { it.isDay }.end)
         assertEquals(listOf(15, 15, 15), p.pieces.takeWhile { it.minutes == 15 }.map { it.minutes })   // 17:15 -> 18:00
         assertEquals(60, p.pieces.last().minutes, "11 -> 12 radar-only hour")
         assertEquals(false, p.pieces.last().multiSensor)
+    }
+
+    @Test
+    fun aLongSpanIsWholeDaysAndTheEdges() {
+        val p = RainSince.plan(t(1, 0, 0), t(20, 6, 0), t(20, 6, 0))
+        val days = p.pieces.filter { it.isDay }
+        assertEquals(19, days.size)                                     // 11-01 00Z to 11-20 00Z
+        assertEquals(t(2, 0, 0), days.first().end); assertEquals(t(20, 0, 0), days.last().end)
+        assertEquals(listOf(6), p.pieces.filter { !it.isDay }.map { it.minutes / 60 })
+        var at = p.start
+        for (x in p.pieces) { assertEquals(at, x.start); at = x.end }
+        assertEquals(p.end, at)
+        // a span with no whole day in it keeps the plain windows
+        assertTrue(RainSince.plan(t(19, 3, 0), t(19, 20, 0), t(19, 20, 0)).pieces.none { it.isDay })
     }
 
     @Test

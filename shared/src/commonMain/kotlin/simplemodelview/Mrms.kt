@@ -197,18 +197,31 @@ class MrmsRepository(private val http: Http, private val core: Core) {
         } catch (e: Exception) {
             throw RefsException("could not decode ${product.title}: ${e.message}")
         }
-        val placed = when (target) {
-            FrameTarget.LatLon -> window
-            FrameTarget.Planned -> MrmsWindow(planned!!, core.reproject(window.values, window.grid, planned), window.validTime, window.sourceCellDegrees)
-            is FrameTarget.Onto -> MrmsWindow(target.grid, core.reproject(window.values, window.grid, target.grid), window.validTime, window.sourceCellDegrees)
-        }
-        return MrmsFrame(placed, file)
+        return MrmsFrame(place(window, target, planned), file)
+    }
+
+    private fun place(window: MrmsWindow, target: FrameTarget, planned: Grid?): MrmsWindow = when (target) {
+        FrameTarget.LatLon -> window
+        FrameTarget.Planned -> MrmsWindow(planned!!, core.reproject(window.values, window.grid, planned), window.validTime, window.sourceCellDegrees)
+        is FrameTarget.Onto -> MrmsWindow(target.grid, core.reproject(window.values, window.grid, target.grid), window.validTime, window.sourceCellDegrees)
+    }
+
+    /** The same as [loadFrame], from a day kept in the day cache instead of a downloaded file. [file] only names the day. */
+    fun loadFrameFromDay(
+        product: MrmsProduct, file: MrmsFile, day: RainDay, packer: Packer, west: Double, south: Double, east: Double, north: Double, step: Int, target: FrameTarget = FrameTarget.LatLon,
+    ): MrmsFrame {
+        val planned = if (target == FrameTarget.Planned) core.planLambertBox(west, south, east, north, lambertCellMeters(product.cellDegrees * step, south, north)) else null
+        val cover = planned?.let { gridCoverBox(core, it) } ?: doubleArrayOf(west, south, east, north)
+        val w = try { RainDayFile.window(day, packer, cover[0], cover[1], cover[2], cover[3], step) } catch (e: IllegalArgumentException) { throw RefsException("could not read the stored day: ${e.message}") }
+        val grid = core.defineLatLonGrid(w.columns, w.rows, w.southLat, w.westLon, w.dLat, w.dLon)
+        return MrmsFrame(place(MrmsWindow(grid, w.values, file.validTime, product.cellDegrees), target, planned), file)
     }
 
     /** Downloads a file without decoding it, so the HTTP cache has it for a loop. */
     suspend fun prefetch(file: MrmsFile) { download(file) }
 
-    private suspend fun download(file: MrmsFile): ByteArray {
+    /** The file's bytes (the HTTP cache keeps it for a day). */
+    suspend fun download(file: MrmsFile): ByteArray {
         var result = http.get(file.url)
         if (result.status != 200 && result.status != 404 && result.status != 403) result = http.get(file.url)   // one retry
         return when (result.status) {
