@@ -20,6 +20,12 @@ import java.util.concurrent.TimeUnit
  * headers say; only the `.zgroup` probes (does a newer cycle exist yet?) and the MRMS listings are always fresh.
  */
 class OkHttpHttp(context: Context, cacheMegabytes: Long = 150, private val contact: () -> String = { "" }) : Http {
+    /** Bytes the disk cache holds now (0 when it cannot be read). */
+    fun cacheBytes(): Long = try { client.cache?.size() ?: 0L } catch (_: Exception) { 0L }
+
+    /** Empties the disk cache. */
+    fun clearCache() { try { client.cache?.evictAll() } catch (_: Exception) { } }
+
     private val client = OkHttpClient.Builder()
         .cache(Cache(File(context.cacheDir, "http"), cacheMegabytes * 1024 * 1024))
         .connectTimeout(15, TimeUnit.SECONDS)

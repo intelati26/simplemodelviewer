@@ -623,26 +623,13 @@ internal fun SettingsDialog(
                 SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
                     onChange(settings.copy(optionsInExport = it))
                 }
+                var storage by remember { mutableStateOf(false) }
                 Column {
-                    var stats by remember { mutableStateOf(AppContainer.gribStore.stats()) }
-                    Text("Downloaded model data (GFS and NBM GRIB)")
-                    Text(
-                        if (stats.files == 0) "Nothing kept." else "${stats.bytes / 1_000_000} MB in ${stats.files} files" +
-                            stats.byModel.entries.sortedBy { it.key }.joinToString("") { " \u00B7 ${it.key} ${it.value / 1_000_000} MB" } +
-                            ". Kept 24 hours from the model run.",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { AppContainer.gribStore.clear("GFS"); stats = AppContainer.gribStore.stats() }, enabled = stats.byModel.containsKey("GFS")) { Text("Clear GFS") }
-                        TextButton(onClick = { AppContainer.gribStore.clear("NBM"); stats = AppContainer.gribStore.stats() }, enabled = stats.byModel.containsKey("NBM")) { Text("Clear NBM") }
-                    }
+                    Text("Storage and cache")
+                    Text("What the app keeps on the device (downloaded files, model data, rainfall days), how much space it takes, and how to clear it.", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { storage = true }) { Text("Open\u2026") }
                 }
-                Column {
-                    Text("Cache size (applies on the next launch)")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (mb in listOf(50, 150, 300, 1000)) FilterChip(settings.cacheMegabytes == mb, { onChange(settings.copy(cacheMegabytes = mb)) }, label = { Text(if (mb == 1000) "1 GB" else "$mb MB") })
-                    }
-                }
+                if (storage) StorageDialog(settings, onChange) { storage = false }
                 if (units != null) Column {      // (the MRMS page only: SPC's fields have their own fixed units)
                     Text("Units (MRMS page)")
                     @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)

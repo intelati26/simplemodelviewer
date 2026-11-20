@@ -55,6 +55,9 @@ class RainDayStore(private val dir: File, private val keepDays: Int = 90, privat
     /** The bytes the cache holds, and how many days. */
     fun size(): Pair<Long, Int> = dir.listFiles { f -> f.name.endsWith(".rd") }.orEmpty().let { fs -> fs.sumOf { it.length() } to fs.size }
 
+    /** When the oldest kept day ends (epoch seconds), or null with none. */
+    fun oldestEnd(): Long? = dir.listFiles { f -> f.name.endsWith(".rd") }.orEmpty().mapNotNull { it.name.removePrefix("day-").removeSuffix(".rd").toLongOrNull() }.minOrNull()
+
     /** Deletes the days older than [keepDays] (a day's file is named by the time it ends). */
     fun expire() {
         val oldest = clock() - keepDays * 86400L

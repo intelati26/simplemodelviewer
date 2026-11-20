@@ -141,7 +141,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.mrms
-    private val rainDays = RainDayStore(File(getApplication<Application>().cacheDir, "rain-days"))
+    private val rainDays = AppContainer.rainDays
     private val alertsRepo = AppContainer.alerts
     private val outlook = AppContainer.outlook
     private val renderer = MapRenderer(core, AppContainer.lines)
