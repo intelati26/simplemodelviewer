@@ -60,7 +60,7 @@ internal fun StorageDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                 if (f == null) { Text("Reading…", color = muted); return@Column }
                 val total = f.httpBytes + f.grib.bytes + f.rainBytes
                 Text("Kept on this device: ${size(total)}", style = MaterialTheme.typography.titleSmall)
-                Text("All of it is cache: Android may also clear it when the phone is short of space, and anything missing is simply downloaded again.", style = MaterialTheme.typography.bodySmall, color = muted)
+                Text("Downloaded files and model data are cache: Android may clear them when the phone is short of space, and anything missing is simply downloaded again. Rainfall days are kept in the app's storage and stay until you clear them or they pass 90 days.", style = MaterialTheme.typography.bodySmall, color = muted)
                 HorizontalDivider()
 
                 Bucket(
@@ -85,7 +85,7 @@ internal fun StorageDialog(settings: Settings, onChange: (Settings) -> Unit, onD
                 Bucket(
                     "Rainfall days", if (f.rainDays == 0) "Nothing kept" else "${size(f.rainBytes)} in ${f.rainDays} days",
                     (f.rainOldest?.let { "From the day ending ${formatClock(it, 0)}. " } ?: "") +
-                        "Each finished UTC day of multi-sensor rainfall, stored compactly for the rainfall totals, kept 90 days. A total then downloads only the days not kept.",
+                        "Each finished UTC day of multi-sensor rainfall, stored compactly in the app's storage (not the cache) for the rainfall totals, kept 90 days. A total then downloads only the days not kept.",
                 ) {
                     TextButton(onClick = { AppContainer.rainDays.clear(); refresh += 1 }, enabled = f.rainDays > 0) { Text("Clear") }
                 }

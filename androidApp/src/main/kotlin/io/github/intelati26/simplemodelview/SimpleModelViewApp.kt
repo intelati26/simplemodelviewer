@@ -52,7 +52,17 @@ object AppContainer {
     val mrms by lazy { MrmsRepository(http, core) }
     val gribStore by lazy { DiskGribStore(app, File(app.cacheDir, "grib"), capBytes = { prefs.getInt("cache_mb", 150).toLong() * 1024 * 1024 }) }
     /** The finished rainfall days (see [RainDayStore]). */
-    val rainDays by lazy { RainDayStore(File(app.cacheDir, "rain-days")) }
+    val rainDays by lazy {
+        // app storage, not the cache folder: Android does not empty it when space is short (the days that were in the cache folder move over)
+        val dir = File(app.filesDir, "rain-days")
+        val old = File(app.cacheDir, "rain-days")
+        if (old.isDirectory) {
+            dir.mkdirs()
+            old.listFiles { f -> f.name.endsWith(".rd") }?.forEach { f -> if (!f.renameTo(File(dir, f.name))) f.delete() }
+            old.deleteRecursively()
+        }
+        RainDayStore(dir)
+    }
     val nbm by lazy { NbmRepository(http, core, gribStore) }
     val gfs by lazy { GfsRepository(http, core, gribStore) }
     val nbmText by lazy { NbmTextRepository(http) }
