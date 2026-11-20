@@ -704,6 +704,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun showRain(st: MrmsState, since: Long) {
         update { it.copy(busy = true, error = null, rainInfo = "Finding the newest totals\u2026") }
+        withContext(Dispatchers.IO) { rainDays.expire() }
         val multiEnd = newestOf("MultiSensor_QPE_01H_Pass2_00.00") ?: newestOf("MultiSensor_QPE_01H_Pass1_00.00")
         val radarEnd = newestOf("RadarOnly_QPE_15M_00.00") ?: (System.currentTimeMillis() / 1000)
         val plan = simplemodelview.RainSince.plan(since, multiEnd, radarEnd)
