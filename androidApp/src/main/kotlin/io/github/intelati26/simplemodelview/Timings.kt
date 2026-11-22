@@ -12,10 +12,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * How long each stage of the last picture took, for the read-out Settings can switch on ("Show timings"): the data (download and decode, only when the frame was
- * not already kept), the native raster, the map lines, the contour lines, the barbs, and the whole picture. Stages that did not run keep their last time.
+ * not already kept), the native raster, the layer under the data (the MRMS temperature) and the layers over it (overlays), the map lines, the contour lines, the barbs, and the whole picture. Stages that did not run keep their last time.
  */
 object Timings {
-    private val order = listOf("data", "raster", "lines", "contours", "barbs", "picture")
+    private val order = listOf("data", "raster", "underlay", "overlay", "lines", "contours", "barbs", "picture")
     private val times = HashMap<String, Long>()
     val line = MutableStateFlow("")
 

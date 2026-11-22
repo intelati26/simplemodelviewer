@@ -620,7 +620,7 @@ internal fun SettingsDialog(
                     }
                     Text("Auto draws them when the map is zoomed to a sector.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                SwitchRow("Show timings", "A small line under the map with how long the last picture took, stage by stage: data, raster, lines, contours, barbs.", settings.showTimings) {
+                SwitchRow("Show timings", "A small line under the map with how long the last picture took, stage by stage: data, raster, layers under and over it, lines, contours, barbs.", settings.showTimings) {
                     onChange(settings.copy(showTimings = it))
                 }
                 SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
