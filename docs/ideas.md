@@ -4,9 +4,8 @@ Written 2026-11-22. Things talked about and not built yet, newest thinking first
 
 ## Compare page (radar against REFS members) — next steps
 
-Built: reflectivity, side by side / overlay / difference, members ranked by neighborhood score over f01 to f04 (`docs/mrms-refs-compare-mobile.md` has the design).
+Built: reflectivity, side by side / overlay / difference, members ranked by neighborhood score over f01 to f04, rescored for the cells on screen once a zoom settles (double tap zooms) (`docs/mrms-refs-compare-mobile.md` has the design).
 
-- **Score what is on screen.** Rescore the members for the zoomed-in area instead of the whole domain; the ranking can differ a lot between the Plains and the Southeast. `CompareScore.score` already takes a region.
 - **Long-press probe** reading the radar, the shown member and the difference at one point.
 - **Hit / miss view:** both over 35 dBZ, model only, radar only.
 - **Member strip:** small thumbnails of every member's difference, tap to open.

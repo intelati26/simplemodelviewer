@@ -54,6 +54,8 @@ data class CompareState(
     val ranks: List<MemberRank> = emptyList(),
     val scored: Pair<Int, Int>? = null,
     val scoredHours: List<Int> = emptyList(),
+    /** True when the ranking is for the part of the map on screen, false for the whole map. */
+    val inView: Boolean = false,
     val model: Bitmap? = null,
     val obs: Bitmap? = null,
     val diff: Bitmap? = null,
@@ -89,19 +91,21 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
     private val radarCache = HashMap<Int, FloatArray>()   // time step -> radar dBZ on the REFS grid (NaN outside its coverage, -10 where there is no echo)
     private var autoMember = true
     private var loadJob: Job? = null
+    private var scoreJob: Job? = null
+    private var region: IntArray? = null                  // the cells on screen (first column, first row, last column, last row), null: the whole map
     private var showJob: Job? = null
 
     init { load() }
 
     fun load() {
-        loadJob?.cancel(); showJob?.cancel()
+        loadJob?.cancel(); showJob?.cancel(); scoreJob?.cancel()
         radarCache.clear(); autoMember = true
         loadJob = viewModelScope.launch {
             update { it.copy(busy = true, error = null, status = "Finding the newest run…", ranks = emptyList(), scored = null) }
             try {
                 open()
                 showCurrent()
-                scoreMembers()
+                startScoring()
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(busy = false, status = null, error = e.message ?: e.toString()) }
             }
@@ -192,12 +196,41 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         if (s == null) return
     }
 
+    private fun startScoring() {
+        scoreJob?.cancel()
+        scoreJob = viewModelScope.launch {
+            try { scoreMembers() } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(busy = false, status = null, error = e.message ?: e.toString()) } }
+        }
+    }
+
+    /**
+     * The map's pan and zoom, reported as fractions of the picture: once it rests, the members are scored again for the cells on screen (the best match over the
+     * Plains is not always the best over the Southeast).
+     */
+    fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
+        val whole = (right - left) * (bottom - top) > 0.97f
+        val next = if (whole) null else intArrayOf(
+            kotlin.math.floor(left * columns).toInt(), kotlin.math.floor((1f - bottom) * rows).toInt(),
+            kotlin.math.ceil(right * columns).toInt() - 1, kotlin.math.ceil((1f - top) * rows).toInt() - 1,   // the picture's top is north, and row 0 is south
+        )
+        val same = (next == null && region == null) || (next != null && region != null && next.indices.all { kotlin.math.abs(next[it] - region!![it]) <= 6 })
+        if (same || store == null) return
+        region = next
+        scoreJob?.cancel()
+        scoreJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(700)           // let the zoom settle
+            try { scoreMembers() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
+    }
+
     /** Scores every member's early hours against the radar, a few at a time; the list fills in as hours finish. */
     private suspend fun scoreMembers() {
+        val area = region
         val s = store ?: return
         val p = product ?: return
         val members = _state.value.members
         if (members.isEmpty()) return
+        update { it.copy(inView = area != null, scored = 0 to scoredSteps.size) }
         val scores = Array(members.size) { arrayOfNulls<MatchScore>(scoredSteps.size) }
         val gate = Semaphore(3)
         for ((k, step) in scoredSteps.withIndex()) {
@@ -207,7 +240,7 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
                     async(Dispatchers.Default) {
                         gate.withPermit {
                             val field = try { repo.readFrameTimed(s, p, step, m) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
-                            if (field != null && field.fileTime != null) scores[m][k] = CompareScore.score(field.values, obs, columns, rows)
+                            if (field != null && field.fileTime != null) scores[m][k] = CompareScore.score(field.values, obs, columns, rows, area)
                         }
                     }
                 }.awaitAll()

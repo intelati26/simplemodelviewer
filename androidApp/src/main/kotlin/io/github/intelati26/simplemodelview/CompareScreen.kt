@@ -3,6 +3,7 @@ package io.github.intelati26.simplemodelview
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
@@ -88,7 +89,7 @@ internal fun CompareScreen(vm: CompareViewModel, onOpen: (String) -> Unit) {
             }
             Text(s.error ?: s.status ?: line, fontSize = 12.sp, color = if (s.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
-            Box(Modifier.weight(1f).fillMaxWidth()) { ComparePanes(s.mode, s.model, s.obs, s.diff, s.opacity) }
+            Box(Modifier.weight(1f).fillMaxWidth()) { ComparePanes(s.mode, s.model, s.obs, s.diff, s.opacity, vm::setViewport) }
             if (s.mode == CompareMode.Overlay) Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Model", fontSize = 12.sp); Slider(s.opacity, vm::setOpacity, modifier = Modifier.weight(1f).padding(horizontal = 8.dp)); Text("Radar", fontSize = 12.sp)
             }
@@ -99,10 +100,17 @@ internal fun CompareScreen(vm: CompareViewModel, onOpen: (String) -> Unit) {
 
 /** The maps: one pan / zoom state drives every pane, so they always show the same place. */
 @Composable
-private fun ComparePanes(mode: CompareMode, model: Bitmap?, obs: Bitmap?, diff: Bitmap?, opacity: Float) {
+private fun ComparePanes(mode: CompareMode, model: Bitmap?, obs: Bitmap?, diff: Bitmap?, opacity: Float, onViewport: (Float, Float, Float, Float) -> Unit) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var pane by remember { mutableStateOf(IntSize.Zero) }
+    // the part of the picture on screen, for scoring the members over just that
+    LaunchedEffect(scale, offset, pane, model) {
+        val b = model ?: return@LaunchedEffect
+        if (pane.width == 0 || pane.height == 0) return@LaunchedEffect
+        val f = simplemodelview.visibleFractions(pane.width.toFloat(), pane.height.toFloat(), b.width.toFloat() / b.height, scale, offset.x, offset.y)
+        onViewport(f[0], f[1], f[2], f[3])
+    }
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
         val stacked = mode == CompareMode.Side && maxHeight >= maxWidth
         val sideBySide = mode == CompareMode.Side
@@ -122,6 +130,22 @@ private fun ComparePanes(mode: CompareMode, model: Bitmap?, obs: Bitmap?, diff: 
                 scale = newScale; offset = o
             }
         }
+        // a double tap zooms in on that spot, or back out
+        val doubleTap = Modifier.pointerInput(sideBySide, stacked, pane) {
+            detectTapGestures(onDoubleTap = { q ->
+                if (scale > 1.05f) { scale = 1f; offset = Offset.Zero } else if (pane.width > 0) {
+                    val local = when {
+                        !sideBySide -> q
+                        stacked -> Offset(q.x, q.y % pane.height)
+                        else -> Offset(q.x % pane.width, q.y)
+                    }
+                    val target = 3f
+                    val t = (local - Offset(pane.width / 2f, pane.height / 2f)) * (1f - target)
+                    val maxX = pane.width * (target - 1f) / 2f; val maxY = pane.height * (target - 1f) / 2f
+                    scale = target; offset = Offset(t.x.coerceIn(-maxX, maxX), t.y.coerceIn(-maxY, maxY))
+                }
+            })
+        }
         @Composable fun Layer(bitmap: Bitmap?, modifier: Modifier = Modifier) {
             if (bitmap != null) Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
                 modifier = modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y })
@@ -133,16 +157,16 @@ private fun ComparePanes(mode: CompareMode, model: Bitmap?, obs: Bitmap?, diff: 
             }
         }
         when (mode) {
-            CompareMode.Side -> if (stacked) Column(Modifier.fillMaxSize().then(gesture)) {
+            CompareMode.Side -> if (stacked) Column(Modifier.fillMaxSize().then(gesture).then(doubleTap)) {
                 Pane("Radar", obs, Modifier.weight(1f).fillMaxWidth()); Pane("REFS", model, Modifier.weight(1f).fillMaxWidth())
-            } else Row(Modifier.fillMaxSize().then(gesture)) {
+            } else Row(Modifier.fillMaxSize().then(gesture).then(doubleTap)) {
                 Pane("Radar", obs, Modifier.weight(1f).fillMaxSize()); Pane("REFS", model, Modifier.weight(1f).fillMaxSize())
             }
-            CompareMode.Overlay -> Box(Modifier.fillMaxSize().then(gesture).onSizeChanged { pane = it }) {
+            CompareMode.Overlay -> Box(Modifier.fillMaxSize().then(gesture).then(doubleTap).onSizeChanged { pane = it }) {
                 Layer(model, Modifier.alpha(1f)); Layer(obs, Modifier.alpha(opacity))
                 Text("REFS under, radar over", fontSize = 11.sp, color = Color.White, modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(Color(0xAA000000)).padding(horizontal = 4.dp))
             }
-            CompareMode.Difference -> Box(Modifier.fillMaxSize().then(gesture).onSizeChanged { pane = it }) {
+            CompareMode.Difference -> Box(Modifier.fillMaxSize().then(gesture).then(doubleTap).onSizeChanged { pane = it }) {
                 Layer(diff)
                 Text("REFS minus radar (dBZ)", fontSize = 11.sp, color = Color.White, modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(Color(0xAA000000)).padding(horizontal = 4.dp))
             }
@@ -155,8 +179,9 @@ private fun ComparePanes(mode: CompareMode, model: Bitmap?, obs: Bitmap?, diff: 
 private fun Ranking(s: CompareState, onPick: (Int) -> Unit) {
     val hours = s.scoredHours
     Column(Modifier.fillMaxWidth().height(190.dp).padding(horizontal = 12.dp)) {
+        val area = if (s.inView) " (on screen)" else " (whole map)"
         val progress = s.scored?.let { (done, of) -> if (done < of) "  scoring $done of $of hours…" else "" } ?: if (s.members.isEmpty()) "" else "  scoring…"
-        Text("Initial conditions, best match first$progress", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text("Initial conditions$area, best match first$progress", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Text("Neighborhood score at 35 dBZ (45 km), f${hours.joinToString("/") { "%02d".format(it) }}; the mean ranks.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (s.ranks.isEmpty()) return@Column
         LazyColumn(Modifier.fillMaxWidth()) {
