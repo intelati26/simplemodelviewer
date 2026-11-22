@@ -218,7 +218,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
-    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live)
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(
         s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") },

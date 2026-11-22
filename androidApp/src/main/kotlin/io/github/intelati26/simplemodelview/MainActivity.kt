@@ -301,7 +301,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     if (places) PlacesDialog(
         s.places, onDismiss = { places = false },
         onGo = { places = false; vm.goToPlace(it) },
-        onDelete = vm::deletePlace, live = live,
+        onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon,
     )
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
@@ -541,7 +541,26 @@ private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
 }
 
 @Composable
-internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit, live: LiveControl? = null) {
+internal fun PlacesDialog(
+    places: List<Place>, onDismiss: () -> Unit, onGo: (Place) -> Unit, onDelete: (Place) -> Unit, live: LiveControl? = null,
+    /** Edit a place (old, new name, latitude, longitude), read the shown field at a position, and the position the crosshair is on (for "use the crosshair"). */
+    onEdit: ((Place, String, Double, Double) -> Unit)? = null, read: ((Double, Double) -> String)? = null, marked: Pair<Double, Double>? = null,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var reads by remember { mutableStateOf(mapOf<String, String>()) }
+    var editing by remember { mutableStateOf<Place?>(null) }
+    var finding by remember { mutableStateOf(false) }
+    fun readMine() {
+        finding = true
+        reads = reads + (LiveLocation.NAME to "Finding where you are…")
+        LiveLocation.once(context) { fix ->
+            finding = false
+            reads = reads + (LiveLocation.NAME to (if (fix == null) "No location fix (is location on, and allowed for this app?)" else read?.invoke(fix.lat, fix.lon) ?: placeLabel(fix.lat, fix.lon)))
+        }
+    }
+    val permission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { it }) readMine() else reads = reads + (LiveLocation.NAME to "Location is not allowed for this app.")
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
@@ -558,21 +577,77 @@ internal fun PlacesDialog(places: List<Place>, onDismiss: () -> Unit, onGo: (Pla
                 }
                 HorizontalDivider()
             }
+            if (read != null) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Where I am now", fontWeight = FontWeight.Bold)
+                    TextButton(enabled = !finding, onClick = {
+                        if (LiveLocation.hasPermission(context)) readMine()
+                        else permission.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }) { Text("Read here") }
+                    reads[LiveLocation.NAME]?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+                HorizontalDivider()
+            }
             if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place; Show jumps back to it.")
             else LazyColumn {
                 items(places, key = { it.name }) { p ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(p.name, fontWeight = FontWeight.Bold)
+                        Text(placeLabel(p.lat, p.lon), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row {
                             TextButton(onClick = { onGo(p) }) { Text("Show") }
+                            if (read != null) TextButton(onClick = { reads = reads + (p.name to read(p.lat, p.lon)) }) { Text("Read") }
+                            if (onEdit != null) TextButton(onClick = { editing = p }) { Text("Edit") }
                             TextButton(onClick = { onDelete(p) }) { Text("Delete") }
                         }
+                        reads[p.name]?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     }
                     HorizontalDivider()
                 }
             }
           }
         },
+    )
+    editing?.let { place ->
+        EditPlaceDialog(place, marked, onUseMine = { done -> LiveLocation.once(context) { fix -> done(fix) } }, onDismiss = { editing = null }) { name, lat, lon ->
+            onEdit?.invoke(place, name, lat, lon)
+            reads = reads - place.name
+            editing = null
+        }
+    }
+}
+
+/** Rename a place and refine where it is: type the coordinates, or take them from the crosshair or from where you are. */
+@Composable
+private fun EditPlaceDialog(place: Place, marked: Pair<Double, Double>?, onUseMine: (((Place?) -> Unit)) -> Unit, onDismiss: () -> Unit, onSave: (String, Double, Double) -> Unit) {
+    var name by remember { mutableStateOf(place.name) }
+    var lat by remember { mutableStateOf(fixed(place.lat, 4)) }
+    var lon by remember { mutableStateOf(fixed(place.lon, 4)) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val la = lat.trim().toDoubleOrNull(); val lo = lon.trim().toDoubleOrNull()
+    val valid = la != null && lo != null && simplemodelview.validLatLon(la, lo)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit place") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val keys = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal)
+                    androidx.compose.material3.OutlinedTextField(lat, { lat = it }, label = { Text("Latitude") }, singleLine = true, keyboardOptions = keys, modifier = Modifier.weight(1f))
+                    androidx.compose.material3.OutlinedTextField(lon, { lon = it }, label = { Text("Longitude") }, singleLine = true, keyboardOptions = keys, modifier = Modifier.weight(1f))
+                }
+                Text("Degrees; north and east are positive (west is negative: -97.44).", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row {
+                    if (marked != null) TextButton(onClick = { lat = fixed(marked.first, 4); lon = fixed(marked.second, 4); note = null }) { Text("Use the crosshair") }
+                    TextButton(onClick = { note = "Finding where you are…"; onUseMine { fix -> if (fix != null) { lat = fixed(fix.lat, 4); lon = fixed(fix.lon, 4); note = null } else note = "No location fix (is location on, and allowed for this app?)" } }) { Text("Use my location") }
+                }
+                note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (!valid) Text("Latitude -90 to 90, longitude -180 to 180.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = { TextButton(enabled = valid, onClick = { onSave(name, la!!, lo!!) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

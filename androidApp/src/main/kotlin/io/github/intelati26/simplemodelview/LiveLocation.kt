@@ -54,6 +54,27 @@ object LiveLocation {
         }
     }
 
+    /** One position now, for reading the map where you are without turning "My location" on: the newest last-known fix, else the next one a provider gives (about 20 seconds at most). */
+    @SuppressLint("MissingPermission")
+    fun once(context: Context, onResult: (Place?) -> Unit) {
+        if (!hasPermission(context)) { onResult(null); return }
+        val lm = context.applicationContext.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: run { onResult(null); return }
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { try { lm.isProviderEnabled(it) } catch (_: Exception) { false } }
+        val last = providers.mapNotNull { try { lm.getLastKnownLocation(it) } catch (_: Exception) { null } }.maxByOrNull { it.time }
+        if (last != null && System.currentTimeMillis() - last.time < 10 * 60_000L) { onResult(Place(NAME, last.latitude, last.longitude)); return }
+        if (providers.isEmpty()) { onResult(last?.let { Place(NAME, it.latitude, it.longitude) }); return }
+        var done = false
+        val handler = android.os.Handler(Looper.getMainLooper())
+        val once = object : LocationListener {
+            override fun onLocationChanged(location: Location) { if (!done) { done = true; lm.removeUpdates(this); onResult(Place(NAME, location.latitude, location.longitude)) } }
+            @Deprecated("old callback") override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
+        }
+        for (p in providers) try { lm.requestLocationUpdates(p, 0L, 0f, once, Looper.getMainLooper()) } catch (_: Exception) { }
+        handler.postDelayed({ if (!done) { done = true; lm.removeUpdates(once); onResult(last?.let { Place(NAME, it.latitude, it.longitude) }) } }, 20_000L)
+    }
+
     fun stop() {
         manager?.removeUpdates(listener)
         manager = null

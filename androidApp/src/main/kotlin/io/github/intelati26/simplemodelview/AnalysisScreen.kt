@@ -207,7 +207,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
-    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live)
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
     if (settings) SettingsDialog(
         s.settings, vm::setSettings,
         onExport = { vm.reportNotice("Settings files are exported and imported from the other pages' settings.") },

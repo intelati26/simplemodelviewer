@@ -1279,6 +1279,25 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(places = places) }
     }
 
+    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
+    fun editPlace(old: Place, name: String, lat: Double, lon: Double) {
+        if (!simplemodelview.validLatLon(lat, lon)) return
+        val places = simplemodelview.editPlace(_state.value.places, old, Place(name, lat, lon))
+        prefs.edit().putString("places", encodePlaces(places)).apply()
+        update { it.copy(places = places) }
+    }
+
+    /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
+    fun readAt(lat: Double, lon: Double): String {
+        val (product, values) = shown ?: return "Nothing is shown yet"
+        val grid = product.grid
+        val (c, r) = core.latLonToGrid(grid, lat, lon)
+        val column = Math.round(c).toInt(); val row = Math.round(r).toInt()
+        var text = if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the area shown" else readout(core, product, values, emptyList(), column, row)
+        outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
+        return text
+    }
+
     fun deletePlace(place: Place) {
         val places = _state.value.places - place
         prefs.edit().putString("places", encodePlaces(places)).apply()
