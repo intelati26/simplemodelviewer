@@ -1545,6 +1545,31 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null
+        // a rainfall total: the picture is the total on screen (the sector's grid), not a radar file
+        if (st.rainSince != null) {
+            val (p, values) = shown ?: return@withContext null
+            val g = shownGrid ?: return@withContext null
+            if (p.id != "rain_since") return@withContext null
+            // the part of the total on screen, or the whole of it (the sector)
+            val box = if (area == ShareArea.Screen) {
+                val (l, t, r, b) = viewport.toList()
+                val col0 = floor(l * g.columns).toInt().coerceIn(0, g.columns - 2)
+                val row0 = floor((1f - b) * g.rows).toInt().coerceIn(0, g.rows - 2)       // the picture's top is north
+                val cols = (ceil(r * g.columns).toInt() - col0).coerceIn(2, g.columns - col0)
+                val rows = (ceil((1f - t) * g.rows).toInt() - row0).coerceIn(2, g.rows - row0)
+                View("Screen area", col0, row0, cols, rows, exportScale(cols, rows), 1, g)
+            } else View("Rainfall", 0, 0, g.columns, g.rows, exportScale(g.columns, g.rows), 1, g)
+            val map = renderer.render(p, p.style, values, emptyList(), box, dark = false, contours = false, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
+            val info = st.rainInfo?.takeIf { it.isNotBlank() } ?: ""
+            // the title says where the total starts: the line says where it ends and what it is made of
+            val parts = info.split("  \u00B7  ")
+            val through = parts.firstOrNull()?.substringAfter("\u2192 ", "")?.trim().orEmpty()
+            val line = (listOfNotNull("through $through".takeIf { through.isNotEmpty() }) + parts.drop(1) + "NOAA/NSSL MRMS").joinToString("  \u00B7  ")
+            val image = renderer.shareImage(map, p, p.style, line, emptyList())
+            val out = File(sharedDir(), "mrms_rainfall_${simplemodelview.civilFromEpoch(st.rainSince).let { c -> "%04d%02d%02d%02d".format(c[0], c[1], c[2], c[3]) }}_to_${simplemodelview.civilFromEpoch(file.validTime).let { c -> "%04d%02d%02d%02d%02d".format(c[0], c[1], c[2], c[3], c[4]) }}.png")
+            out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            return@withContext out
+        }
         val (map, style) = areaBitmap(area, st.product, file)
         val image = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
         val out = File(sharedDir(), fileName(st.product, file, "png"))

@@ -699,6 +699,8 @@ internal fun shareFile(context: android.content.Context, file: java.io.File, mim
 internal fun ShareDialog(
     canLoop: Boolean, current: String, globe: Boolean, initialSize: VideoSize, estimate: (ShareArea, VideoSize) -> Double,
     onDismiss: () -> Unit, onShare: (ShareArea, Boolean, VideoSize) -> Unit, disclaimer: String = DISCLAIMER,
+    /** False for a rainfall total: it is only the sector on screen (or the part of it that shows), not another meso area. */
+    mesoAreas: Boolean = true,
 ) {
     var area by remember { mutableStateOf<ShareArea>(if (globe) ShareArea.Globe else ShareArea.Screen) }
     var size by remember { mutableStateOf(initialSize) }
@@ -708,16 +710,18 @@ internal fun ShareDialog(
         text = {
             Column {
                 Text("Area", style = MaterialTheme.typography.labelLarge)
-                LazyColumn(Modifier.height(300.dp)) {
+                LazyColumn(if (mesoAreas) Modifier.height(300.dp) else Modifier) {
                     if (globe) {
                         item { AreaRow("The globe, as turned now", area == ShareArea.Globe) { area = ShareArea.Globe } }
                     } else {
                         item { AreaRow("This screen area", area == ShareArea.Screen) { area = ShareArea.Screen } }
                         item { AreaRow("Whole map ($current)", area == ShareArea.Whole) { area = ShareArea.Whole } }
                     }
-                    item { Text("Meso areas", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge) }
-                    items(Sector.all) { sector ->
-                        AreaRow(sector.name, (area as? ShareArea.Meso)?.sector == sector) { area = ShareArea.Meso(sector) }
+                    if (mesoAreas) {
+                        item { Text("Meso areas", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge) }
+                        items(Sector.all) { sector ->
+                            AreaRow(sector.name, (area as? ShareArea.Meso)?.sector == sector) { area = ShareArea.Meso(sector) }
+                        }
                     }
                 }
                 if (canLoop) {

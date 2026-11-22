@@ -239,7 +239,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, units = s.units, onUnits = vm::setUnits, disclaimer = MRMS_DISCLAIMER, showContours = true,
     ) { settings = false }
     if (sharing) ShareDialog(
-        canLoop = s.files.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
+        canLoop = s.files.size > 1 && s.rainSince == null, current = s.sector.name, globe = s.globe, mesoAreas = s.rainSince == null, onDismiss = { sharing = false },
         initialSize = vm.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
             vm.videoSize = size

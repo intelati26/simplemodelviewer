@@ -2,6 +2,9 @@ package io.github.intelati26.simplemodelview
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -34,6 +37,7 @@ import simplemodelview.earlyTimeIndices
 import simplemodelview.gridCoverBox
 import simplemodelview.nearestFile
 import simplemodelview.rankMembers
+import java.io.File
 
 enum class CompareMode { Side, Overlay, Difference }
 
@@ -266,6 +270,76 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         autoMember = false
         update { it.copy(member = member) }
         redraw()
+    }
+
+    /** The comparison as one picture: what the screen shows (both panes, the overlay or the difference) over the whole map, with the run, member and times, a color key and the best members' scores. */
+    suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
+        val st = _state.value
+        val p = product ?: return@withContext null
+        val model = st.model ?: return@withContext null
+        val radarMap = st.obs
+        val width = model.width
+        fun label(canvas: Canvas, text: String, size: Float) {
+            val paint = Paint().apply { isAntiAlias = true; textSize = size; color = Color.WHITE; isFakeBoldText = true }
+            val w = paint.measureText(text)
+            canvas.drawRect(size * 0.4f, size * 0.4f, size * 0.4f + w + size * 0.6f, size * 2.0f, Paint().apply { color = 0xAA000000.toInt() })
+            canvas.drawText(text, size * 0.7f, size * 1.5f, paint)
+        }
+        val labelSize = maxOf(16f, width / 70f)
+        val (picture, style, mode) = when (st.mode) {
+            CompareMode.Side -> {
+                val out = Bitmap.createBitmap(width, model.height * 2, Bitmap.Config.ARGB_8888)
+                val c = Canvas(out)
+                if (radarMap != null) c.drawBitmap(radarMap, 0f, 0f, null)
+                c.drawBitmap(model, 0f, model.height.toFloat(), null)
+                label(c, "Radar (MRMS)", labelSize)
+                c.save(); c.translate(0f, model.height.toFloat()); label(c, "REFS ${st.members.getOrNull(st.member) ?: ""}", labelSize); c.restore()
+                Triple(out, p.style, "side by side")
+            }
+            CompareMode.Overlay -> {
+                val out = model.copy(Bitmap.Config.ARGB_8888, true)
+                if (radarMap != null) Canvas(out).drawBitmap(radarMap, 0f, 0f, Paint().apply { alpha = (st.opacity * 255).toInt() })
+                label(Canvas(out), "REFS under, radar over (radar ${(st.opacity * 100).toInt()} %)", labelSize)
+                Triple(out, p.style, "overlay")
+            }
+            CompareMode.Difference -> {
+                val out = (st.diff ?: return@withContext null).copy(Bitmap.Config.ARGB_8888, true)
+                label(Canvas(out), "REFS minus radar", labelSize)
+                Triple(out, differenceStyle, "difference")
+            }
+        }
+        val titleProduct = p.copy(title = "Radar vs REFS reflectivity, $mode", style = style)
+        val header = buildString {
+            st.run?.let { append("REFS ${it.label}") }
+            st.members.getOrNull(st.member)?.let { append("  ·  $it") }
+            st.times.getOrNull(st.timeIndex)?.let { append("  ·  f%02d valid %s".format(st.hours.getOrElse(st.timeIndex) { 0 }, simplemodelview.formatClock(it))) }
+            st.obsTime?.let { append("  ·  radar ${simplemodelview.formatClock(it)}") }
+        }
+        val framed = renderer.shareImage(picture, titleProduct, style, header, emptyList())
+        // the best matches under the picture
+        val rows = st.ranks.take(6)
+        val textSize = maxOf(18f, width / 60f)
+        val footer = if (rows.isEmpty()) 0 else (textSize * (rows.size + 3.2f)).toInt()
+        val out = Bitmap.createBitmap(framed.width, framed.height + footer, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawColor(Color.WHITE)
+        c.drawBitmap(framed, 0f, 0f, null)
+        if (rows.isNotEmpty()) {
+            val bold = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize; isFakeBoldText = true }
+            val plain = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize }
+            val x = maxOf(12f, width / 90f)
+            var y = framed.height + textSize * 1.4f
+            c.drawText("Best initial-condition match ${if (st.inView) "(area on screen)" else "(whole map)"}: neighborhood score at 35 dBZ, 45 km, f${st.scoredHours.joinToString("/") { "%02d".format(it) }}, mean", x, y, bold)
+            for ((i, r) in rows.withIndex()) {
+                y += textSize * 1.1f
+                fun f(v: Double?) = if (v == null || v.isNaN()) "-" else "%.2f".format(v)
+                c.drawText("${i + 1}. ${r.name}", x, y, plain)
+                c.drawText(r.scores.joinToString("   ") { f(it?.fss) } + "     " + f(r.headline), width * 0.62f, y, plain)
+            }
+        }
+        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+        val name = "compare_${st.run?.label?.filter { it.isLetterOrDigit() } ?: "run"}_${(st.members.getOrNull(st.member) ?: "member").filter { it.isLetterOrDigit() }}_$mode.png".replace(' ', '_')
+        File(dir, name).also { f -> f.outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) } }
     }
 
     fun setMode(mode: CompareMode) = update { it.copy(mode = mode) }

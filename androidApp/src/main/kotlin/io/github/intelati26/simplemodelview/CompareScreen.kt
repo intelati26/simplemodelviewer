@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import simplemodelview.MemberRank
 import simplemodelview.formatClock
 
@@ -71,6 +72,10 @@ internal fun CompareScreen(vm: CompareViewModel, onOpen: (String) -> Unit) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Radar vs REFS", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 if (s.busy) BusySpinner(Modifier.padding(end = 2.dp))
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                TextButton(onClick = { scope.launch { try { vm.buildShareFile()?.let { shareFile(context, it, "image/png", "Share comparison") } } catch (e: Exception) { android.widget.Toast.makeText(context, "Could not make the picture: ${e.message}", android.widget.Toast.LENGTH_LONG).show() } } },
+                    enabled = s.model != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 TextButton(onClick = vm::load, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Reload") }
                 PageMenu("compare", onOpen)
             }
