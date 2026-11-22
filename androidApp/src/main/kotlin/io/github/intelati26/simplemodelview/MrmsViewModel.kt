@@ -117,6 +117,7 @@ data class MrmsState(
     val underTemp: Boolean = false,                   // the surface temperature drawn under the radar (a translucent fill)
     val underDew: Boolean = false,                    // surface dewpoint lines over the picture
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
+    val stationDensity: Int = 2,                      // 1 as before, 2 and 3 closer up and down
     val station: StationDetail? = null,               // the station tapped: its reports and chart
     val rainSince: Long? = null,                      // the rainfall total from this time to now is shown instead of the radar (epoch seconds)
     val rainInfo: String? = null,                     // the span the total covers and its sources, or what is missing
@@ -180,6 +181,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             underTemp = prefs.getBoolean("mrms_under_t", false),
             underDew = prefs.getBoolean("mrms_under_td", false),
             stations = prefs.getBoolean("mrms_stations", false),
+            stationDensity = prefs.getInt("mrms_station_density", 2).coerceIn(1, 3),
         )
     )
     val state: StateFlow<MrmsState> = _state
@@ -638,6 +640,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (shown != null && !_state.value.playing) showFrame()
     }
 
+    fun setStationDensity(level: Int) {
+        prefs.edit().putInt("mrms_station_density", level).apply()
+        update { it.copy(stationDensity = level) }
+        if (shown != null && !_state.value.playing && _state.value.stations) showFrame()
+    }
+
     /** The reports in force at [time] inside the lat / lon box [box] (west, south, east, north), the bulk file read again when it is a few minutes old. */
     private suspend fun stationReports(time: Long, box: DoubleArray): List<simplemodelview.Metar> {
         val now = System.currentTimeMillis() / 1000
@@ -648,7 +656,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun plotsFor(file: MrmsFile, v: View, box: DoubleArray): List<StationPlot> {
         if (!_state.value.stations) return emptyList()
         val reports = stationReports(file.validTime, box)
-        return withContext(Dispatchers.Default) { stationPlots(core, reports, v, _state.value.units.celsius) }
+        return withContext(Dispatchers.Default) { stationPlots(core, reports, v, _state.value.units.celsius, _state.value.stationDensity) }
     }
 
     /** Opens a station: its last day of reports (AWC) and its 5-minute wind (IEM, which AWC does not carry), for the chart. */

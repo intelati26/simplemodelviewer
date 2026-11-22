@@ -22,6 +22,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,7 +88,7 @@ internal fun OverlayTreeDialog(
     /** The surface layers under the radar (MRMS page only; null: not offered): the temperature fill and the dewpoint lines. */
     underTemp: Boolean? = null, onUnderTemp: (Boolean) -> Unit = {}, underDew: Boolean = false, onUnderDew: (Boolean) -> Unit = {},
     /** METAR station plots (MRMS page only; null: not offered). */
-    stations: Boolean? = null, onStations: (Boolean) -> Unit = {},
+    stations: Boolean? = null, onStations: (Boolean) -> Unit = {}, stationDensity: Int = 2, onStationDensity: (Int) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var open by remember { mutableStateOf(emptySet<String>()) }
@@ -260,6 +261,10 @@ internal fun OverlayTreeDialog(
                                 Text("Temperature (red), dewpoint (green), wind barb, present weather, and a dot in the flight category's color (VFR green, MVFR blue, IFR red, LIFR magenta). Tap a station for its reports and a chart of the last day.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Switch(checked = stations, onCheckedChange = onStations)
+                        }
+                        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Density")
+                            for ((level, name) in listOf(1 to "Normal", 2 to "Dense", 3 to "Densest")) FilterChip(stationDensity == level, { onStationDensity(level) }, label = { Text(name) })
                         }
                         Note("From the Aviation Weather Center (aviationweather.gov): the latest report of every station, read every few minutes; past scans show the report in force then (the app keeps six hours of them). The chart's 5-minute wind is from the Iowa Environmental Mesonet, which has it.")
                     }

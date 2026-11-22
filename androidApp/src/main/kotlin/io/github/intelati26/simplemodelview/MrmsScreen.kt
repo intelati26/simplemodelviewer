@@ -335,7 +335,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         contours = s.settings.contours, contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null,
         onContours = { vm.setSettings(s.settings.copy(contours = it)) },
         underTemp = s.underTemp, onUnderTemp = vm::setUnderTemp, underDew = s.underDew, onUnderDew = vm::setUnderDew,
-        stations = s.stations, onStations = vm::setStations,
+        stations = s.stations, onStations = vm::setStations, stationDensity = s.stationDensity, onStationDensity = vm::setStationDensity,
         onDismiss = { overlayTree = false },
     )
     s.alertDetail?.let { (title, text) ->

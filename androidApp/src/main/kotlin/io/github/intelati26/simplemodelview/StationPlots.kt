@@ -26,7 +26,7 @@ internal fun stationTextSize(pictureWidth: Int) = maxOf(11f, pictureWidth / 95f)
  * The plots of [metars] on the picture of [view] (its grid's cells, [view]'s scale), thinned so no two are nearer than about five text heights. ASOS
  * stations of the US (K...) are kept first, then the rest, each set by its id so the choice does not move between frames.
  */
-internal fun stationPlots(core: Core, metars: List<Metar>, view: View, celsius: Boolean): List<StationPlot> {
+internal fun stationPlots(core: Core, metars: List<Metar>, view: View, celsius: Boolean, density: Int = 1): List<StationPlot> {
     val s = view.scale.toFloat() / view.step
     val w = view.pixelWidth
     val h = view.pixelHeight
@@ -42,8 +42,10 @@ internal fun stationPlots(core: Core, metars: List<Metar>, view: View, celsius: 
     }
     val keepXy = ArrayList<Int>()
     for (i in ordered.indices) if (inside[i]) keepXy += i
-    val packed = FloatArray(keepXy.size * 2) { k -> xy[2 * keepXy[k / 2] + k % 2] }
-    val spacing = stationTextSize(w) * 4.2f
+    // a plot is wide and not very tall (temperature, dot and weather side by side; dewpoint under): the denser levels let stations sit closer up and down, not across
+    val stretch = when (density) { 2 -> 1.6f; 3 -> 2.0f; else -> 1f }
+    val packed = FloatArray(keepXy.size * 2) { k -> xy[2 * keepXy[k / 2] + k % 2] * (if (k % 2 == 1) stretch else 1f) }
+    val spacing = stationTextSize(w) * (if (density >= 3) 3.9f else 4.2f)
     return thinStations(packed, spacing).map { k ->
         val i = keepXy[k]
         val m = ordered[i]
