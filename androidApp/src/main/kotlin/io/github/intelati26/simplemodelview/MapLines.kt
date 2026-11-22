@@ -14,9 +14,35 @@ import java.nio.ByteOrder
  * lon). Each vertex is projected to grid coordinates once; drawing a view is then just a scale and offset.
  */
 class MapLines(context: Context, private val core: Core) {
+    private companion object { const val CHUNK = 64 }
     // raw: lat, west-positive lon, lat, west-positive lon per segment; trig: sin(lat), cos(lat), sin(lon), cos(lon) for both vertices
     // (the globe needs no trig per frame). Grid cells (col, row, col, row) are projected per grid on first use.
     private class Layer(val raw: FloatArray, val trig: FloatArray) {
+        // a globe frame skips whole runs of segments that cannot show: [CHUNK] consecutive segments (a stretch of a line) have a center (unit vector) and an angular radius
+        val chunks = (trig.size / 8 + CHUNK - 1) / CHUNK
+        val center = FloatArray(chunks * 3)
+        val radius = FloatArray(chunks)
+        init {
+            val segments = trig.size / 8
+            for (k in 0 until chunks) {
+                val from = k * CHUNK; val to = minOf(segments, from + CHUNK)
+                var x = 0.0; var y = 0.0; var z = 0.0
+                for (sgm in from until to) for (v in 0..1) {
+                    val t = sgm * 8 + v * 4
+                    x += trig[t + 1] * trig[t + 3]; y += trig[t + 1] * trig[t + 2]; z += trig[t]
+                }
+                val len = Math.sqrt(x * x + y * y + z * z).let { if (it < 1e-9) 1.0 else it }
+                x /= len; y /= len; z /= len
+                var widest = 0.0
+                for (sgm in from until to) for (v in 0..1) {
+                    val t = sgm * 8 + v * 4
+                    val dot = trig[t + 1] * trig[t + 3] * x + trig[t + 1] * trig[t + 2] * y + trig[t] * z
+                    widest = maxOf(widest, Math.acos(dot.coerceIn(-1.0, 1.0)))
+                }
+                center[k * 3] = x.toFloat(); center[k * 3 + 1] = y.toFloat(); center[k * 3 + 2] = z.toFloat(); radius[k] = widest.toFloat()
+            }
+        }
+
         // projected lines per grid; MRMS windows make many grids, so only the few most recent are kept
         val cells = object : LinkedHashMap<Grid, FloatArray>(8, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Grid, FloatArray>) = size > 6
@@ -113,12 +139,30 @@ class MapLines(context: Context, private val core: Core) {
             (if (detailed && when (countyMode) { 1 -> true; 2 -> false; else -> zoomedIn }) listOf(Triple("county", if (dark) 0x50AAAAAA else 0x50606060, 0.45f)) else emptyList()) +
             listOf(Triple("statev2", if (dark) 0xFFE0E4E8.toInt() else 0xFF2A3036.toInt(), 1.1f))
         val paint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = detailed }
+        // the part of the sphere that can show: a cap around the camera's point, out to the horizon or, zoomed in, to the screen's far corner
+        val cap = Math.min(Math.PI / 2, Math.asin(Math.min(1.0, Math.hypot(cx.toDouble(), cy.toDouble()) / r))) + 0.03
+        val camX = (cos0 * cosL0).toDouble(); val camY = (cos0 * sinL0).toDouble(); val camZ = sin0.toDouble()
         for ((name, color, width1) in plan) {
-            val trig = layers.getValue(name).trig
-            val pts = FloatArray(trig.size / 2)
+            val layer = layers.getValue(name)
+            val trig = layer.trig
+            val alive = BooleanArray(layer.chunks)
+            var segments = 0
+            for (k in 0 until layer.chunks) {
+                val dot = camX * layer.center[k * 3] + camY * layer.center[k * 3 + 1] + camZ * layer.center[k * 3 + 2]
+                if (Math.acos(dot.coerceIn(-1.0, 1.0)) - layer.radius[k] <= cap) { alive[k] = true; segments += minOf(CHUNK, trig.size / 8 - k * CHUNK) }
+            }
+            val pts = FloatArray(segments * 4)
             var count = 0
-            var i = 0
-            while (i < trig.size) {
+            // while the globe is being dragged, runs of segments shorter than a couple of pixels (most of a map's lines at this scale) are joined into one: the same line, far fewer to draw
+            val minLength = if (detailed) 0f else 2.2f * maxOf(1f, minOf(width, height) / 1100f)
+            var pending = false
+            var sx = 0f; var sy = 0f; var ex = 0f; var ey = 0f
+            fun flush() { if (pending) { pts[count] = sx; pts[count + 1] = sy; pts[count + 2] = ex; pts[count + 3] = ey; count += 4; pending = false } }
+            for (k in 0 until layer.chunks) {
+              if (!alive[k]) continue
+              var i = k * CHUNK * 8
+              val end = minOf(trig.size, i + CHUNK * 8)
+              while (i < end) {
                 // vertex a, vertex b: sinLat, cosLat, sinLon, cosLon
                 val sa = trig[i]; val ca = trig[i + 1]; val sla = trig[i + 2]; val cla = trig[i + 3]
                 val sb = trig[i + 4]; val cb = trig[i + 5]; val slb = trig[i + 6]; val clb = trig[i + 7]
@@ -134,9 +178,18 @@ class MapLines(context: Context, private val core: Core) {
                 val x1 = cx + r * ca * sinDa; val y1 = cy - r * (cos0 * sa - sin0 * ca * cosDa)
                 val x2 = cx + r * cb * sinDb; val y2 = cy - r * (cos0 * sb - sin0 * cb * cosDb)
                 if ((x1 < 0 && x2 < 0) || (x1 > width && x2 > width) || (y1 < 0 && y2 < 0) || (y1 > height && y2 > height)) continue
-                pts[count] = x1; pts[count + 1] = y1; pts[count + 2] = x2; pts[count + 3] = y2
-                count += 4
+                if (minLength > 0f) {
+                    if (pending && Math.abs(x1 - ex) < 0.01f && Math.abs(y1 - ey) < 0.01f) {
+                        ex = x2; ey = y2                                     // the line goes on: extend the pending piece
+                    } else { flush(); sx = x1; sy = y1; ex = x2; ey = y2; pending = true }
+                    if (Math.abs(ex - sx) + Math.abs(ey - sy) >= minLength) flush()
+                } else {
+                    pts[count] = x1; pts[count + 1] = y1; pts[count + 2] = x2; pts[count + 3] = y2
+                    count += 4
+                }
+              }
             }
+            flush()
             paint.color = color
             paint.strokeWidth = width1 * (if (zoomedIn) 1.5f else 1f) * maxOf(1f, minOf(width, height) / 1100f)
             canvas.drawLines(pts, 0, count, paint)
