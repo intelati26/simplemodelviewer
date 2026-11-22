@@ -86,7 +86,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "Analysis globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "Analysis map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "Analysis map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
         }
@@ -132,7 +132,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                             DropdownMenuItem(text = { Text("Pick dates…") }, onClick = { timeMenu = false; pickDates = true })
                         }
                     }
-                    SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
+                    SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector, onMapHere = if (s.globe) vm::showMapHere else null)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
                 s.loadStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }

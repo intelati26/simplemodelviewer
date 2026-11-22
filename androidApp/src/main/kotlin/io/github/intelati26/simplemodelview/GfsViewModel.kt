@@ -77,6 +77,7 @@ data class GfsState(
     val detail: DetailLayer? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val focus: simplemodelview.MapFocus? = null,      // the part of the next map picture to zoom to (set on leaving the globe), cleared once applied
     val history: Boolean = false,             // the frames are the analyses (hour 0) of the runs of the past days, not one run's forecast hours
     val historyDays: Int = 5,
     val historyRange: Pair<Long, Long>? = null,   // a hand-picked span (epoch seconds); null = the past [historyDays] days
@@ -92,6 +93,8 @@ data class GfsState(
  */
 class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
+    private val handoff = GlobeHandoff(core)
+    private var viewport = floatArrayOf(0f, 0f, 1f, 1f)       // visible part of the picture: left, top, right, bottom fractions
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.gfs
     private val renderer = MapRenderer(core, AppContainer.lines)
@@ -455,9 +458,22 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on && _state.value.polar == null) return
         stopPlaying()
-        update { it.copy(globe = on, polar = null, crosshair = null, readout = null, tapLatLon = null) }
+        val enterBox = if (on && !_state.value.globe) handoff.boxOf(shown?.third, viewport) else null
+        if (on) handoff.cancelLeave()
+        handoff.enter = if (globeW == 0) enterBox else null
+        update { it.copy(globe = on, polar = null, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
+
+    /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
+    fun showMapHere() {
+        val cam = _state.value.cam
+        if (globeW == 0) return
+        handoff.leaveFrom(cam, globeW, globeH)
+        pickSector(simplemodelview.sectorForGlobe(cam, globeW, globeH, GFS_SECTORS))
+    }
+
+    fun focusApplied() = update { it.copy(focus = null) }
 
     /** The globe turned to look straight down on a pole. */
     fun setGlobePole(north: Boolean) {
@@ -488,7 +504,8 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
         val first = globeW == 0
         globeW = w; globeH = h
-        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h)), polar = it.polar?.copy(radius = 0.48 * minOf(w, h))) }
+        if (first) update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h)), polar = it.polar?.copy(radius = 0.48 * minOf(w, h))) }
+        handoff.enter = null
         if (_state.value.globe && globeShown != null) requestGlobe(coarse = false)
     }
 
@@ -578,7 +595,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
         }
         shown = Triple(product, values, view)
-        update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null, detail = null) }
+        update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null, detail = null, focus = handoff.takeFocus(view)) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -587,6 +604,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The UI reports which part of the picture is on screen: once the zoom has settled, only the cells on screen are drawn again, finer, over the overview. */
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
+        viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
         detailJob?.cancel()
         val st = _state.value
         val (product, values, base) = shown ?: return

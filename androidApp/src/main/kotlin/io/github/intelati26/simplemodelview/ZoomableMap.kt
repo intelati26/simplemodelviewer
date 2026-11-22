@@ -39,11 +39,27 @@ import simplemodelview.visibleFractions
 internal fun ZoomableMap(
     bitmap: android.graphics.Bitmap, crosshair: Pair<Float, Float>?, description: String,
     detail: DetailLayer? = null, onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
+    focus: simplemodelview.MapFocus? = null, onFocusApplied: () -> Unit = {},
 ) {
     var scale by remember(bitmap.width, bitmap.height) { mutableStateOf(1f) }
     var offset by remember(bitmap.width, bitmap.height) { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val image = remember(bitmap) { bitmap.asImageBitmap() }
+    // coming back from the globe: zoom to the part of the picture it was showing (this picture's first composition, so the zoom state is fresh)
+    LaunchedEffect(focus, bitmap, size) {
+        if (focus == null || size.width == 0) return@LaunchedEffect
+        val aspect = bitmap.width.toFloat() / bitmap.height
+        val fitW = if (size.width.toFloat() / size.height > aspect) size.height * aspect else size.width.toFloat()
+        val fitH = fitW / aspect
+        val s = minOf(size.width / ((focus.right - focus.left) * fitW), size.height / ((focus.bottom - focus.top) * fitH)).coerceIn(1f, 12f)
+        val cx = ((focus.left + focus.right) / 2f - 0.5f) * fitW
+        val cy = ((focus.top + focus.bottom) / 2f - 0.5f) * fitH
+        val maxX = size.width * (s - 1f) / 2f
+        val maxY = size.height * (s - 1f) / 2f
+        scale = s
+        offset = Offset((-cx * s).coerceIn(-maxX, maxX), (-cy * s).coerceIn(-maxY, maxY))
+        onFocusApplied()
+    }
     // tell the view model which part of the picture is on screen, for "export this screen area"
     LaunchedEffect(scale, offset, size, bitmap) {
         if (size.width == 0) return@LaunchedEffect

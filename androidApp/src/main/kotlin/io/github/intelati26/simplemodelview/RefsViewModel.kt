@@ -101,6 +101,7 @@ data class UiState(
     val newerCycle: Cycle? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val focus: simplemodelview.MapFocus? = null,      // the part of the next map picture to zoom to (set on leaving the globe), cleared once applied
     val fileTime: Long? = null,                  // when the shown frame's file was uploaded (server Last-Modified, epoch s)
     val runComplete: Long? = null,               // when the run's metadata was last written: the run is complete about then
     val contactPrompt: Boolean = false,          // the "please enter your email" dialog is showing
@@ -123,6 +124,7 @@ private const val DEFAULT_MEMBER = "RRFS"
 
 class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
+    private val handoff = GlobeHandoff(core)
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.repo
     private val lines = AppContainer.lines
@@ -414,7 +416,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             Triple(renderer.render(product, style, data, members, v, dark, alerts = outlookDraws(core, outlook, v, valid), contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity), style, v)
         }
         view = v
-        update { it.copy(map = bitmap, style = style, busy = false, detail = null) }
+        update { it.copy(map = bitmap, style = style, busy = false, detail = null, focus = handoff.takeFocus(v)) }
         scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
@@ -423,16 +425,33 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** Turns the globe view on or off (a sector choice turns it off). */
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on) return
-        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        val enterBox = if (on) handoff.boxOf(view, viewport) else null
+        if (on) handoff.cancelLeave()
+        handoff.enter = if (globeW == 0) enterBox else null
+        update { it.copy(globe = on, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
         if (values != null) viewModelScope.launch { rerender() }
     }
+
+    /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
+    fun showMapHere() {
+        val cam = _state.value.cam
+        if (globeW == 0) return
+        handoff.leaveFrom(cam, globeW, globeH)
+        val sector = simplemodelview.sectorForGlobe(cam, globeW, globeH)
+        prefs.edit().putString("sector", sector.name).apply()
+        update { it.copy(sector = sector, globe = false, crosshair = null, readout = null, tapLatLon = null) }
+        viewModelScope.launch { rerender() }
+    }
+
+    fun focusApplied() = update { it.copy(focus = null) }
 
     /** The globe's drawing area in pixels; the first call also fits the globe to the screen. */
     fun setGlobeSize(w: Int, h: Int) {
         if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
         val first = globeW == 0
         globeW = w; globeH = h
-        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }   // the whole globe fits the screen
+        if (first) update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h))) }   // the whole globe fits the screen, or the map's view fills it
+        handoff.enter = null
         if (_state.value.globe && values != null) requestGlobe(coarse = false)
     }
 

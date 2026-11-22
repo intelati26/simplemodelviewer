@@ -100,6 +100,7 @@ data class MrmsState(
     val cellKilometers: Double? = null,          // resolution of the shown picture (after any decimation)
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val focus: simplemodelview.MapFocus? = null,      // the part of the next map picture to zoom to (set on leaving the globe), cleared once applied
     val favorites: Set<String> = emptySet(),
     val places: List<Place> = emptyList(),
     val settings: Settings = Settings(),
@@ -139,6 +140,7 @@ data class StationDetail(val metar: simplemodelview.Metar, val history: List<sim
 
 class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
+    private val handoff = GlobeHandoff(core)
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.mrms
     private val rainDays = AppContainer.rainDays
@@ -755,7 +757,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             if (fellBack > 0) append("  \u00B7  $fellBack multi-sensor total${if (fellBack > 1) "s" else ""} missing, radar-only used")
             if (missing > 0) append("  \u00B7  $missing piece${if (missing > 1) "s" else ""} missing (not counted)")
         }
-        update { it.copy(map = bitmap, detail = null, style = product.style, busy = false, rainInfo = sources, overlayStyles = emptyList(), overlayInfo = null) }
+        update { it.copy(map = bitmap, detail = null, focus = handoff.takeFocus(v), style = product.style, busy = false, rainInfo = sources, overlayStyles = emptyList(), overlayInfo = null) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -998,7 +1000,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 shownOverlays = ov.map { it.shown } + under
                 shownPlots = plots
                 val styles = st.overlays.map { l -> styleForLayer(l) } + listOfNotNull(fill?.let { tempStyle() })
-                update { it.copy(map = bitmap, detail = null, style = synthetic.style, busy = !final, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = styles, overlayInfo = joinInfo(overlayInfoFor(ov), underInfo)) }
+                update { it.copy(map = bitmap, detail = null, focus = handoff.takeFocus(v), style = synthetic.style, busy = !final, cellKilometers = window.sourceCellDegrees * step * 111.0, overlayStyles = styles, overlayInfo = joinInfo(overlayInfoFor(ov), underInfo)) }
             } else if (final) update { it.copy(busy = false) }
         }
         suspend fun <T> stage(load: suspend () -> T): T = staged(progressive, { paint(final = false) }, load)
@@ -1193,15 +1195,29 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on) return
         stopPlaying()
-        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        val enterBox = if (on) handoff.boxOf(view, viewport) else null
+        if (on) handoff.cancelLeave()
+        handoff.enter = if (globeW == 0) enterBox else null
+        update { it.copy(globe = on, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
+
+    /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
+    fun showMapHere() {
+        val cam = _state.value.cam
+        if (globeW == 0) return
+        handoff.leaveFrom(cam, globeW, globeH)
+        pickSector(simplemodelview.sectorForGlobe(cam, globeW, globeH))
+    }
+
+    fun focusApplied() = update { it.copy(focus = null) }
 
     fun setGlobeSize(w: Int, h: Int) {
         if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
         val first = globeW == 0
         globeW = w; globeH = h
-        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        if (first) update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        handoff.enter = null
         if (_state.value.globe && shown != null) requestGlobe(coarse = false)
     }
 

@@ -66,12 +66,14 @@ data class AnalysisState(
     val settings: Settings = Settings(),
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
+    val focus: simplemodelview.MapFocus? = null,      // the part of the next map picture to zoom to (set on leaving the globe), cleared once applied
 ) {
     val frame: AnalysisFrame? get() = frames.getOrNull(index)
 }
 
 class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     private val core = AppContainer.core
+    private val handoff = GlobeHandoff(core)
     private val prefs = AppContainer.prefs
     private val repo = AppContainer.analysis
     private val renderer = MapRenderer(core, AppContainer.lines)
@@ -248,7 +250,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             renderer.render(product, product.style, values, emptyList(), v, dark, contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity)
         }
         view = v
-        update { it.copy(map = bitmap, busy = false, detail = null) }
+        update { it.copy(map = bitmap, busy = false, detail = null, focus = handoff.takeFocus(v)) }
         scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
@@ -281,15 +283,29 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on) return
         stopPlaying()
-        update { it.copy(globe = on, crosshair = null, readout = null, tapLatLon = null) }
+        val enterBox = if (on) handoff.boxOf(view, viewport) else null
+        if (on) handoff.cancelLeave()
+        handoff.enter = if (globeW == 0) enterBox else null
+        update { it.copy(globe = on, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
+
+    /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
+    fun showMapHere() {
+        val cam = _state.value.cam
+        if (globeW == 0) return
+        handoff.leaveFrom(cam, globeW, globeH)
+        pickSector(simplemodelview.sectorForGlobe(cam, globeW, globeH))
+    }
+
+    fun focusApplied() = update { it.copy(focus = null) }
 
     fun setGlobeSize(w: Int, h: Int) {
         if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
         val first = globeW == 0
         globeW = w; globeH = h
-        if (first) update { it.copy(cam = it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        if (first) update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h))) }
+        handoff.enter = null
         if (_state.value.globe && shown != null) requestGlobe(coarse = false)
     }
 

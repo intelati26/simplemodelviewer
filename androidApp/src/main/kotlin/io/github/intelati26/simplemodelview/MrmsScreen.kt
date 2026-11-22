@@ -123,7 +123,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
         }
@@ -162,7 +162,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                         Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     if (s.busy && s.map != null) BusySpinner(Modifier.padding(end = 2.dp))
-                    SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector)
+                    SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector, onMapHere = if (s.globe) vm::showMapHere else null)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
                 MrmsTimesLine(s.file?.uploaded, s.file?.validTime, s.detail?.cellKilometers ?: s.cellKilometers)

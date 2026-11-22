@@ -96,7 +96,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "GFS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap, polar = s.polar, onPolarGesture = vm::polarGesture)
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
         }
@@ -176,6 +176,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                                     for (sector in GFS_SECTORS.drop(4)) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; sectorPage = 0; vm.pickSector(sector) })
                                 }
                                 else -> {
+                                    if (s.globe && s.polar == null) DropdownMenuItem(text = { Text("Map of this view") }, onClick = { sectorMenu = false; vm.showMapHere() })
                                     DropdownMenuItem(text = { Text("Globe") }, onClick = { sectorMenu = false; vm.setGlobe(true) })
                                     DropdownMenuItem(text = { Text("Poles ›") }, onClick = { sectorPage = 1 })
                                     for (sector in wide) DropdownMenuItem(text = { Text(sector.name) }, onClick = { sectorMenu = false; vm.pickSector(sector) })
