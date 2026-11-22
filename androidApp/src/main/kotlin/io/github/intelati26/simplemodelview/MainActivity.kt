@@ -623,6 +623,10 @@ internal fun SettingsDialog(
                 SwitchRow("Show timings", "A small line under the map with how long the last picture took, stage by stage: data, raster, layers under and over it, lines, contours, barbs.", settings.showTimings) {
                     onChange(settings.copy(showTimings = it))
                 }
+                var logTimings by remember { mutableStateOf(AppContainer.prefs.getBoolean("log_timings", false)) }
+                SwitchRow("Log timings", "Also write each stage time to Logcat (tag Timings), to measure a drag or a loop from a computer: adb logcat -s Timings.", logTimings) {
+                    logTimings = it; Timings.logging = it; AppContainer.prefs.edit().putBoolean("log_timings", it).apply()
+                }
                 SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
                     onChange(settings.copy(optionsInExport = it))
                 }

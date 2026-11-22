@@ -27,7 +27,7 @@ object BackupPrefs {
 
     /** How the app looks and behaves: units, barbs, contours, counties, loops, each page's product, sector, level and color. */
     val ui: Map<String, Spec> = linkedMapOf(
-        "barb_density" to int(1, 100), "contours" to bool(), "counties" to int(0, 2), "minimal_ui" to bool(), "options_in_export" to bool(), "show_timings" to bool(),
+        "barb_density" to int(1, 100), "contours" to bool(), "counties" to int(0, 2), "minimal_ui" to bool(), "options_in_export" to bool(), "show_timings" to bool(), "log_timings" to bool(),
         "u_celsius" to bool(), "u_km" to bool(), "u_metric_length" to bool(), "video_size" to text(), "loop_from_shown" to bool(),
         "loop_frames" to int(0, 1000), "mrms_loop_frames" to int(0, 1000), "gfs_loop_hours" to int(-1000, 1000), "nbm_loop_hours" to int(-1000, 1000), "gfs_history_days" to int(1, 2000),
         "page" to text(), "product" to text(), "sector" to text(), "member_name" to text(), "wind_color" to text(), "wind_level" to int(10, 1000),

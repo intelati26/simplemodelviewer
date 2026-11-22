@@ -19,6 +19,7 @@ class SimpleModelViewApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContainer.init(this)
+        Timings.logging = AppContainer.prefs.getBoolean("log_timings", false)
         // the favorites used to be saved under the British spelling of the key: carry them over once
         AppContainer.prefs.let { p ->
             if (p.contains("favourites")) {

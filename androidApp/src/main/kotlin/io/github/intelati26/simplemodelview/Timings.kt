@@ -19,9 +19,13 @@ object Timings {
     private val times = HashMap<String, Long>()
     val line = MutableStateFlow("")
 
+    /** Settings → "Log timings": every stage time also goes to Logcat (tag "Timings"), for measuring a drag or a loop with `adb logcat -s Timings`. */
+    @Volatile var logging = false
+
     @Synchronized
     fun record(stage: String, millis: Long) {
         times[stage] = millis
+        if (logging) android.util.Log.d("Timings", "$stage $millis ms")
         line.value = order.mapNotNull { k -> times[k]?.let { "$k $it ms" } }.joinToString(" · ")
     }
 
