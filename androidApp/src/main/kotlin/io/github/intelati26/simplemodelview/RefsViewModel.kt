@@ -154,6 +154,9 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state: kotlinx.coroutines.flow.StateFlow<UiState> = _state
 
+    // the saved places are one list for every page: this page's copy follows it
+    init { viewModelScope.launch { AppContainer.places.places.collect { p -> update { it.copy(places = p) } } } }
+
     private inline fun update(f: (UiState) -> UiState) { _state.value = f(_state.value) }
 
     /** The MRMS page may have changed favorites, places or settings while this page was away. */
@@ -569,7 +572,8 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
-        prefs.edit().putStringSet("favorites", b.favorites.toSet()).putString("places", encodePlaces(b.places.map { Place(it.name, it.lat, it.lon) })).apply()
+        prefs.edit().putStringSet("favorites", b.favorites.toSet()).apply()
+        AppContainer.places.replaceAll(b.places.map { Place(it.name, it.lat, it.lon) })
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
         val extras = SettingsTransfer.apply(prefs, b)
@@ -581,19 +585,11 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- places ----
-    fun savePlace(name: String, lat: Double, lon: Double) {
-        val places = (_state.value.places.filter { it.name != name } + Place(name.ifBlank { placeLabel(lat, lon) }, lat, lon))
-        prefs.edit().putString("places", encodePlaces(places)).apply()
-        update { it.copy(places = places) }
-    }
+    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
 
     /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    fun editPlace(old: Place, name: String, lat: Double, lon: Double) {
-        if (!simplemodelview.validLatLon(lat, lon)) return
-        val places = simplemodelview.editPlace(_state.value.places, old, Place(name, lat, lon))
-        prefs.edit().putString("places", encodePlaces(places)).apply()
-        update { it.copy(places = places) }
-    }
+    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
+    fun editPlace(old: Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
 
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
@@ -605,11 +601,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         return if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the REFS area" else readout(core, product, data, _state.value.members, column, row)
     }
 
-    fun deletePlace(place: Place) {
-        val places = _state.value.places - place
-        prefs.edit().putString("places", encodePlaces(places)).apply()
-        update { it.copy(places = places) }
-    }
+    fun deletePlace(place: Place) = AppContainer.places.delete(place)
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
     /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */

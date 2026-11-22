@@ -48,6 +48,7 @@ object AppContainer {
     fun setLoopFromShown(on: Boolean) { prefs.edit().putBoolean("loop_from_shown", on).apply(); loopFromShown.value = on }
     val core by lazy { NativeCore() }
     val lines by lazy { MapLines(app, core) }
+    val places by lazy { PlacesStore(prefs) }
     val http by lazy { OkHttpHttp(app, prefs.getInt("cache_mb", 150).toLong()) { prefs.getString("contact_email", "").orEmpty() } }   // a new cache size applies on the next launch
     val repo by lazy { RefsRepository(http, core) }
     val mrms by lazy { MrmsRepository(http, core) }

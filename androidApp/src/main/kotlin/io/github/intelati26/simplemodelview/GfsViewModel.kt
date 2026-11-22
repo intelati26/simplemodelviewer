@@ -68,6 +68,7 @@ data class GfsState(
     val title: String = "",
     val crosshair: Pair<Float, Float>? = null,
     val tapLatLon: Pair<Double, Double>? = null,
+    val places: List<simplemodelview.Place> = AppContainer.places.places.value,
     val readout: String? = null,
     val playing: Boolean = false,
     val prefetch: Float? = null,
@@ -200,6 +201,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         )
     )
     val state: StateFlow<GfsState> = _state
+
+    // the saved places are one list for every page: this page's copy follows it
+    init { viewModelScope.launch { AppContainer.places.places.collect { p -> update { it.copy(places = p) } } } }
     private inline fun update(f: (GfsState) -> GfsState) { _state.value = f(_state.value) }
 
     private fun readSettings() = Settings(
@@ -635,6 +639,46 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
 
+    // ---- places (bookmarks): the list is shared by every page ----
+    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
+    fun deletePlace(place: simplemodelview.Place) = AppContainer.places.delete(place)
+    fun editPlace(old: simplemodelview.Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
+
+    /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
+    fun readAt(lat: Double, lon: Double): String {
+        val st = _state.value
+        val (product, values) = (if (st.globe) globeShown else shown?.let { it.first to it.second }) ?: return "Nothing is shown yet"
+        val grid = product.grid
+        val (c, r) = core.latLonToGrid(grid, lat, lon)
+        val column = Math.round(c).toInt(); val row = Math.round(r).toInt()
+        if (column !in 0 until grid.columns || row !in 0 until grid.rows) return "${simplemodelview.placeLabel(lat, lon)}   outside the area shown"
+        return readout(core, product, values, emptyList(), column, row, trueFrameWinds = true) +
+            (outlook.readoutAt(lat, lon, st.file?.valid, st.file?.run)?.let { t -> "   \u00B7 $t" } ?: "")
+    }
+
+    /** Puts the crosshair on a saved place (the sector that holds it opens when the current one does not). [follow]: a live fix, which only moves the crosshair. */
+    fun goToPlace(place: simplemodelview.Place, follow: Boolean = false) {
+        val st = _state.value
+        if (st.globe) {
+            update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }
+            requestGlobe(coarse = false)
+            return
+        }
+        fun holds(s: Sector) = place.lon in s.west..s.east && place.lat in s.south..s.north
+        val inSector = holds(st.sector)
+        if (follow && !inSector) return
+        viewModelScope.launch {
+            if (!inSector) {
+                val sector = GFS_SECTORS.firstOrNull { holds(it) } ?: return@launch
+                update { it.copy(sector = sector) }
+                try { showCurrent() } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(busy = false, loadStatus = null, error = e.message) }; return@launch }
+            }
+            val (product, _, v) = shown ?: return@launch
+            val (c, r) = core.latLonToGrid(product.grid, place.lat, place.lon)
+            onTap(((c - v.col0 + 0.5) / v.cols).toFloat(), ((v.row0 + v.rows - r - 0.5) / v.rows).toFloat())
+        }
+    }
+
     // ---- settings ----
     fun setSettings(settings: Settings) {
         prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
@@ -649,7 +693,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun backup() = SettingsTransfer.withPrefs(SettingsBackup(
         wifiOnlyLoop = _state.value.settings.wifiOnlyLoop, dataSaver = _state.value.settings.dataSaver, cacheMegabytes = _state.value.settings.cacheMegabytes,
-        contactEmail = _state.value.settings.contactEmail, favorites = prefs.getStringSet("favorites", emptySet()).orEmpty().sorted(), places = emptyList(),
+        contactEmail = _state.value.settings.contactEmail, favorites = prefs.getStringSet("favorites", emptySet()).orEmpty().sorted(), places = _state.value.places.map { BackupPlace(it.name, it.lat, it.lon) },
         product = prefs.getString("product", null), sector = prefs.getString("sector", null),
     ), prefs)
 
@@ -666,6 +710,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
+        AppContainer.places.replaceAll(b.places.map { simplemodelview.Place(it.name, it.lat, it.lon) })
         val extras = SettingsTransfer.apply(prefs, b)
         update { it.copy(notice = "Settings imported" + (if (extras > 0) " ($extras display and source choices)" else "") + ".") }
         return extras > 0

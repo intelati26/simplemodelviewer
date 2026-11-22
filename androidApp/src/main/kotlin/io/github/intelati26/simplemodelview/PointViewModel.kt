@@ -71,7 +71,7 @@ class PointViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The places may have been changed on another page; the place used last stays picked. */
     fun reloadFromPrefs() {
-        val places = decodePlaces(prefs.getString("places", "").orEmpty())
+        val places = AppContainer.places.places.value
         val remembered = prefs.getString("point_place", null)
         val index = places.indexOfFirst { "${it.lat},${it.lon}" == remembered }.takeIf { it >= 0 } ?: 0
         update { it.copy(places = places, placeIndex = index.coerceIn(0, maxOf(0, places.size - 1))) }

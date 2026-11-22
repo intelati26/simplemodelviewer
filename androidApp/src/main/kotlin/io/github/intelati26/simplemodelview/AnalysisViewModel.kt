@@ -103,6 +103,9 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state: StateFlow<AnalysisState> = _state
 
+    // the saved places are one list for every page: this page's copy follows it
+    init { viewModelScope.launch { AppContainer.places.places.collect { p -> update { it.copy(places = p) } } } }
+
     private inline fun update(f: (AnalysisState) -> AnalysisState) { _state.value = f(_state.value) }
 
     private fun readSettings() = Settings(
@@ -370,19 +373,11 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- places ----
-    fun savePlace(name: String, lat: Double, lon: Double) {
-        val places = (_state.value.places.filter { it.name != name } + Place(name.ifBlank { placeLabel(lat, lon) }, lat, lon))
-        prefs.edit().putString("places", encodePlaces(places)).apply()
-        update { it.copy(places = places) }
-    }
+    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
 
     /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    fun editPlace(old: Place, name: String, lat: Double, lon: Double) {
-        if (!simplemodelview.validLatLon(lat, lon)) return
-        val places = simplemodelview.editPlace(_state.value.places, old, Place(name, lat, lon))
-        prefs.edit().putString("places", encodePlaces(places)).apply()
-        update { it.copy(places = places) }
-    }
+    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
+    fun editPlace(old: Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
 
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
@@ -393,11 +388,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         return if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the area shown" else readout(core, product, values, emptyList(), column, row)
     }
 
-    fun deletePlace(place: Place) {
-        val places = _state.value.places - place
-        prefs.edit().putString("places", encodePlaces(places)).apply()
-        update { it.copy(places = places) }
-    }
+    fun deletePlace(place: Place) = AppContainer.places.delete(place)
 
     fun goToPlace(place: Place, follow: Boolean = false) {
         val st = _state.value

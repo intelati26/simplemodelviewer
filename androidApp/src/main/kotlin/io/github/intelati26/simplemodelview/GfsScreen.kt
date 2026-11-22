@@ -68,6 +68,8 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
     var pickSince by remember { mutableStateOf(false) }
+    var places by remember { mutableStateOf(false) }
+    var savingPlace by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var restartAsk by remember { mutableStateOf(false) }
@@ -128,6 +130,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                                     } catch (e: Exception) { loopProgress = null; vm.reportNotice("Could not make the video: ${e.message}") }
                                 }
                             })
+                            DropdownMenuItem(text = { Text("Places") }, onClick = { more = false; places = true })
                             DropdownMenuItem(text = { Text("Settings") }, onClick = { more = false; settings = true })
                             DropdownMenuItem(text = { Text("About") }, onClick = { more = false; about = true })
                         }
@@ -197,6 +200,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    if (s.tapLatLon != null) TextButton(onClick = { savingPlace = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Save") }
                     TextButton(onClick = vm::clearTap, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Clear") }
                 }
             }
@@ -230,6 +234,19 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
     }
+
+    if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
+        var name by remember { mutableStateOf(simplemodelview.placeLabel(lat, lon)) }
+        AlertDialog(
+            onDismissRequest = { savingPlace = false },
+            title = { Text("Save place") },
+            text = { androidx.compose.material3.OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
+            confirmButton = { TextButton(onClick = { vm.savePlace(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
+        )
+    }
+    val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
 
     if (pickSince) {
         val now = System.currentTimeMillis()
