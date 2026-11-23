@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
@@ -396,13 +397,30 @@ internal fun Legend(style: Style, members: List<String>, withMembers: Boolean = 
             }
             return
         }
-        Row(Modifier.fillMaxWidth()) {
-            for (stop in style.stops) Box(Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or stop.rgb)))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(MapRenderer.label(style.stops.first(), style), style = MaterialTheme.typography.labelSmall)
-            Text(style.units, style = MaterialTheme.typography.labelSmall)
-            Text(MapRenderer.label(style.top?.let { simplemodelview.Stop(it, 0) } ?: style.stops.last(), style), style = MaterialTheme.typography.labelSmall)
+        // the color bar with a number under the start of its colors, as many as fit (the shared picture's legend does the same), and the units over its right end
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val stops = style.stops
+            val labels = stops.map { MapRenderer.label(it, style) }
+            val top = style.top?.let { MapRenderer.label(simplemodelview.Stop(it, 0), style) }
+            val widest = (labels + listOfNotNull(top)).maxOf { it.length }
+            val labelWidth = (widest * 6.6f + 8f).dp                          // a small label: about 6.6 dp a character, and a gap
+            val every = kotlin.math.ceil(stops.size * labelWidth.value / maxWidth.value).toInt().coerceAtLeast(1)
+            val last = (stops.size - 1) / every * every
+            val showTop = top != null && last <= stops.size - 2 * every
+            Column(Modifier.fillMaxWidth()) {
+                if (style.units.isNotEmpty()) Text(style.units, Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelSmall, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                Row(Modifier.fillMaxWidth()) {
+                    for (stop in stops) Box(Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or stop.rgb)))
+                }
+                Box(Modifier.fillMaxWidth().height(16.dp)) {
+                    Row(Modifier.fillMaxWidth()) {
+                        for (i in stops.indices) Box(Modifier.weight(1f)) {
+                            if (i % every == 0) Text(labels[i], Modifier.wrapContentWidth(Alignment.Start, unbounded = true), style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                        }
+                    }
+                    if (showTop) Text(top!!, Modifier.align(Alignment.CenterEnd), style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                }
+            }
         }
     }
 }

@@ -399,7 +399,8 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
 
         fun label(stop: Stop, style: Style): String {
             val v = stop.value
-            return if (v == v.toLong().toDouble()) v.toLong().toString() else fixed(v, if (kotlin.math.abs(v) < 1) 2 else 1)
+            // a whole number as it is; otherwise two places with the trailing zero dropped (1.25 and 1.75 are not 1.3 and 1.8)
+            return if (v == v.toLong().toDouble()) v.toLong().toString() else fixed(v, 2).let { t -> if (t.endsWith("0")) t.dropLast(1) else t }
         }
     }
 }
