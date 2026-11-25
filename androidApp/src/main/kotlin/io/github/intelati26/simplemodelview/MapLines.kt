@@ -87,7 +87,7 @@ class MapLines(context: Context, private val core: Core) {
     /** Draws the lines of [view] on a canvas whose size is view.pixelWidth x view.pixelHeight. */
     /** [countyMode]: 0 counties when zoomed to a sector, 1 always, 2 never. */
     fun draw(canvas: Canvas, view: View, dark: Boolean, countyMode: Int = 0) {
-        val s = view.scale.toFloat()
+        val s = view.scale.toFloat() / view.step      // (a view that draws every n-th cell, the data saver, is n times smaller)
         val widthUnit = if (view.scale > 1) 1.0f else 0.8f
         val window = view.grid.isWindow   // an MRMS window: 1-3 px per cell
         val lineScale = if (view.grid == Grid.REFS) maxOf(1f, s / 2f) else if (window) maxOf(1f, s / 2f) else 1.2f   // (the coarse GREFS grid is drawn at 8-16 px per cell: keep lines thin)

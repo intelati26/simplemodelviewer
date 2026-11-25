@@ -49,7 +49,9 @@ internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 10
 class MapRenderer(private val core: Core, private val lines: MapLines) {
     fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f,
                /** A field under the data (the MRMS temperature): stretched over the whole picture, smoothly, before the data is drawn. */
-               underlay: Overlay? = null, fieldLines: List<FieldLines> = emptyList(), stations: List<StationPlot> = emptyList()): Bitmap {
+               underlay: Overlay? = null, fieldLines: List<FieldLines> = emptyList(), stations: List<StationPlot> = emptyList(),
+               /** The color behind the data (default: the map's own grays); white for a picture that is laid out with others on white. */
+               background: Int? = null): Bitmap {
         val pictureStart = System.nanoTime()
         val w = view.pixelWidth
         val h = view.pixelHeight
@@ -62,7 +64,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val picture = argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
+        canvas.drawColor(background ?: if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
         if (underlay != null) Timings.timed("underlay") { canvas.drawBitmap(underlay.bitmap, null, underlay.dst, Paint().apply { isFilterBitmap = true }) }
         if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)   // the member cells go over the contours
         canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, if (paintLines) Paint().apply { alpha = 0x90 } else null)
