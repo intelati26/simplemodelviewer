@@ -59,7 +59,11 @@ data class ThunderData(
     val nextHour: Chance,
     val next4: Chance,
     val rest: Chance,
+    val severe: List<SevereChance> = emptyList(), val severeRun: String? = null,   // the next 4 hours by type (GREFS)
 )
+
+/** One severe type's chance at the place for the 4-hour period, and what the previous run said. */
+data class SevereChance(val name: String, val percent: Double, val earlier: Double?)
 
 /**
  * Reads SPC's REFSCT thunder probability (percent, on a 40.6 km grid) at a place from the newest run that has its first hour, and the same hours from the run before it, so the card can say
@@ -70,14 +74,15 @@ class ThunderReader(private val core: Core, private val repo: RefsRepository) {
     private val four = "refsct-4hr/thunder_prob"
     private val full = "refsct-full/thunder_prob"
 
-    private class Open(val store: CycleStore, val p1: Product, val p4: Product, val pf: Product, val t1: List<Long>, val t4: List<Long>, val tf: List<Long>)
+    private class Open(val store: CycleStore, val p1: Product, val p4: Product, val pf: Product, val t1: List<Long>, val t4: List<Long>, val tf: List<Long>, val sev: List<Pair<String, Product>>, val ts: List<Long>)
 
     private suspend fun open(cycle: Cycle): Open? {
         val store = try { repo.open(cycle) } catch (e: CancellationException) { throw e } catch (_: Exception) { return null }
         val p1 = store.products.firstOrNull { it.id == one } ?: return null
         val p4 = store.products.firstOrNull { it.id == four } ?: return null
         val pf = store.products.firstOrNull { it.id == full } ?: return null
-        return try { Open(store, p1, p4, pf, repo.validTimes(store, p1), repo.validTimes(store, p4), repo.validTimes(store, pf)) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        val sev = listOf("Tornado" to "grefs-4hr/tor_prob", "Damaging wind" to "grefs-4hr/wind_prob", "Large hail" to "grefs-4hr/hail_prob").mapNotNull { (n, id) -> store.products.firstOrNull { it.id == id }?.let { n to it } }
+        return try { Open(store, p1, p4, pf, repo.validTimes(store, p1), repo.validTimes(store, p4), repo.validTimes(store, pf), sev, sev.firstOrNull()?.let { repo.validTimes(store, it.second) } ?: emptyList()) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
     }
 
     private suspend fun valueAt(o: Open, p: Product, step: Int, place: Place): Double? {
@@ -116,7 +121,19 @@ class ThunderReader(private val core: Core, private val repo: RefsRepository) {
             val vr = atRest.takeIf { it >= 0 }?.let { async { valueAt(cur, cur.pf, it, place) } }
             val e4 = if (previous != null && at4 != null) previous.t4.indexOf(cur.t4[at4]).takeIf { it >= 0 }?.let { async { valueAt(previous, previous.p4, it, place) } } else null
             val er = if (previous != null && atRest >= 0) previous.tf.indexOf(cur.tf[atRest]).takeIf { it >= 0 }?.let { async { valueAt(previous, previous.pf, it, place) } } else null
+            // GREFS is written later than REFSCT: when this run has none yet, the newest run that has it is used (and named on the card)
+            val sevAt = (currentAt until opened.size).firstOrNull { opened[it]?.sev?.isNotEmpty() == true && opened[it]!!.ts.isNotEmpty() }
+            val sc = sevAt?.let { opened[it] }
+            val sp = sevAt?.let { opened.getOrNull(it + 1) }
+            val sNow = sc?.ts?.indices?.minByOrNull { Math.abs(sc.ts[it] - (now + 4 * 3600L)) }
+            val sevJobs = if (sc == null || sNow == null) emptyList() else sc.sev.map { (n, pr) ->
+                val ePrev = sp?.sev?.firstOrNull { it.first == n }?.second
+                val eIdx = sp?.ts?.indexOf(sc.ts[sNow])?.takeIf { it >= 0 }
+                Triple(n, async { valueAt(sc, pr, sNow, place) }, if (sp != null && ePrev != null && eIdx != null) async { valueAt(sp, ePrev, eIdx, place) } else null)
+            }
+            val severe = sevJobs.mapNotNull { (n, v, e) -> v.await()?.let { SevereChance(n, it, e?.await()) } }
             ThunderData(
+                severe = severe, severeRun = sc?.store?.cycle?.label,
                 run = cur.store.cycle.label, hours = hours, earlierHours = earlier,
                 nextHour = Chance(hours.first().percent, earlier[hours.first().valid]),
                 next4 = Chance(v4?.await(), e4?.await()),
@@ -188,6 +205,23 @@ internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, place
                 Text("${Math.round(p)}%", fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(36.dp))
             }
             ThunderTiming.rise(p, c.earlier)?.let { Text("$it on the last run", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 104.dp)) }
+        }
+        if (data.severe.isNotEmpty()) {
+            val top = data.severe.maxByOrNull { it.percent }
+            Text("Severe, 4 hours (by type)" + (data.severeRun?.takeIf { it != data.run }?.let { " · $it run" } ?: ""), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            for (c in data.severe) {
+                val isTop = c === top && c.percent >= 1.0
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(c.name, fontSize = 12.sp, fontWeight = if (isTop) FontWeight.Medium else FontWeight.Normal, modifier = Modifier.width(96.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(Modifier.weight(1f).height(14.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        // the bar is scaled to 30% so small chances are visible; the mark is your line when it is on that scale
+                        Box(Modifier.fillMaxWidth(fraction = (c.percent / 30.0).coerceIn(0.0, 1.0).toFloat()).fillMaxHeight().background(if (c.percent >= line) Color(0xFFE24B4A) else Color(0xFFEF9F27)))
+                    }
+                    Text(if (c.percent < 1.0) "<1%" else "${Math.round(c.percent)}%", fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(36.dp))
+                }
+                ThunderTiming.rise(c.percent, c.earlier)?.let { Text("$it on the last run", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 104.dp)) }
+            }
+            if (top != null && top.percent >= 1.0) Text("Highest at your place: ${top.name.lowercase()}", fontSize = 12.sp)
         }
         Text("Model guidance (SPC REFS thunder probability, ${data.run} run), not a forecast.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
