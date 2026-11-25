@@ -42,3 +42,15 @@ Built: reflectivity, side by side / overlay / difference, members ranked by neig
 - Sync the wX fork with the REFS / MRMS port (branch `refs-mrms`).
 - NOMADS `spc_post` feeds (GRIB2 / JPEG2000 SPC products): the owner is revisiting this in about two weeks; do not build yet (`docs/nomads-spc-post.md`).
 - Step arrows on the MRMS, NBM and GFS pages were only compiled, never run.
+
+## Simple mode, the outlook browser and the discussion (2026-11-25)
+
+Direction: a normal person one step from The Weather Channel, who sees an SPC outlook on TV and wants to look at SPC themselves.
+
+- **Simple home ("Today"):** the SPC outlook for your place in words (Slight and above is the default severe trigger, with the location's top hazard type named), thunder probability against a personal line
+  (about 25%, rising compared with the previous run) from REFSCT in 1 h, 4 h and rest-of-day periods, the severe model probabilities by type (GREFS), radar with watches and warnings, a
+  "Share a heads-up with family" button. Advanced mode keeps everything else. No background alerts.
+- **National outlook browser (built first):** the outlook as the map, Day 1 to 8, kinds by day, tap for the risk there, the issue and valid times, and the SPC discussion text under the map.
+- **Discussion linked to the models (idea from the owner):** the discussion names model guidance ("12Z REFS guidance indicates a relatively narrow corridor of weak surface-based
+  instability, SBCAPE of 250-500 J/kg"). Find those phrases (a time like 12Z, a model name, a parameter such as SBCAPE, MUCAPE, SRH, STP) and offer a chip that opens the REFS page on that
+  product at that valid time, zoomed to the area the sentence is about. The catalog already has sbcape, mucape, sbcinh, srh, shrmag and stp. Naming the area is the hard part.
