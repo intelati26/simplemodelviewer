@@ -83,6 +83,10 @@ data class TodayState(
     val covering: List<MesoscaleDiscussion> = emptyList(),
     val nearby: List<MesoscaleDiscussion> = emptyList(),
     val mesoNote: String? = null,
+    val thunder: ThunderData? = null,
+    val thunderNote: String? = null,
+    val thunderBusy: Boolean = false,
+    val line: Int = 25,
     val updated: Long? = null,
 )
 
@@ -93,10 +97,12 @@ data class TodayState(
 class TodayViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = AppContainer.prefs
     private val repo = OutlookRepository(AppContainer.http)
-    private val _state = MutableStateFlow(TodayState())
+    private val _state = MutableStateFlow(TodayState(line = AppContainer.prefs.getInt("today_thunder_line", simplemodelview.ThunderTiming.DEFAULT_LINE)))
     val state: StateFlow<TodayState> = _state
     private inline fun update(f: (TodayState) -> TodayState) { _state.value = f(_state.value) }
     private var job: Job? = null
+    private var thunderJob: Job? = null
+    private val thunderReader = ThunderReader(AppContainer.core, AppContainer.repo)
 
     init {
         viewModelScope.launch { AppContainer.places.places.collect { list -> update { s -> s.copy(places = list, place = pick(list, s.place?.name ?: prefs.getString("today_place", null))) }; load() } }
@@ -106,10 +112,26 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
 
     fun pickPlace(place: Place) { prefs.edit().putString("today_place", place.name).apply(); update { it.copy(place = place) }; load() }
     fun pickDay(day: Int) { update { it.copy(day = day) }; load() }
+    fun setLine(line: Int) { prefs.edit().putInt("today_thunder_line", line).apply(); update { it.copy(line = line) } }
     fun refresh() = load()
+
+    private fun loadThunder(place: Place?) {
+        thunderJob?.cancel()
+        if (place == null) { update { it.copy(thunder = null, thunderNote = null, thunderBusy = false) }; return }
+        thunderJob = viewModelScope.launch {
+            update { it.copy(thunderBusy = true, thunderNote = null) }
+            try {
+                val data = thunderReader.read(place, System.currentTimeMillis() / 1000)
+                update { it.copy(thunder = data, thunderNote = if (data == null) "The model's thunder chance is not available yet." else null, thunderBusy = false) }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                update { it.copy(thunder = null, thunderNote = e.message ?: "The thunder chance could not be read.", thunderBusy = false) }
+            }
+        }
+    }
 
     private fun load() {
         job?.cancel()
+        loadThunder(_state.value.place)
         val st = _state.value
         val place = st.place
         job = viewModelScope.launch {
@@ -218,6 +240,9 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                     }
                     TextButton(onClick = { onOpen("outlook") }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("See the national outlook") }
                 }
+
+                // ---- thunder chance and timing
+                ThunderCard(s.thunder, s.thunderNote, s.thunderBusy, s.place?.name, s.line, vm::setLine)
 
                 // ---- mesoscale discussions
                 if (s.covering.isNotEmpty() || s.nearby.isNotEmpty() || s.mesoNote != null) Card {

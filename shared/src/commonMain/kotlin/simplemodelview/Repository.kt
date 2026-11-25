@@ -145,7 +145,7 @@ class RefsRepository(private val http: Http, private val core: Core) {
         val chunk = maxOf(1, array.chunks.firstOrNull() ?: 1)
         val count = array.shape.firstOrNull() ?: 0
         // every time value is its own tiny file: fetch them a few at a time instead of one after another
-        val gate = Semaphore(6)
+        val gate = Semaphore(16)
         val chunks = (0 until (count + chunk - 1) / chunk)
         val values = coroutineScope {
             chunks.map { i ->
