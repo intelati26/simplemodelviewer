@@ -423,11 +423,20 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         // the notes go under the table in small print
         val noteSize = textSize * 0.62f
         val note = Paint().apply { isAntiAlias = true; color = 0xFF555555.toInt(); this.textSize = noteSize }
-        val noteLines = listOf(
-            "Neighborhood score (fractions skill score): the share of 35 dBZ echo agreeing with the radar within 30 km, 1 is a perfect match.",
-            "Columns: $hoursText, then the mean, which sets the order. Scored over ${if (st.inView) "the area on screen" else "the whole map"}.",
-        )
-        val footer = if (scored.isEmpty()) 0 else (textSize * (scored.size + 2.4f) + noteSize * (noteLines.size + 1.2f)).toInt()
+        val tableWidth = nameWidth + st.scoredHours.size * cell + textSize * 0.4f + bold.measureText("mean")
+        // the notes are broken to the table's width, not run on past it
+        fun wrap(text: String): List<String> {
+            val lines = ArrayList<String>(); var line = ""
+            for (word in text.split(' ')) {
+                val tryLine = if (line.isEmpty()) word else "$line $word"
+                if (line.isNotEmpty() && note.measureText(tryLine) > tableWidth) { lines += line; line = word } else line = tryLine
+            }
+            if (line.isNotEmpty()) lines += line
+            return lines
+        }
+        val noteLines = wrap("Neighborhood score (fractions skill score): the share of 35 dBZ echo agreeing with the radar within 30 km, 1 is a perfect match. " +
+            "Columns: $hoursText, then the mean, which sets the order. Scored over ${if (st.inView) "the area on screen" else "the whole map"}.")
+        val footer = if (scored.isEmpty()) 0 else (textSize * (scored.size + 2.4f) + noteSize * (noteLines.size * 1.25f + 0.6f)).toInt()
         val out = Bitmap.createBitmap(framed.width, framed.height + footer, Bitmap.Config.ARGB_8888)
         val oc = Canvas(out)
         oc.drawColor(Color.WHITE)
