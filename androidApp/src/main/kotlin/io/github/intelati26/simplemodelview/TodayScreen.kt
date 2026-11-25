@@ -87,6 +87,10 @@ data class TodayState(
     val thunderNote: String? = null,
     val thunderBusy: Boolean = false,
     val line: Int = 25,
+    val wind: WindData? = null,
+    val windNote: String? = null,
+    val windBusy: Boolean = false,
+    val gustLine: Int = 40,
     val updated: Long? = null,
 )
 
@@ -97,12 +101,14 @@ data class TodayState(
 class TodayViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = AppContainer.prefs
     private val repo = OutlookRepository(AppContainer.http)
-    private val _state = MutableStateFlow(TodayState(line = AppContainer.prefs.getInt("today_thunder_line", simplemodelview.ThunderTiming.DEFAULT_LINE)))
+    private val _state = MutableStateFlow(TodayState(line = AppContainer.prefs.getInt("today_thunder_line", simplemodelview.ThunderTiming.DEFAULT_LINE), gustLine = AppContainer.prefs.getInt("today_gust_line", simplemodelview.WindTiming.DEFAULT_LINE)))
     val state: StateFlow<TodayState> = _state
     private inline fun update(f: (TodayState) -> TodayState) { _state.value = f(_state.value) }
     private var job: Job? = null
     private var thunderJob: Job? = null
     private val thunderReader = ThunderReader(AppContainer.core, AppContainer.repo)
+    private var windJob: Job? = null
+    private val windReader = WindReader(AppContainer.core, AppContainer.repo)
 
     init {
         viewModelScope.launch { AppContainer.places.places.collect { list -> update { s -> s.copy(places = list, place = pick(list, s.place?.name ?: prefs.getString("today_place", null))) }; load() } }
@@ -113,7 +119,22 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
     fun pickPlace(place: Place) { prefs.edit().putString("today_place", place.name).apply(); update { it.copy(place = place) }; load() }
     fun pickDay(day: Int) { update { it.copy(day = day) }; load() }
     fun setLine(line: Int) { prefs.edit().putInt("today_thunder_line", line).apply(); update { it.copy(line = line) } }
+    fun setGustLine(line: Int) { prefs.edit().putInt("today_gust_line", line).apply(); update { it.copy(gustLine = line) } }
     fun refresh() = load()
+
+    private fun loadWind(place: Place?) {
+        windJob?.cancel()
+        if (place == null) { update { it.copy(wind = null, windNote = null, windBusy = false) }; return }
+        windJob = viewModelScope.launch {
+            update { it.copy(windBusy = true, windNote = null) }
+            try {
+                val data = windReader.read(place, System.currentTimeMillis() / 1000)
+                update { it.copy(wind = data, windNote = if (data == null) "The model's gust forecast is not available yet." else null, windBusy = false) }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                update { it.copy(wind = null, windNote = e.message ?: "The gust forecast could not be read.", windBusy = false) }
+            }
+        }
+    }
 
     private fun loadThunder(place: Place?) {
         thunderJob?.cancel()
@@ -132,6 +153,7 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
     private fun load() {
         job?.cancel()
         loadThunder(_state.value.place)
+        loadWind(_state.value.place)
         val st = _state.value
         val place = st.place
         job = viewModelScope.launch {
@@ -243,6 +265,9 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
 
                 // ---- thunder chance and timing
                 ThunderCard(s.thunder, s.thunderNote, s.thunderBusy, s.place?.name, s.line, vm::setLine)
+
+                // ---- wind
+                WindCard(s.wind, s.windNote, s.windBusy, s.place?.name, s.gustLine, vm::setGustLine, s.outlook, s.day, s.thunder)
 
                 // ---- mesoscale discussions
                 if (s.covering.isNotEmpty() || s.nearby.isNotEmpty() || s.mesoNote != null) Card {

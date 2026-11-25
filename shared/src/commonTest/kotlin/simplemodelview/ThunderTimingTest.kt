@@ -32,3 +32,18 @@ class ThunderTimingTest {
         assertNull(ThunderTiming.rise(32.0, 30.0)); assertNull(ThunderTiming.rise(null, 30.0)); assertNull(ThunderTiming.rise(30.0, Double.NaN))
     }
 }
+
+class WindTimingTest {
+    private val t0 = 1_000_000L
+    private fun hours(vararg p: Double) = p.mapIndexed { i, v -> HourChance(t0 + (i + 1) * 3600L, v) }
+
+    @Test fun reachesTheLine() {
+        val s = WindTiming.summarize(hours(12.0, 25.0, 41.0, 35.0), 40)
+        assertEquals("Gusts reach your 40 mph line from about H3", WindTiming.headline(s) { "H${(it - t0) / 3600}" })
+    }
+
+    @Test fun staysUnderTheLine() {
+        val s = WindTiming.summarize(hours(12.0, 28.0, 20.0), 40)
+        assertEquals("Gusts stay under your 40 mph line through H3 (highest 28 mph around H2)", WindTiming.headline(s) { "H${(it - t0) / 3600}" })
+    }
+}
