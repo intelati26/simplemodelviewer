@@ -412,23 +412,28 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         val framed = renderer.shareImage(sheet, p.copy(title = "Radar vs REFS reflectivity, $mode", style = legendStyle), legendStyle, header, emptyList())
         // the scores of the members shown (the best six when one is)
         val scored = if (!withScores) emptyList() else if (grid) gm.mapNotNull { m -> st.ranks.firstOrNull { it.index == m } } else st.ranks.take(6)
-        val textSize = maxOf(18f, framed.width / 60f)
+        // the table is the same size whatever the layout (a picture of three columns is wide, the table need not be): a fixed text size, the names in a column as wide as the longest, then a fixed width for each score
+        val textSize = 30f
+        val x = maxOf(12f, framed.width / 90f)
+        val bold = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize; isFakeBoldText = true }
+        val plain = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize }
+        val heading = "Initial-condition match ${if (st.inView) "(area on screen)" else "(whole map)"}: neighborhood score at 35 dBZ, 45 km, f${st.scoredHours.joinToString("/") { "%02d".format(it) }}, mean"
+        val nameWidth = (scored.map { r -> plain.measureText("${st.ranks.indexOf(r) + 1}. ${r.name}") }.maxOrNull() ?: 0f) + textSize * 1.5f
+        val cell = textSize * 2.6f
         val footer = if (scored.isEmpty()) 0 else (textSize * (scored.size + 3.2f)).toInt()
         val out = Bitmap.createBitmap(framed.width, framed.height + footer, Bitmap.Config.ARGB_8888)
         val oc = Canvas(out)
         oc.drawColor(Color.WHITE)
         oc.drawBitmap(framed, 0f, 0f, null)
         if (scored.isNotEmpty()) {
-            val bold = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize; isFakeBoldText = true }
-            val plain = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize }
-            val x = maxOf(12f, framed.width / 90f)
             var y = framed.height + textSize * 1.4f
-            oc.drawText("Initial-condition match ${if (st.inView) "(area on screen)" else "(whole map)"}: neighborhood score at 35 dBZ, 45 km, f${st.scoredHours.joinToString("/") { "%02d".format(it) }}, mean", x, y, bold)
+            oc.drawText(heading, x, y, bold)
             for (r in scored) {
-                y += textSize * 1.1f
+                y += textSize * 1.15f
                 fun f(d: Double?) = if (d == null || d.isNaN()) "-" else "%.2f".format(d)
                 oc.drawText("${st.ranks.indexOf(r) + 1}. ${r.name}", x, y, plain)
-                oc.drawText(r.scores.joinToString("   ") { f(it?.fss) } + "     " + f(r.headline), framed.width * 0.62f, y, plain)
+                for ((i, sc) in r.scores.withIndex()) oc.drawText(f(sc?.fss), x + nameWidth + i * cell, y, plain)
+                oc.drawText(f(r.headline), x + nameWidth + r.scores.size * cell + textSize * 0.4f, y, bold)
             }
         }
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
