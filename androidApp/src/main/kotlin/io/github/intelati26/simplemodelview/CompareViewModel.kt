@@ -338,7 +338,7 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
      * The comparison as one picture on white: every pane drawn for the same area (the part of the map on screen, or all of it), the run, member and times, one color
      * key and the scores of the members shown. The panes are drawn again at a size that suits the area, not copied from the screen.
      */
-    suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
+    suspend fun buildShareFile(wholeMap: Boolean = false, withScores: Boolean = true): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val p = product ?: return@withContext null
         val step = timeSteps.getOrNull(st.timeIndex) ?: return@withContext null
@@ -349,7 +349,7 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         val n = when (st.mode) { CompareMode.Side -> 2; CompareMode.Overlay, CompareMode.Difference -> 1; CompareMode.Grid -> gm.size + (if (st.gridDiff) 0 else 1) }
         // the area: what is on screen (a zoomed-in part), else the whole map
         val vp = viewportF
-        val whole = (vp[2] - vp[0]) * (vp[3] - vp[1]) > 0.97f
+        val whole = wholeMap || (vp[2] - vp[0]) * (vp[3] - vp[1]) > 0.97f
         val areaAspect = if (whole) columns.toFloat() / rows else (vp[2] - vp[0]) * columns / ((vp[3] - vp[1]) * rows)
         val ncols = when { n <= 1 -> 1; n == 2 -> if (areaAspect >= 1.25f) 1 else 2; n <= 4 -> 2; n <= 9 -> 3; else -> 4 }
         val tileW = 3600 / ncols
@@ -411,7 +411,7 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         }
         val framed = renderer.shareImage(sheet, p.copy(title = "Radar vs REFS reflectivity, $mode", style = legendStyle), legendStyle, header, emptyList())
         // the scores of the members shown (the best six when one is)
-        val scored = if (grid) gm.mapNotNull { m -> st.ranks.firstOrNull { it.index == m } } else st.ranks.take(6)
+        val scored = if (!withScores) emptyList() else if (grid) gm.mapNotNull { m -> st.ranks.firstOrNull { it.index == m } } else st.ranks.take(6)
         val textSize = maxOf(18f, framed.width / 60f)
         val footer = if (scored.isEmpty()) 0 else (textSize * (scored.size + 3.2f)).toInt()
         val out = Bitmap.createBitmap(framed.width, framed.height + footer, Bitmap.Config.ARGB_8888)

@@ -74,8 +74,43 @@ internal fun CompareScreen(vm: CompareViewModel, onOpen: (String) -> Unit) {
                 if (s.busy) BusySpinner(Modifier.padding(end = 2.dp))
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val scope = androidx.compose.runtime.rememberCoroutineScope()
-                TextButton(onClick = { scope.launch { try { vm.buildShareFile()?.let { shareFile(context, it, "image/png", "Share comparison") } } catch (e: Exception) { android.widget.Toast.makeText(context, "Could not make the picture: ${e.message}", android.widget.Toast.LENGTH_LONG).show() } } },
-                    enabled = s.model != null || s.tiles.any { it.bitmap != null }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
+                var sharing by remember { mutableStateOf(false) }
+                var wholeMap by remember { mutableStateOf(false) }
+                var withScores by remember { mutableStateOf(true) }
+                var making by remember { mutableStateOf(false) }
+                TextButton(onClick = { sharing = true }, enabled = !making && (s.model != null || s.tiles.any { it.bitmap != null }), modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(if (making) "Making…" else "Share") }
+                if (sharing) androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { sharing = false },
+                    title = { Text("Share the comparison") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Area", style = MaterialTheme.typography.labelLarge)
+                            for ((whole, name) in listOf(false to "This screen area (every pane the same)", true to "Whole map")) Row(Modifier.fillMaxWidth().clickable { wholeMap = whole }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (wholeMap == whole) "●" else "○", Modifier.padding(end = 12.dp), fontSize = 18.sp)
+                                Text(name, fontWeight = if (wholeMap == whole) FontWeight.Bold else FontWeight.Normal)
+                            }
+                            Row(Modifier.fillMaxWidth().clickable { withScores = !withScores }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Scores under the picture", fontWeight = FontWeight.Bold)
+                                    Text("The members shown with their neighborhood scores.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                androidx.compose.material3.Switch(withScores, { withScores = it })
+                            }
+                            Text("A picture on white: the layout as shown (${when (s.mode) { CompareMode.Side -> "side by side"; CompareMode.Overlay -> "overlay"; CompareMode.Difference -> "difference"; CompareMode.Grid -> "the radar and the best members" }}), at the time shown, with one color key.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            sharing = false; making = true
+                            scope.launch {
+                                try { vm.buildShareFile(wholeMap, withScores)?.let { shareFile(context, it, "image/png", "Share comparison") } }
+                                catch (e: Exception) { android.widget.Toast.makeText(context, "Could not make the picture: ${e.message}", android.widget.Toast.LENGTH_LONG).show() }
+                                making = false
+                            }
+                        }) { Text("Picture") }
+                    },
+                    dismissButton = { TextButton(onClick = { sharing = false }) { Text("Cancel") } },
+                )
                 TextButton(onClick = vm::load, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Reload") }
                 PageMenu("compare", onOpen)
             }
