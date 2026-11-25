@@ -115,15 +115,16 @@ class MainActivity : ComponentActivity() {
     private val analysisViewModel: AnalysisViewModel by viewModels()
     private val compareViewModel: CompareViewModel by viewModels()
     private val outlookViewModel: OutlookBrowserViewModel by viewModels()
+    private val todayViewModel: TodayViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // which page opens: an intent extra (`--es page mrms`, used by the emulator scripts), else the one used last
-        val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
+        // which page opens: an intent extra (`--es page mrms`, used by the emulator scripts), else Today
+        val start = intent?.getStringExtra("page") ?: "today"
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point", "analysis", "compare", "outlook").firstOrNull { it == start } ?: "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("today", "spc", "mrms", "nbm", "gfs", "point", "analysis", "compare", "outlook").firstOrNull { it == start } ?: "today") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -137,7 +138,8 @@ class MainActivity : ComponentActivity() {
                     val toSynoptic: (Long, Cycle?) -> Unit = { valid, run ->
                         if (run != null) { viewModel.showValid(valid, run); go("spc") } else { gfsViewModel.showValid(valid); go("gfs") }
                     }
-                    if (page == "point") PointScreen(pointViewModel, go, toSynoptic)
+                    if (page == "today") TodayScreen(todayViewModel, go)
+                    else if (page == "point") PointScreen(pointViewModel, go, toSynoptic)
                     else if (page == "gfs") GfsScreen(gfsViewModel, go)
                     else if (page == "analysis") AnalysisScreen(analysisViewModel, go)
                     else if (page == "compare") CompareScreen(compareViewModel, go)
