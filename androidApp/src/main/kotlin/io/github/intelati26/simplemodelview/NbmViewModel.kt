@@ -76,6 +76,7 @@ data class NbmState(
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
     val loopSpanHours: Int = 0,                       // how much of the run Play and a loop video cover, from its start; 0 = all
+    val loopTimes: Pair<Long, Long>? = null,     // the loop as a range of valid times chosen on the time bar (overrides the length / span below)
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
     val focus: simplemodelview.MapFocus? = null,      // the part of the next map picture to zoom to (set on leaving the globe), cleared once applied
@@ -578,9 +579,22 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("nbm_loop_hours", hours).apply()
         val wasPlaying = _state.value.playing
         if (wasPlaying) stopPlaying()
-        update { it.copy(loopSpanHours = hours) }
+        update { it.copy(loopSpanHours = hours, loopTimes = null) }
         if (wasPlaying) startPlaying()
     }
+
+    /** The loop as a range of valid times chosen on the time bar (null: the page's usual loop). It follows the times, so a new scan or run does not shift it. */
+    fun setLoopTimes(range: Pair<Long, Long>?) {
+        val wasPlaying = _state.value.playing
+        if (wasPlaying) stopPlaying()
+        update { it.copy(loopTimes = range) }
+        if (wasPlaying) startPlaying()
+    }
+
+    /** The frames Play and a loop video cover: the range chosen on the time bar, else the span from the start (or from the frame shown). */
+    fun loopWindowFor(st: NbmState): IntRange =
+        st.loopTimes?.let { (a, b) -> simplemodelview.loopIndices(st.frames.map { it.valid }, a, b) }
+            ?: nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
 
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
@@ -600,7 +614,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
             val frames = st.frames
-            val window = nbmLoopWindow(frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+            val window = loopWindowFor(st)
             outlook.wantAllAs(window.map { frames[it].valid to frames[it].run })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(frames.size)
@@ -729,7 +743,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** Renders the frames of the loop into an MP4 and returns it. Each frame is held for the forecast hours it stands for. [onProgress] gets (done, total). */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val st = _state.value
-        val window = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+        val window = loopWindowFor(st)
         val n = window.count()
         if (n < 2) return@withContext null
         val out = File(sharedDir(), fileName(st.product, st.frames[window.first], "mp4"))
@@ -757,7 +771,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
         val grid = shown?.first?.grid ?: return 0.0
         val st = _state.value
-        val frames = nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0).count()
+        val frames = loopWindowFor(st).count()
         if (area == ShareArea.Globe) { val w = GLOBE_LOOP_SIDE; return VideoSize.estimateMegabytes(size, w, w + w / 6, frames) }
         val box = areaView(area, grid)
         return VideoSize.estimateMegabytes(size, box.pixelWidth, box.pixelHeight + box.pixelWidth / 6, frames)   // + header and legend

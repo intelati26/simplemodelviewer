@@ -107,6 +107,7 @@ data class UiState(
     val contactPrompt: Boolean = false,          // the "please enter your email" dialog is showing
     val notice: String? = null,                  // a short message over a working map (the error field replaces the map)
     val loopLength: Int = 0,                     // how many frames Play and a loop video cover (the first N); 0 = all
+    val loopTimes: Pair<Long, Long>? = null,     // the loop as a range of valid times chosen on the time bar (overrides the length / span below)
     val windLevel: Int = 500,                    // the Heights & Winds product: the level (mb) and the key of what is in color under it
     val windColor: String = "speed",
 ) {
@@ -663,7 +664,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val v = resolveView(area)
         val pictureW = if (area == ShareArea.Globe && globeW > 0) GLOBE_LOOP_SIDE else v.pixelWidth
         val pictureH = if (area == ShareArea.Globe && globeW > 0) GLOBE_LOOP_SIDE else v.pixelHeight
-        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindowAnchored(_state.value.times.size, _state.value.loopLength, _state.value.timeIndex, AppContainer.loopFromShown.value).count())   // + header and legend
+        return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindowFor(_state.value).count())   // + header and legend
     }
 
     var videoSize: VideoSize
@@ -681,9 +682,22 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("loop_frames", frames).apply()
         val wasPlaying = _state.value.playing
         if (wasPlaying) stopPlaying()
-        update { it.copy(loopLength = frames) }
+        update { it.copy(loopLength = frames, loopTimes = null) }
         if (wasPlaying) startPlaying()
     }
+
+    /** The loop as a range of valid times chosen on the time bar (null: the page's usual loop). It follows the times, so a new scan or run does not shift it. */
+    fun setLoopTimes(range: Pair<Long, Long>?) {
+        val wasPlaying = _state.value.playing
+        if (wasPlaying) stopPlaying()
+        update { it.copy(loopTimes = range) }
+        if (wasPlaying) startPlaying()
+    }
+
+    /** The frames Play and a loop video cover: the range chosen on the time bar, else the first N (or from the one shown). */
+    fun loopWindowFor(st: UiState): IntRange =
+        st.loopTimes?.let { (a, b) -> simplemodelview.loopIndices(st.times, a, b) }
+            ?: loopWindowAnchored(st.times.size, st.loopLength, st.timeIndex, AppContainer.loopFromShown.value)
 
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
@@ -704,7 +718,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
-            val window = loopWindowAnchored(st.times.size, st.loopLength, st.timeIndex, AppContainer.loopFromShown.value)
+            val window = loopWindowFor(st)
             outlook.wantAll(window.map { st.times[it] })      // the outlook of every day the loop reaches, ready when the loop gets there
             val count = window.count()
             val ready = BooleanArray(st.times.size)
@@ -814,7 +828,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return@withContext null
         val cycle = st.cycle ?: return@withContext null
-        val window = loopWindowAnchored(st.times.size, st.loopLength, st.timeIndex, AppContainer.loopFromShown.value)
+        val window = loopWindowFor(st)
         val n = window.count()
         if (n < 2) return@withContext null
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }

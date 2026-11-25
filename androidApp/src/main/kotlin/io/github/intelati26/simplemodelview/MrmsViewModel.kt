@@ -108,6 +108,7 @@ data class MrmsState(
     val units: Units = Units(),
     val live: Boolean = false,                   // the page is on screen and checks for newer scans by itself
     val loopLength: Int = 0,                     // how many of the newest scans Play and a loop video cover; 0 = all
+    val loopTimes: Pair<Long, Long>? = null,     // the loop as a range of valid times chosen on the time bar (overrides the length / span below)
     val rotationChoice: String = OverlayPresets.DEFAULT_ROTATION,   // the product of the Rotation switch
     val hailChoice: String = OverlayPresets.DEFAULT_HAIL,   // the product of the Hail switch
     val overlays: List<OverlayLayer> = emptyList(),   // other products drawn over the first, in order (the last on top)
@@ -1384,9 +1385,22 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("mrms_loop_frames", frames).apply()
         val wasPlaying = _state.value.playing
         if (wasPlaying) stopPlaying()
-        update { it.copy(loopLength = frames) }
+        update { it.copy(loopLength = frames, loopTimes = null) }
         if (wasPlaying) startPlaying()
     }
+
+    /** The loop as a range of valid times chosen on the time bar (null: the page's usual loop). It follows the times, so a new scan or run does not shift it. */
+    fun setLoopTimes(range: Pair<Long, Long>?) {
+        val wasPlaying = _state.value.playing
+        if (wasPlaying) stopPlaying()
+        update { it.copy(loopTimes = range) }
+        if (wasPlaying) startPlaying()
+    }
+
+    /** The scans Play and a loop video cover: the range chosen on the time bar, else the newest N (or from the one shown). */
+    fun loopWindowFor(st: MrmsState): IntRange =
+        st.loopTimes?.let { (a, b) -> simplemodelview.loopIndices(st.files.map { it.validTime }, a, b) }
+            ?: (if (AppContainer.loopFromShown.value) loopWindowFromShown(st.files.size, st.loopLength, st.index) else loopWindowEndingAt(st.files.size, st.loopLength, st.index))
 
     fun togglePlay() { if (_state.value.playing) stopPlaying() else startPlaying() }
 
@@ -1405,7 +1419,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
-            val window = (if (AppContainer.loopFromShown.value) loopWindowFromShown(st.files.size, st.loopLength, st.index) else loopWindowEndingAt(st.files.size, st.loopLength, st.index))
+            val window = loopWindowFor(st)
             val count = window.count()
             val ready = BooleanArray(st.files.size)
             var finished = false
@@ -1591,7 +1605,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** Renders every file of the loop into an MP4 and returns it. [onProgress] gets (done, total). Files come from the HTTP cache once played. */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
         val st = _state.value
-        val window = (if (AppContainer.loopFromShown.value) loopWindowFromShown(st.files.size, st.loopLength, st.index) else loopWindowEndingAt(st.files.size, st.loopLength, st.index))
+        val window = loopWindowFor(st)
         val n = window.count()
         if (n < 2) return@withContext null
         val dir = sharedDir()
@@ -1627,6 +1641,6 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 g.columns * s to g.rows * s
             }
         }
-        return VideoSize.estimateMegabytes(size, w, h + w / 6, (if (AppContainer.loopFromShown.value) loopWindowFromShown(_state.value.files.size, _state.value.loopLength, _state.value.index) else loopWindowEndingAt(_state.value.files.size, _state.value.loopLength, _state.value.index)).count())   // + header and legend
+        return VideoSize.estimateMegabytes(size, w, h + w / 6, loopWindowFor(_state.value).count())   // + header and legend
     }
 }

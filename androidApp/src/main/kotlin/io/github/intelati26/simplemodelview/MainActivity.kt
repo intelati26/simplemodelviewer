@@ -262,6 +262,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
+                LoopRangeBar(s.times, { vm.loopWindowFor(s) }, s.timeIndex, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopLength(0) }
                 TimeStepRow(s.timeIndex, s.times.size, s.playing, vm::togglePlay, vm::pickTime)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }

@@ -75,6 +75,7 @@ data class GfsState(
     val settings: Settings = Settings(),
     val contactPrompt: Boolean = false,
     val loopSpanHours: Int = 0,
+    val loopTimes: Pair<Long, Long>? = null,     // the loop as a range of valid times chosen on the time bar (overrides the length / span below)
     val detail: DetailLayer? = null,
     val globe: Boolean = false,
     val cam: GlobeCamera = GlobeCamera(38.0, -97.0, 380.0),
@@ -732,7 +733,15 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("gfs_loop_hours", hours).apply()
         val wasPlaying = _state.value.playing
         if (wasPlaying) stopPlaying()
-        update { it.copy(loopSpanHours = hours) }
+        update { it.copy(loopSpanHours = hours, loopTimes = null) }
+        if (wasPlaying) startPlaying()
+    }
+
+    /** The loop as a range of valid times chosen on the time bar (null: the page's usual loop). It follows the times, so a new scan or run does not shift it. */
+    fun setLoopTimes(range: Pair<Long, Long>?) {
+        val wasPlaying = _state.value.playing
+        if (wasPlaying) stopPlaying()
+        update { it.copy(loopTimes = range) }
         if (wasPlaying) startPlaying()
     }
 
@@ -747,7 +756,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startPlaying() {
         val st = _state.value
-        val window = loopWindow(st)
+        val window = loopWindowFor(st)
         if (window.count() < 2) return
         outlook.wantAllAs(window.map { st.frames[it].valid to st.frames[it].run })      // the outlook of every day the loop reaches, ready when the loop gets there
         frameJob?.cancel()
@@ -780,8 +789,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun loopWindow(st: GfsState): IntRange =
-        if (st.history) st.frames.indices else nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
+    /** The frames Play and a loop video cover: the range chosen on the time bar, else (a history loop: all of them) the span from the start or from the frame shown. */
+    fun loopWindowFor(st: GfsState): IntRange =
+        st.loopTimes?.let { (a, b) -> simplemodelview.loopIndices(st.frames.map { it.valid }, a, b) }
+            ?: if (st.history) st.frames.indices else nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
 
     var videoSize: simplemodelview.VideoSize
         get() = simplemodelview.VideoSize.byName(prefs.getString("video_size", null))
@@ -791,7 +802,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun buildLoopFile(onProgress: (Int, Int) -> Unit): File? {
         stopPlaying()
         val st = _state.value
-        val window = loopWindow(st)
+        val window = loopWindowFor(st)
         val n = window.count()
         if (n < 2) return null
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }

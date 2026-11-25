@@ -229,6 +229,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         valueRange = 0f..(s.frames.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
+                LoopRangeBar(s.frames.map { it.valid }, { vm.loopWindowFor(s) }, s.index, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopSpan(0) }
                 TimeStepRow(s.index, s.frames.size, s.playing, vm::togglePlay, vm::pickIndex)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
