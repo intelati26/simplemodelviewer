@@ -417,17 +417,26 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
         val x = maxOf(12f, framed.width / 90f)
         val bold = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize; isFakeBoldText = true }
         val plain = Paint().apply { isAntiAlias = true; color = Color.BLACK; this.textSize = textSize }
-        val heading = "Initial-condition match ${if (st.inView) "(area on screen)" else "(whole map)"}: neighborhood score at 35 dBZ, 45 km, f${st.scoredHours.joinToString("/") { "%02d".format(it) }}, mean"
-        val nameWidth = (scored.map { r -> plain.measureText("${st.ranks.indexOf(r) + 1}. ${r.name}") }.maxOrNull() ?: 0f) + textSize * 1.5f
+        val hoursText = st.scoredHours.joinToString("/") { "f%02d".format(it) }
+        val nameWidth = maxOf(bold.measureText("Initial-condition match"), scored.map { r -> plain.measureText("${st.ranks.indexOf(r) + 1}. ${r.name}") }.maxOrNull() ?: 0f) + textSize * 1.2f
         val cell = textSize * 2.6f
-        val footer = if (scored.isEmpty()) 0 else (textSize * (scored.size + 3.2f)).toInt()
+        // the notes go under the table in small print
+        val noteSize = textSize * 0.62f
+        val note = Paint().apply { isAntiAlias = true; color = 0xFF555555.toInt(); this.textSize = noteSize }
+        val noteLines = listOf(
+            "Neighborhood score (fractions skill score): the share of 35 dBZ echo agreeing with the radar within 30 km, 1 is a perfect match.",
+            "Columns: $hoursText, then the mean, which sets the order. Scored over ${if (st.inView) "the area on screen" else "the whole map"}.",
+        )
+        val footer = if (scored.isEmpty()) 0 else (textSize * (scored.size + 2.4f) + noteSize * (noteLines.size + 1.2f)).toInt()
         val out = Bitmap.createBitmap(framed.width, framed.height + footer, Bitmap.Config.ARGB_8888)
         val oc = Canvas(out)
         oc.drawColor(Color.WHITE)
         oc.drawBitmap(framed, 0f, 0f, null)
         if (scored.isNotEmpty()) {
             var y = framed.height + textSize * 1.4f
-            oc.drawText(heading, x, y, bold)
+            oc.drawText("Initial-condition match", x, y, bold)
+            for ((i, h) in st.scoredHours.withIndex()) oc.drawText("f%02d".format(h), x + nameWidth + i * cell, y, bold)
+            oc.drawText("mean", x + nameWidth + st.scoredHours.size * cell + textSize * 0.4f, y, bold)
             for (r in scored) {
                 y += textSize * 1.15f
                 fun f(d: Double?) = if (d == null || d.isNaN()) "-" else "%.2f".format(d)
@@ -435,6 +444,8 @@ class CompareViewModel(app: Application) : AndroidViewModel(app) {
                 for ((i, sc) in r.scores.withIndex()) oc.drawText(f(sc?.fss), x + nameWidth + i * cell, y, plain)
                 oc.drawText(f(r.headline), x + nameWidth + r.scores.size * cell + textSize * 0.4f, y, bold)
             }
+            y += textSize * 0.5f
+            for (line in noteLines) { y += noteSize * 1.25f; oc.drawText(line, x, y, note) }
         }
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         val name = "compare_${st.run?.label?.filter { it.isLetterOrDigit() } ?: "run"}_${mode.filter { it.isLetterOrDigit() || it == ' ' }.replace(' ', '_')}.png"

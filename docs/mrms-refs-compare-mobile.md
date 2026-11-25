@@ -18,10 +18,10 @@ is the answer.
 - **Scores** (on the shared grid, MRMS max-pooled to 3 km, evaluated inside the current view or a chosen area, with
   CONUS as the default):
   - Critical success index and bias at 20, 35 and 45 dBZ (hits, misses, false alarms).
-  - Neighborhood score (fractions skill score, about 15 and 45 km radius) so a storm placed 10 km off is not scored
+  - Neighborhood score (fractions skill score, a 30 km radius) so a storm placed 10 km off is not scored
     as a complete miss.
   - Mean absolute dBZ error where either field is at least 10 dBZ.
-  The ranking uses one headline (default FSS at 35 dBZ, 45 km) and shows the others as a detail sheet.
+  The ranking uses one headline (default FSS at 35 dBZ, 30 km) and shows the others as a detail sheet.
 - **Trend:** the score at f00 to f03, and the same member's score in the last 3 cycles, so one lucky frame does not
   crown a member. Cycles are fetched only for the same valid times already in use (older runs' f00 to f03 are
   small, cached chunks).

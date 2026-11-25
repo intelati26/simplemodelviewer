@@ -26,8 +26,8 @@ class MatchScore(
 object CompareScore {
     val THRESHOLDS = doubleArrayOf(20.0, 35.0, 45.0)
     const val HEADLINE_DBZ = 35.0
-    /** 15 cells of 3 km: 45 km. */
-    const val HEADLINE_RADIUS = 15
+    /** 10 cells of 3 km: 30 km. */
+    const val HEADLINE_RADIUS = 10
     const val ECHO_DBZ = 10.0
 
     /** Model minus radar where either is an echo (at least [minDbz]) and both are usable; NaN elsewhere. */

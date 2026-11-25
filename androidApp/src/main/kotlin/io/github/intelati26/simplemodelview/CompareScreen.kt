@@ -242,7 +242,7 @@ private fun Ranking(s: CompareState, onPick: (Int) -> Unit) {
         val area = if (s.inView) " (on screen)" else " (whole map)"
         val progress = s.scored?.let { (done, of) -> if (done < of) "  scoring $done of $of hours…" else "" } ?: if (s.members.isEmpty()) "" else "  scoring…"
         Text("Initial conditions$area, best match first$progress", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Text("Neighborhood score at 35 dBZ (45 km), f${hours.joinToString("/") { "%02d".format(it) }}; the mean ranks.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Neighborhood score at 35 dBZ (30 km), f${hours.joinToString("/") { "%02d".format(it) }}; the mean ranks.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (s.ranks.isEmpty()) return@Column
         LazyColumn(Modifier.fillMaxWidth()) {
             itemsIndexed(s.ranks) { i, r -> RankRow(i + 1, r, r.index == s.member) { onPick(r.index) } }
