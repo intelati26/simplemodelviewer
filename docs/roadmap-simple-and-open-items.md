@@ -40,9 +40,13 @@ Cards, top to bottom:
 
 Not in scope: background alerts or notifications (decided earlier: no location alerts). A "tell me when it crosses my line" notification is a separate decision.
 
-### 1.2 What moves behind Advanced
-Full MRMS catalog, REFS member viewer, Compare and the member ranking, globe, overlay tree, loop range bar, METAR density, storage and cache page, timings, GFS and NBM page controls.
-Simple keeps about ten curated products with "All products" opening the full picker.
+### 1.2 Today is for everyone; Advanced adds, it does not hide (owner's decision, 2026-11-25)
+The Today home is the first screen in **both** modes. Advanced is "Today plus everything else", not "everything instead of Today".
+- **Simple:** Today, the Outlook page, Places, and about ten curated products; the other pages are not in the menu.
+- **Advanced:** the same Today home, then the page menu with everything: full MRMS catalog, REFS member viewer, Compare and the member ranking, globe, overlay tree, loop range bar, METAR density, storage and cache page,
+  timings, GFS and NBM page controls. Today's cards can link into those pages (the chance card to the REFS member strip, the radar card to MRMS).
+- The mode switch therefore changes **which pages and controls are offered**, never whether Today is there. The header chip on Today reads "Advanced" or "Simple" and toggles that.
+- Open: should Advanced users be able to choose which page opens at launch (Today by default, or the last page used as now)? Recommend: Today by default, with a "Start on the last page I used" setting for people who live in Advanced.
 
 ### 1.3 Work to do
 - A `mode` setting (first-run choice, switch in the header), page list per mode. **Small.**
@@ -131,8 +135,8 @@ Open:
 
 ## 10. Order I would do it in
 
-1. Push `63fd823` and `eb70cdf`; release 0.4.4.
-2. Simple/Advanced switch plus the curated Simple product list (small, reuses screens).
+1. Push `63fd823`, `eb70cdf` and this file; release 0.4.4.
+2. The Today screen as the launch page for both modes, then the Simple/Advanced switch (it only changes which pages are offered) and the curated Simple product list.
 3. Check hazard-by-hazard point reads from the outlook and GREFS; then the Today "Chance at your place" card (thunder, severe by type, the line, rising).
 4. Outlook page: test Days 2-8 on the device; then the discussion-to-REFS links (parameter and time first, area second).
 5. Today home assembly: outlook card, chance card, radar card, share heads-up. The member strip last.
