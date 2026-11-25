@@ -141,6 +141,11 @@ class OutlookModel(private val repo: OutlookRepository, private val prefs: Share
 internal fun outlookDraws(core: Core, model: OutlookModel, view: View, valid: Long?, asOf: Long? = null): List<AlertDraw> {
     val choice = model.choiceFor(valid, asOf) ?: return emptyList()
     val data = model.state.value.loaded[choice.id]?.data ?: return emptyList()
+    return outlookDrawsOfData(core, data, view)
+}
+
+/** The areas of a loaded outlook as outlines in the pixels of the picture of [view] (see [outlookDraws]). */
+internal fun outlookDrawsOfData(core: Core, data: OutlookData, view: View): List<AlertDraw> {
     val pixels = view.scale.toFloat() / view.step
     return data.shapes.flatMap { shape ->
         shape.polygons.map { polygon ->

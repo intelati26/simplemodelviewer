@@ -114,6 +114,7 @@ class MainActivity : ComponentActivity() {
     private val pointViewModel: PointViewModel by viewModels()
     private val analysisViewModel: AnalysisViewModel by viewModels()
     private val compareViewModel: CompareViewModel by viewModels()
+    private val outlookViewModel: OutlookBrowserViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,7 +123,7 @@ class MainActivity : ComponentActivity() {
         val start = intent?.getStringExtra("page") ?: AppContainer.prefs.getString("page", "spc")
         setContent {
             val dark = isSystemInDarkTheme()
-            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point", "analysis", "compare").firstOrNull { it == start } ?: "spc") }
+            var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("mrms", "nbm", "gfs", "point", "analysis", "compare", "outlook").firstOrNull { it == start } ?: "spc") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -140,6 +141,7 @@ class MainActivity : ComponentActivity() {
                     else if (page == "gfs") GfsScreen(gfsViewModel, go)
                     else if (page == "analysis") AnalysisScreen(analysisViewModel, go)
                     else if (page == "compare") CompareScreen(compareViewModel, go)
+                    else if (page == "outlook") OutlookScreen(outlookViewModel, go)
                     else if (page == "nbm") NbmScreen(nbmViewModel, go)
                     else if (page == "mrms") MrmsScreen(mrmsViewModel, go)
                     else {
