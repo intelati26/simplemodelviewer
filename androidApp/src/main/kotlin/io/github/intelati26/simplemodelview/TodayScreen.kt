@@ -299,7 +299,7 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 Card {
                     Text("Look closer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for ((id, name) in listOf("mrms" to "Radar", "outlook" to "Outlook", "spc" to "Models (REFS)", "compare" to "Radar vs model", "nbm" to "NBM", "gfs" to "GFS")) FilterChip(selected = false, onClick = { onOpen(id) }, label = { Text(name) })
+                        for ((id, name) in listOf("mrms" to "Radar", "outlook" to "Outlook", "spc" to "REFS models", "compare" to "Radar vs model", "nbm" to "NBM", "gfs" to "GFS")) FilterChip(selected = false, onClick = { onOpen(id) }, label = { Text(pageLabel(id, name)) })
                     }
                 }
                 s.updated?.let { Text("Read ${formatClock(it, now)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }

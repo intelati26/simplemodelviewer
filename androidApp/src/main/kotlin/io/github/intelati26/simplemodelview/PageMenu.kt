@@ -18,6 +18,11 @@ import androidx.compose.ui.unit.dp
 /** The pages of the app: the id saved as the page last used, and the name on the page menu. */
 internal val APP_PAGES = listOf("today" to "Today", "spc" to "REFS", "mrms" to "MRMS", "nbm" to "NBM", "gfs" to "GFS", "analysis" to "Analysis", "outlook" to "Outlook", "compare" to "Compare", "point" to "Extended")
 
+/** When a page looks: what is happening now (radar, analysis) or what is coming (the models and the outlooks); pages that are neither have no tag. */
+internal val PAGE_WHEN = mapOf("mrms" to "Now", "analysis" to "Now", "spc" to "Near future", "nbm" to "Near future", "gfs" to "Near future", "outlook" to "Near future")
+
+internal fun pageLabel(id: String, name: String): String = PAGE_WHEN[id]?.let { "$name ($it)" } ?: name
+
 /** One button with the name of the page on show; it opens a list of the pages (all of them, the current one marked). */
 @Composable
 internal fun PageMenu(current: String, onOpen: (String) -> Unit) {
@@ -28,7 +33,7 @@ internal fun PageMenu(current: String, onOpen: (String) -> Unit) {
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             for ((id, name) in APP_PAGES) DropdownMenuItem(
-                text = { Text(if (id == current) "$name  ✓" else name) },
+                text = { Text(pageLabel(id, name).let { if (id == current) "$it  ✓" else it }) },
                 onClick = { open = false; if (id != current) onOpen(id) },
             )
         }
