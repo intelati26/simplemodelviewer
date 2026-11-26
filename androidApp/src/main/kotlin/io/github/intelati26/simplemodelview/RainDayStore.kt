@@ -43,6 +43,15 @@ class RainDayStore(private val dir: File, private val keepDays: Int = 90, privat
         return try { RainDay.fromBytes(f.readBytes()).also { f.setLastModified(System.currentTimeMillis()) } } catch (_: Exception) { f.delete(); null }
     }
 
+    fun has(dayEnd: Long): Boolean = fileOf(dayEnd).isFile
+
+    /** Every kept day as its end time and file bytes, oldest first (for the rain history export). */
+    fun rawDays(): List<Pair<Long, ByteArray>> =
+        dir.listFiles { f -> f.name.endsWith(".rd") }.orEmpty()
+            .mapNotNull { f -> f.name.removePrefix("day-").removeSuffix(".rd").toLongOrNull()?.let { it to f } }
+            .sortedBy { it.first }
+            .mapNotNull { (end, f) -> try { end to f.readBytes() } catch (_: Exception) { null } }
+
     fun write(dayEnd: Long, day: RainDay) {
         dir.mkdirs()
         val tmp = File(dir, "day-$dayEnd.tmp")

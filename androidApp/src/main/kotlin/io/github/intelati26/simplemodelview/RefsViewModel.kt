@@ -626,6 +626,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** Reads a settings file the user chose, validates it and applies it. Nothing changes if it is not a simplemodelview backup. */
     /** True when display or source choices were imported: the app restarts to take them up. */
     suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
+        RainHistory.importIfArchive(resolver, uri)?.let { note -> update { it.copy(notice = note) }; return false }      // (a rain history file from the export: no restart)
         val text = withContext(Dispatchers.IO) {
             try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null }
         }

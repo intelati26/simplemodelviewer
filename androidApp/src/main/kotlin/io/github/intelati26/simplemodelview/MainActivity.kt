@@ -80,7 +80,9 @@ import simplemodelview.formatPlus
 import simplemodelview.formatUtc
 import simplemodelview.isValidEmail
 import simplemodelview.placeLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import simplemodelview.Cycle
 import simplemodelview.Groups
 import simplemodelview.Kind
@@ -755,10 +757,29 @@ internal fun SettingsDialog(
                 Column {
                     Text("Back up or move your settings")
                     Text("Favorites, saved places, these options, the display choices (units, barbs, contours, loops, each page's product, area and level) and the sources (LightningCast and ProbSevere links, the GFS crop switch), as a JSON file you choose where to save. Importing restarts the app.", style = MaterialTheme.typography.bodySmall)
+                    val rain = remember { RainHistory.summary() }
+                    var withRain by remember { mutableStateOf(false) }
+                    var rainNote by remember { mutableStateOf<String?>(null) }
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    // the rain history is its own file (it can be large): saved first, then the settings file's own save dialog follows
+                    val rainLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+                        if (uri == null) rainNote = "Rain history not saved."
+                        else scope.launch {
+                            val n = withContext(Dispatchers.IO) { try { context.contentResolver.openOutputStream(uri, "wt")?.use { RainHistory.write(AppContainer.rainDays, it) } } catch (e: Exception) { null } }
+                            rainNote = if (n == null) "Could not write the rain history file." else "Rain history saved: $n days."
+                        }
+                        onExport()
+                    }
+                    if (rain != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(checked = withRain, onCheckedChange = { withRain = it })
+                        Text("Include the rain history (${rain.first} days, ${if (rain.second >= 1_048_576) "%.1f MB".format(rain.second / 1048576.0) else "${rain.second / 1024} KB"}): another phone reads it and skips the download", style = MaterialTheme.typography.bodySmall)
+                    }
                     Row {
-                        TextButton(onClick = onExport) { Text("Export") }
+                        TextButton(onClick = { if (withRain && rain != null) rainLauncher.launch("simplemodelview-rain-history.zip") else onExport() }) { Text("Export") }
                         TextButton(onClick = onImport) { Text("Import") }
                     }
+                    rainNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
                 Disclaimer(text = disclaimer)
             }

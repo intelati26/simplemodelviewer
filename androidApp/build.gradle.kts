@@ -62,6 +62,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 
+    testImplementation("junit:junit:4.13.2")             // plain JVM tests of the app's own helpers (RainHistory)
+
     // UI tests that run on a device / emulator (./gradlew :androidApp:connectedDebugAndroidTest)
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
