@@ -2,6 +2,7 @@ package io.github.intelati26.simplemodelview
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,7 +39,7 @@ import simplemodelview.loopTimesFor
 internal fun LoopLengthMenu(length: Int, total: Int, onPick: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+        TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) {
             Text(if (length <= 0 || length >= total) "Loop: all" else "Loop: $length")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -80,7 +81,7 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (open) Box {
-                TextButton(onClick = { menu = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Span \u25BE", fontSize = 12.sp) }
+                TextButton(onClick = { menu = true }, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Span \u25BE", fontSize = 12.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     val spans = loopSpanOptions(times)
                     DropdownMenuItem(text = { Text("Up to the frame shown", style = MaterialTheme.typography.labelSmall) }, onClick = {}, enabled = false)
@@ -93,7 +94,13 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
                 }
             }
         }
+        val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val ends = androidx.compose.material3.SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.tertiary, activeTrackColor = MaterialTheme.colorScheme.tertiary, inactiveTrackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
         if (open) RangeSlider(
+            modifier = Modifier.compactSlider(),
+            startThumb = { androidx.compose.material3.SliderDefaults.Thumb(source, colors = ends, thumbSize = androidx.compose.ui.unit.DpSize(5.dp, 20.dp)) },
+            endThumb = { androidx.compose.material3.SliderDefaults.Thumb(source, colors = ends, thumbSize = androidx.compose.ui.unit.DpSize(5.dp, 20.dp)) },
+            track = { st -> androidx.compose.material3.SliderDefaults.Track(st, Modifier.height(6.dp), colors = ends, drawStopIndicator = null, thumbTrackGapSize = 2.dp, trackInsideCornerSize = 2.dp) },
             value = window.first.toFloat()..window.last.toFloat(),
             onValueChange = { r ->
                 val a = Math.round(r.start).coerceIn(0, n - 2)

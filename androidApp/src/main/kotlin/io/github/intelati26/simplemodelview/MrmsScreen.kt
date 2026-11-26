@@ -182,7 +182,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
             val contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null
             // every overlay lives in one tree popup, so the strip under the map is a single line
-            TextButton(onClick = { overlayTree = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
+            TextButton(onClick = { overlayTree = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 12.dp)) {
                 Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable, probSevereState, listOfNotNull("T".takeIf { s.underTemp }, "Td".takeIf { s.underDew }, "METAR".takeIf { s.stations }).joinToString(" + ").ifEmpty { null }), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
@@ -194,7 +194,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     LoopLengthMenu(s.loopLength, s.files.size, vm::setLoopLength)
-                    Slider(
+                    CompactSlider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.files.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
@@ -410,7 +410,7 @@ private fun HeightRow(product: MrmsProduct, onPick: (Int) -> Unit) {
     val shown = dragging?.toInt() ?: product.level
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = { onPick(product.level - 1) }, enabled = product.level > 0, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("\u2212") }
-        Slider(
+        CompactSlider(
             value = (dragging ?: product.level.toFloat()), onValueChange = { dragging = it }, onValueChangeFinished = { dragging?.let { onPick(it.toInt()) } },
             valueRange = 0f..last.toFloat(), steps = maxOf(0, last - 1), modifier = Modifier.weight(1f),
         )

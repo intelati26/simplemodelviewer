@@ -224,7 +224,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         }
                     }
                     TimeMenu(s.frames.map { it.valid }, s.index, { i -> nbmFrameLabel(s.frames[i]) }, vm::pickIndex)
-                    Slider(
+                    CompactSlider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.frames.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )

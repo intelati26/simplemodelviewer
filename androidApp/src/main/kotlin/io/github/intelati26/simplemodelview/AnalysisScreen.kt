@@ -153,7 +153,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     TimeMenu(s.frames.map { it.valid }, s.index, { i -> frameLabel(s.frames[i]) + if (s.frames[i].valid in s.missing) "  (no file)" else "" }, vm::pickIndex)
-                    Slider(
+                    CompactSlider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.frames.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )

@@ -259,9 +259,9 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
-                    TextButton(onClick = vm::goToNow, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Now") }
+                    TextButton(onClick = vm::goToNow, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Now") }
                     TimeMenu(s.times, s.timeIndex, { i -> s.cycle?.let { c -> "${formatUtc(s.times[i])}  (f${((s.times[i] - c.epochSeconds) / 3600).toString().padStart(2, '0')})" } ?: formatUtc(s.times[i]) }, vm::pickTime)
-                    Slider(
+                    CompactSlider(
                         value = s.timeIndex.toFloat(), onValueChange = { vm.pickTime(it.toInt()) },
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
@@ -415,9 +415,9 @@ internal fun Legend(style: Style, members: List<String>, withMembers: Boolean = 
             Column(Modifier.fillMaxWidth()) {
                 if (style.units.isNotEmpty()) Text(style.units, Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelSmall, textAlign = androidx.compose.ui.text.style.TextAlign.End)
                 Row(Modifier.fillMaxWidth()) {
-                    for (stop in stops) Box(Modifier.weight(1f).height(10.dp).background(Color(0xFF000000.toInt() or stop.rgb)))
+                    for (stop in stops) Box(Modifier.weight(1f).height(7.dp).background(Color(0xFF000000.toInt() or stop.rgb)))
                 }
-                Box(Modifier.fillMaxWidth().height(16.dp)) {
+                Box(Modifier.fillMaxWidth().height(14.dp)) {
                     Row(Modifier.fillMaxWidth()) {
                         for (i in stops.indices) Box(Modifier.weight(1f)) {
                             if (i % every == 0) Text(labels[i], Modifier.wrapContentWidth(Alignment.Start, unbounded = true), style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)

@@ -1,5 +1,7 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenu
@@ -28,7 +30,7 @@ fun TimeMenu(times: List<Long>, selected: Int, label: (Int) -> String, onPick: (
     var open by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
-    TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Time ▾") }
+    TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Time ▾") }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }, scrollState = scroll) {
         var lastDay = ""
         times.forEachIndexed { i, t ->
