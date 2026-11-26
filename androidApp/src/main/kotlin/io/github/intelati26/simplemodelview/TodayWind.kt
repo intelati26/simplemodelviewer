@@ -118,7 +118,7 @@ internal fun WindCard(wind: WindData?, note: String?, busy: Boolean, placeName: 
         }
         if (wind != null && summary != null) {
             Text(WindTiming.headline(summary, ::clockLabel), fontSize = 14.sp)
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 for (h in wind.hours) Box(
                     Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surface).background(gustShade(h.percent))
                         .then(if (h.percent >= line) Modifier.border(BorderStroke(1.5.dp, Color(0xFFB3261E)), RoundedCornerShape(3.dp)) else Modifier),
@@ -131,7 +131,7 @@ internal fun WindCard(wind: WindData?, note: String?, busy: Boolean, placeName: 
             }
         }
         val dayWord = if (day == 1) "today" else if (day == 2) "tomorrow" else "day $day"
-        outlook?.wind?.let { Text("SPC damaging-wind chance $dayWord: $it%", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
+        outlook?.wind?.let { Text("SPC damaging-wind chance $dayWord: $it%", fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp)) }
         thunder?.severe?.firstOrNull { it.name == "Damaging wind" }?.let { c ->
             val shown = if (c.percent < 1.0) "<1%" else "${Math.round(c.percent)}%"
             Text("Model damaging-wind chance, 4 hours: $shown", fontSize = 13.sp)

@@ -40,18 +40,18 @@ internal fun ExpandCard(
     var open by rememberSaveable(key) { mutableStateOf(startOpen) }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).clickable { open = !open }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-            Text(symbol, fontSize = 24.sp, modifier = Modifier.width(34.dp).padding(top = 2.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+            Text(symbol, fontSize = 20.sp, modifier = Modifier.width(28.dp).padding(top = 1.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(title, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 summary()
             }
             Text(if (open) "▴" else "▾", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
         }
-        if (open) Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { details() }
+        if (open) Column(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) { details() }
     }
 }
 

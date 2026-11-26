@@ -194,7 +194,7 @@ internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, place
         if (data == null || summary == null) return@ExpandCard
         Text(ThunderTiming.headline(summary, ::clockLabel), fontSize = 14.sp)
         // the hours
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             for (h in data.hours) {
                 val isOver = h.percent >= line
                 Box(
@@ -212,7 +212,7 @@ internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, place
         // the three periods, each against the line
         for ((label, c) in listOf("Next hour" to data.nextHour, "Next 4 hours" to data.next4, "Rest of the day" to data.rest)) {
             val p = c.percent ?: continue
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 2.dp)) {
                 Text(label, fontSize = 12.sp, modifier = Modifier.width(96.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(Modifier.weight(1f).height(14.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surface)) {
                     Box(Modifier.fillMaxWidth(fraction = (p / 100.0).coerceIn(0.0, 1.0).toFloat()).fillMaxHeight().background(if (p >= line) Color(0xFFE24B4A) else shade(maxOf(p, 5.0)).copy(alpha = 1f)))
@@ -225,7 +225,7 @@ internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, place
         }
         if (data.severe.isNotEmpty()) {
             val top = data.severe.maxByOrNull { it.percent }
-            Text("Severe, 4 hours (by type)" + (data.severeRun?.takeIf { it != data.run }?.let { " · $it run" } ?: ""), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            Text("Severe, 4 hours (by type)" + (data.severeRun?.takeIf { it != data.run }?.let { " · $it run" } ?: ""), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
             for (c in data.severe) {
                 val isTop = c === top && c.percent >= 1.0
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

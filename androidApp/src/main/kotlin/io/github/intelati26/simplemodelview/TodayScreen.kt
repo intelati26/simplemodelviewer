@@ -225,8 +225,8 @@ private val warn = Color(0xFFB3261E)
 @Composable
 private fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) { content() }
 }
 
@@ -266,7 +266,7 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((d, label) in listOf(1 to "Today", 2 to "Tomorrow", 3 to "Day 3")) FilterChip(selected = s.day == d, onClick = { vm.pickDay(d) }, label = { Text(label) })
             }
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 s.error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
 
                 // ---- the outlook at the place
