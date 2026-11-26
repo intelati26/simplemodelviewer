@@ -48,6 +48,9 @@ internal val GFS_SECTORS = listOf(
     Sector("Atlantic", -105.0, 5.0, -10.0, 62.0),
 ) + Sector.all.drop(1)         // and the regional sectors of the other pages (Midwest, Great Lakes, ...)
 
+/** What the page shows apart from the time: the product, and for heights and winds the level and color (the compare keeps the one shown before). */
+data class GfsPick(val product: String, val level: Int, val color: String, val since: Long?)
+
 data class GfsState(
     val busy: Boolean = true,
     val loadStatus: String? = null,
@@ -85,6 +88,11 @@ data class GfsState(
     val historyRange: Pair<Long, Long>? = null,   // a hand-picked span (epoch seconds); null = the past [historyDays] days
     val since: Long? = null,                  // the start (epoch seconds) of the precipitation-since product
     val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
+    val other: GfsPick? = null,               // what was shown before this: the compare shows it under this one, at the same time
+    val compare: Boolean = false,
+    val paneB: List<Bitmap>? = null,          // that product's own field and, over it, the shared lines
+    val titleB: String? = null,
+    val styleB: Style? = null,
 ) {
     val file: NbmFile? get() = frames.getOrNull(index)
 }
@@ -574,12 +582,10 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(map = bitmap, busy = false) }
     }
 
-    private suspend fun showCurrent() {
-        val st = _state.value
-        val file = st.file ?: return
-        update { it.copy(busy = true, error = null) }
-        if (st.globe) { showGlobeFrame(st, file); return }
-        val target = gridFor(st.sector)
+    private var shownPick: GfsPick? = null
+
+    /** The field of what [st] says is shown at [file], on [target]'s grid: its values, product and title. */
+    private suspend fun fieldFor(st: GfsState, file: NbmFile, target: Grid): Triple<FloatArray, Product, String> {
         val since = st.product == GfsHistory.SINCE_ID
         val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
         val status = statusHandler()
@@ -592,7 +598,42 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }.also { computed[key] = it }
         val (product, title0) = productFor(st, surface, target)
-        val title = if (since) sinceTitle(st, file) else title0
+        return Triple(values, product, if (since) sinceTitle(st, file) else title0)
+    }
+
+    /** Shows the previous product under this one (or back to one picture). */
+    fun setCompare(on: Boolean) {
+        if (_state.value.compare == on) return
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        if (on) showFrame()
+    }
+
+    /** The compare's second picture: the other product at this same frame, as its own field only, with the lines and alerts over it once. */
+    private suspend fun computePaneB(product: Product, values: FloatArray, view: View, file: NbmFile, target: Grid) {
+        val st = _state.value
+        val b = st.other
+        if (!st.compare || st.playing || b == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
+        try {
+            val (valuesB, productB, titleB) = fieldFor(st.copy(product = b.product, level = b.level, color = b.color, since = b.since), file, target)
+            val settings = st.settings
+            val (over, field) = withContext(Dispatchers.Default) {
+                renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), counties = settings.counties, part = RenderPart.Over) to
+                    renderer.render(productB, productB.style, valuesB, emptyList(), view, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
+            }
+            update { it.copy(paneB = listOf(field, over), titleB = titleB, styleB = productB.style) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+    }
+
+    private suspend fun showCurrent() {
+        val st = _state.value
+        val file = st.file ?: return
+        update { it.copy(busy = true, error = null) }
+        if (st.globe) { showGlobeFrame(st, file); return }
+        val target = gridFor(st.sector)
+        // what is shown now against what was before: the compare keeps the one before
+        val pick = GfsPick(st.product, st.level, st.color, st.since)
+        if (pick != shownPick) { shownPick?.let { before -> update { it.copy(other = before) } }; shownPick = pick }
+        val (values, product, title) = fieldFor(st, file, target)
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
         outlook.want(file.valid, file.run)
@@ -601,6 +642,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         }
         shown = Triple(product, values, view)
         update { it.copy(map = bitmap, style = product.style, title = title, busy = false, loadStatus = null, detail = null, focus = handoff.takeFocus(view)) }
+        computePaneB(product, values, view, file, target)
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 

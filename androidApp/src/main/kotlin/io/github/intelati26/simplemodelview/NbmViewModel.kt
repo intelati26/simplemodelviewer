@@ -56,6 +56,11 @@ data class NbmState(
     val error: String? = null,
     val notice: String? = null,
     val product: NbmProduct = NbmCatalog.default,
+    val other: NbmProduct? = null,                    // the product shown before this one (the compare shows it under this one)
+    val compare: Boolean = false,
+    val paneB: List<Bitmap>? = null,                  // the other product's own field and, over it, the shared lines
+    val titleB: String? = null,
+    val styleB: Style? = null,
     val sector: Sector = Sector.all[0],
     val cycles: List<NbmCycle> = emptyList(),
     val cycle: NbmCycle? = null,
@@ -226,7 +231,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     fun pickProduct(picked: NbmProduct) {
         prefs.edit().putString("nbm_product", picked.id).apply()
-        update { it.copy(product = picked) }
+        update { st -> st.copy(product = picked, other = st.product.takeIf { it.id != picked.id } ?: st.other) }
         load()
     }
 
@@ -317,6 +322,35 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         return if (dataSaver) v.decimated(2) else v
     }
 
+    /** Shows the previous product under this one (or back to one picture). */
+    fun setCompare(on: Boolean) {
+        if (_state.value.compare == on) return
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        if (on) viewModelScope.launch { showCurrent() }
+    }
+
+    /** The compare's second picture: the other product in the same run at the frame nearest this time, as its own field only, with the lines and alerts over it once. */
+    private suspend fun computePaneB(product: Product, field: GridField, v: View, file: NbmFile) {
+        val st = _state.value
+        val b = st.other
+        val cycle = st.cycle
+        if (!st.compare || st.playing || b == null || cycle == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
+        try {
+            val frames = repo.listFrames(b.id, cycle)
+            val fb = frames.minByOrNull { kotlin.math.abs(it.valid - file.valid) }?.takeIf { kotlin.math.abs(it.valid - file.valid) <= 5400 }
+            if (fb == null) { update { it.copy(paneB = null, notice = "${b.title} has no frame near this time in this run.") }; return }
+            val fieldB = decode(fb)
+            val settings = st.settings
+            val syn = synthetic(b, fieldB.grid)
+            val (over, fld) = withContext(Dispatchers.Default) {
+                val bv = if (fieldB.grid == field.grid) v else viewFor(st.sector, fieldB.grid)
+                renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid, file.run), counties = settings.counties, part = RenderPart.Over) to
+                    renderer.render(syn, syn.style, fieldB.values, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
+            }
+            update { it.copy(paneB = listOf(fld, over), titleB = b.title, styleB = syn.style) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+    }
+
     private fun synthetic(product: NbmProduct, grid: Grid) =
         Product(product.pickerId, product.title, product.group, product.style, hasMembers = false, timeDimension = null, grid = grid)
 
@@ -340,6 +374,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         view = v
         shown = product to field.values
         update { it.copy(map = bitmap, style = product.style, busy = false, detail = null, focus = handoff.takeFocus(v)) }
+        computePaneB(product, field, v, file)
         scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }

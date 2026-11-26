@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +77,9 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
     val panel = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
     val spanLabel = s.history?.let { (a, b) -> formatUtc(a).take(10) + if (b - a > 86_400) "…" + formatUtc(b).take(10) else "" } ?: "Last 6 h"
 
+    var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
+    var bottomPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val bitmap = s.map
@@ -85,6 +89,8 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "Analysis globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
+                bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "Analysis map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -105,7 +111,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                     }
                     ProductStepButton(next = true, enabled = at in 0 until AnalysisCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("analysis", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -149,6 +155,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
+            if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     TimeMenu(s.frames.map { it.valid }, s.index, { i -> frameLabel(s.frames[i]) + if (s.frames[i].valid in s.missing) "  (no file)" else "" }, vm::pickIndex)
@@ -164,8 +171,8 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         if (s.settings.minimalUi) MinimalChrome(
             s.frame?.let { frameLabel(it) + "  ${s.index + 1}/${s.frames.size}" } ?: "", s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
         ) else {
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { readoutBlock(); controlsBlock() }
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }
     }
 

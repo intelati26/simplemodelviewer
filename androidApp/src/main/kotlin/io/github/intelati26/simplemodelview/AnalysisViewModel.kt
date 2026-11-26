@@ -45,6 +45,11 @@ data class AnalysisState(
     val error: String? = null,
     val notice: String? = null,
     val product: AnalysisProduct = AnalysisCatalog.default,
+    val other: AnalysisProduct? = null,             // the product shown before this one (the compare shows it under this one)
+    val compare: Boolean = false,
+    val paneB: List<Bitmap>? = null,                // that product's own field and, over it, the shared lines
+    val titleB: String? = null,
+    val styleB: Style? = null,
     val sector: Sector = Sector.all[0],
     val history: Pair<Long, Long>? = null,          // an hourly span of the past (epoch seconds); null: the last six hours, every 15 minutes
     val frames: List<AnalysisFrame> = emptyList(),
@@ -162,7 +167,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
 
     fun pickProduct(picked: AnalysisProduct) {
         prefs.edit().putString("analysis_product", picked.id).apply()
-        update { it.copy(product = picked) }
+        update { st -> st.copy(product = picked, other = st.product.takeIf { it != picked } ?: st.other) }
         showFrame()
     }
 
@@ -226,6 +231,33 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         return if (dataSaver) v.decimated(2) else v
     }
 
+    /** Shows the previous product under this one (or back to one picture). */
+    fun setCompare(on: Boolean) {
+        if (_state.value.compare == on) return
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        if (on) showFrame()
+    }
+
+    /** The compare's second picture: the other product of the same frame, as its own field only, with the lines over it once. */
+    private suspend fun computePaneB(product: Product, values: FloatArray, v: View, frame: AnalysisFrame) {
+        val st = _state.value
+        val b = st.other
+        if (!st.compare || st.playing || b == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
+        try {
+            val fb = field(frame, b)
+            if (fb == null) { update { it.copy(paneB = null, notice = "No ${b.title} analysis for this time.") }; return }
+            val (gridB, valuesB, _) = fb
+            val syn = synthetic(b, gridB)
+            val settings = st.settings
+            val (over, fld) = withContext(Dispatchers.Default) {
+                val bv = if (gridB == product.grid) v else viewFor(st.sector, gridB)
+                renderer.render(product, product.style, values, emptyList(), v, dark, counties = settings.counties, part = RenderPart.Over) to
+                    renderer.render(syn, syn.style, valuesB, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
+            }
+            update { it.copy(paneB = listOf(fld, over), titleB = b.title, styleB = syn.style) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+    }
+
     private fun synthetic(product: AnalysisProduct, grid: Grid) = Product(product.id, product.title, "Analysis", product.style, hasMembers = false, timeDimension = null, grid = grid)
 
     private suspend fun showCurrent() {
@@ -251,6 +283,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         }
         view = v
         update { it.copy(map = bitmap, busy = false, detail = null, focus = handoff.takeFocus(v)) }
+        computePaneB(product, values, v, frame)
         scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }

@@ -29,6 +29,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -88,6 +89,9 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
         (GfsCatalog.levels + WindProducts.STACK).flatMap { l -> WindProducts.colors.mapNotNull { c -> GfsCatalog.windId(l, c.key) } }.map { Product(it, "", "", Style(), false, null, Grid.REFS) }
     }
 
+    var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
+    var bottomPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val bitmap = s.map
@@ -97,11 +101,13 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "GFS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap, polar = s.polar, onPolarGesture = vm::polarGesture)
+                bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
         }
-        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) {
+        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) {
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     var productMenu by remember { mutableStateOf(false) }
@@ -118,6 +124,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Box {
                         TextButton(onClick = { more = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
                         DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                            DropdownMenuItem(text = { Text(if (s.compare) "One picture" else "Compare with the previous product") }, enabled = s.compare || s.other != null, onClick = { more = false; vm.setCompare(!s.compare) })
                             if (s.frames.size > 1) DropdownMenuItem(text = { Text(if (s.history) "Save the history loop (video)" else "Save the loop (video)") }, onClick = {
                                 more = false
                                 scope.launch {
@@ -195,7 +202,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 s.loadStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) {
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) {
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -206,6 +213,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
             OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
+            if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     var spanMenu by remember { mutableStateOf(false) }

@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -106,6 +107,9 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     }
     val family = NbmCatalog.familyOf(s.product)
 
+    var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
+    var bottomPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -116,6 +120,8 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "National Blend of Models globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
+                bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "National Blend of Models map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -131,7 +137,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                     AssistChip(onClick = { picker = true }, label = { Text(family.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.families.size - 1) { vm.stepProduct(1) }
                     PageMenu("nbm", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
                 }
                 NbmVariantRow(family, s.product, vm::pickProduct)
                 s.notice?.let {
@@ -171,6 +177,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
             OutlookRow(outlookState, s.file?.valid, onClick = { outlookDialog = true })
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
+            if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     NbmLoopMenu(s.loopSpanHours, s.frames, vm::setLoopSpan)
@@ -188,8 +195,8 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
         if (s.settings.minimalUi) MinimalChrome(
             s.file?.let { nbmFrameLabel(it) + "  ${s.index + 1}/${s.frames.size}" } ?: "", s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
         ) else {
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { readoutBlock(); controlsBlock() }
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }
     }
 
