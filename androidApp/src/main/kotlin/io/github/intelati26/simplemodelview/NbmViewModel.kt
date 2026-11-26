@@ -34,7 +34,6 @@ import simplemodelview.Style
 import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
-import simplemodelview.encodePlaces
 import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.formatUtc

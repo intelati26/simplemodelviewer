@@ -20,7 +20,6 @@ import simplemodelview.AnalysisBuckets
 import simplemodelview.AnalysisCatalog
 import simplemodelview.AnalysisFrame
 import simplemodelview.AnalysisProduct
-import simplemodelview.AnalysisSource
 import simplemodelview.GlobeCamera
 import simplemodelview.Grid
 import simplemodelview.Place
@@ -30,9 +29,7 @@ import simplemodelview.Style
 import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
-import simplemodelview.encodePlaces
 import simplemodelview.formatUtc
-import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.nextPlayable
 import simplemodelview.placeLabel

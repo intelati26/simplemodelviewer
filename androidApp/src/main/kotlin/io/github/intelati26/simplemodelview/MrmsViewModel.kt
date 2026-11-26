@@ -9,7 +9,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,7 +41,6 @@ import simplemodelview.styleIn
 import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
-import simplemodelview.encodePlaces
 import simplemodelview.formatClock
 import simplemodelview.loopWindowEndingAt
 import simplemodelview.loopWindowFromShown

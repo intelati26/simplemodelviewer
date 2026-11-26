@@ -1,17 +1,18 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -23,6 +24,23 @@ internal val PAGE_WHEN = mapOf("mrms" to "Now", "analysis" to "Now", "spc" to "N
 
 internal fun pageLabel(id: String, name: String): String = PAGE_WHEN[id]?.let { "$name ($it)" } ?: name
 
+/**
+ * Simple or Advanced: which pages the app offers. Today is the home in both; Simple adds the radar, the outlook, the REFS models and the extended forecast, Advanced adds the rest.
+ * An install from before the switch (it has a page saved) stays Advanced; a new one is asked once on Today.
+ */
+internal object AppMode {
+    private val prefs get() = AppContainer.prefs
+    val SIMPLE_PAGES = listOf("today", "mrms", "outlook", "spc", "point")
+    var simple by mutableStateOf(prefs.getString("app_mode", null) == "simple")
+        private set
+    /** True until the first choice is made on a new install. */
+    var undecided by mutableStateOf(prefs.getString("app_mode", null) == null && !prefs.contains("page"))
+        private set
+    fun set(simple: Boolean) { this.simple = simple; undecided = false; prefs.edit().putString("app_mode", if (simple) "simple" else "advanced").apply() }
+    fun offers(id: String) = !simple || id in SIMPLE_PAGES
+    fun pages() = APP_PAGES.filter { offers(it.first) }
+}
+
 /** One button with the name of the page on show; it opens a list of the pages (all of them, the current one marked). */
 @Composable
 internal fun PageMenu(current: String, onOpen: (String) -> Unit) {
@@ -32,9 +50,14 @@ internal fun PageMenu(current: String, onOpen: (String) -> Unit) {
             Text((APP_PAGES.firstOrNull { it.first == current }?.second ?: "Pages") + " ▾")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            for ((id, name) in APP_PAGES) DropdownMenuItem(
+            for ((id, name) in AppMode.pages()) DropdownMenuItem(
                 text = { Text(pageLabel(id, name).let { if (id == current) "$it  ✓" else it }) },
                 onClick = { open = false; if (id != current) onOpen(id) },
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(if (AppMode.simple) "Show all pages (Advanced)" else "Fewer pages (Simple)") },
+                onClick = { open = false; AppMode.set(!AppMode.simple); if (!AppMode.offers(current)) onOpen("today") },
             )
         }
     }

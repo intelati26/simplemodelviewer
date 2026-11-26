@@ -1,5 +1,7 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,10 +30,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,7 +61,6 @@ import simplemodelview.SpcMesoscale
 import simplemodelview.TodayText
 import simplemodelview.formatClock
 import simplemodelview.outlookAt
-import simplemodelview.placeLabel
 
 /** What SPC says about one place for one outlook day. */
 data class PlaceOutlook(
@@ -254,8 +253,16 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 }
                 if (s.busy) BusySpinner(Modifier.padding(end = 2.dp))
                 TextButton(onClick = vm::refresh, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Reload") }
+                TextButton(onClick = { AppMode.set(!AppMode.simple) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(if (AppMode.simple) "Simple" else "Advanced", fontSize = 13.sp) }
                 PageMenu("today", onOpen)
             }
+            if (AppMode.undecided) androidx.compose.material3.AlertDialog(
+                onDismissRequest = { AppMode.set(true) },
+                title = { Text("How would you like to use it?") },
+                text = { Text("Simple shows Today, the radar, the outlook, the REFS models and the extended forecast. Advanced adds the other model pages, analysis and Compare. You can change this any time from the page menu or the button at the top of Today.") },
+                confirmButton = { TextButton(onClick = { AppMode.set(true) }) { Text("Simple") } },
+                dismissButton = { TextButton(onClick = { AppMode.set(false) }) { Text("Advanced") } },
+            )
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((d, label) in listOf(1 to "Today", 2 to "Tomorrow", 3 to "Day 3")) FilterChip(selected = s.day == d, onClick = { vm.pickDay(d) }, label = { Text(label) })
             }
@@ -345,7 +352,7 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 Card {
                     Text("Look closer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for ((id, name) in listOf("mrms" to "Radar", "outlook" to "Outlook", "spc" to "REFS models", "compare" to "Radar vs model", "nbm" to "NBM", "gfs" to "GFS")) FilterChip(selected = false, onClick = { onOpen(id) }, label = { Text(pageLabel(id, name)) })
+                        for ((id, name) in listOf("mrms" to "Radar", "outlook" to "Outlook", "spc" to "REFS models", "compare" to "Radar vs model", "nbm" to "NBM", "gfs" to "GFS").filter { AppMode.offers(it.first) }) FilterChip(selected = false, onClick = { onOpen(id) }, label = { Text(pageLabel(id, name)) })
                     }
                 }
                 s.updated?.let { Text("Read ${formatClock(it, now)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }

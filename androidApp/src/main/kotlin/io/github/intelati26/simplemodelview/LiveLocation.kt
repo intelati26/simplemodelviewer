@@ -1,5 +1,6 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.compose.runtime.getValue
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -12,7 +13,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle

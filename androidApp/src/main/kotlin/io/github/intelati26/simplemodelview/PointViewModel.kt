@@ -18,7 +18,6 @@ import simplemodelview.Place
 import simplemodelview.PointTable
 import simplemodelview.WindProducts
 import simplemodelview.buildPointTable
-import simplemodelview.decodePlaces
 import simplemodelview.epochSeconds
 import simplemodelview.formatUtc
 import simplemodelview.nwsGapTable

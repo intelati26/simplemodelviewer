@@ -1,7 +1,6 @@
 package simplemodelview
 
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /** A saved place (west-negative longitude). */
 data class Place(val name: String, val lat: Double, val lon: Double)

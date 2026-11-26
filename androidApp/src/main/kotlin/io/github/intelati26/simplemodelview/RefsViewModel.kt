@@ -8,15 +8,12 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import simplemodelview.Catalog
 import simplemodelview.Cycle
 import simplemodelview.CycleStore
 import simplemodelview.GlobeCamera
@@ -25,7 +22,6 @@ import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.BackupPlace
 import simplemodelview.Place
-import simplemodelview.loopWindow
 import simplemodelview.loopWindowAnchored
 import simplemodelview.nextPlayable
 import simplemodelview.VideoSize
@@ -33,10 +29,8 @@ import simplemodelview.SettingsBackup
 import simplemodelview.isValidEmail
 import simplemodelview.Product
 import simplemodelview.decodePlaces
-import simplemodelview.encodePlaces
 import simplemodelview.placeLabel
 import simplemodelview.RefsException
-import simplemodelview.RefsRepository
 import simplemodelview.Sector
 import simplemodelview.WindProducts
 import simplemodelview.Style
