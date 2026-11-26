@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -238,6 +239,8 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
     var placeMenu by remember { mutableStateOf(false) }
     var expandedMcd by remember { mutableStateOf<Int?>(null) }
     val now = System.currentTimeMillis() / 1000
+    // Material's text styles carry a line height of about 1.5 times the size, which is most of the space between the lines here: 1.2 keeps the text as large (and following the system's font size) with less air
+    androidx.compose.material3.ProvideTextStyle(androidx.compose.material3.LocalTextStyle.current.copy(lineHeight = 1.2.em, lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center, androidx.compose.ui.text.style.LineHeightStyle.Trim.None))) {
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -358,5 +361,6 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 s.updated?.let { Text("Read ${formatClock(it, now)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
+    }
     }
 }
