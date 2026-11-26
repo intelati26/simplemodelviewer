@@ -3,6 +3,7 @@ package io.github.intelati26.simplemodelview
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -10,6 +11,8 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +35,9 @@ import simplemodelview.GlobeCamera
 import simplemodelview.globeForward
 import simplemodelview.visibleFractions
 
+/** The zoom and pan of a map, so that two panes of a compare can share them. */
+internal class ZoomState { var scale by mutableStateOf(1f); var offset by mutableStateOf(Offset.Zero) }
+
 /**
  * A map picture with pinch-zoom, pan, double-tap zoom and tap-for-value. Tap positions are converted back through the zoom and pan
  * and reported as fractions of the picture; [onViewport] gets the visible part (left, top, right, bottom fractions).
@@ -42,11 +48,14 @@ internal fun ZoomableMap(
     detail: DetailLayer? = null, onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
     focus: simplemodelview.MapFocus? = null, onFocusApplied: () -> Unit = {},
     onScrub: (Float, Float) -> Unit = onTap,
+    /** For a compare: the picture is these layers (the first sets the shape) drawn in order on [layersBackground]; [zoom] is shared with the other pane. */
+    layers: List<android.graphics.Bitmap>? = null, layersBackground: Color = Color.Unspecified, zoom: ZoomState? = null, reportViewport: Boolean = true,
 ) {
     // keyed to the picture's shape (not its pixel count): another product over the same area comes with other cells, and keeps the zoom
     val shape = (bitmap.width.toFloat() / bitmap.height * 1000f).roundToInt()
-    var scale by remember(shape) { mutableStateOf(1f) }
-    var offset by remember(shape) { mutableStateOf(Offset.Zero) }
+    val z = zoom ?: remember(shape) { ZoomState() }
+    var scale by z::scale
+    var offset by z::offset
     var size by remember { mutableStateOf(IntSize.Zero) }
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     // coming back from the globe: zoom to the part of the picture it was showing (this picture's first composition, so the zoom state is fresh)
@@ -66,7 +75,7 @@ internal fun ZoomableMap(
     }
     // tell the view model which part of the picture is on screen, for "export this screen area"
     LaunchedEffect(scale, offset, size, bitmap) {
-        if (size.width == 0) return@LaunchedEffect
+        if (size.width == 0 || !reportViewport) return@LaunchedEffect
         val f = visibleFractions(size.width.toFloat(), size.height.toFloat(), bitmap.width.toFloat() / bitmap.height, scale, offset.x, offset.y)
         onViewport(f[0], f[1], f[2], f[3])
     }
@@ -116,7 +125,10 @@ internal fun ZoomableMap(
                     )
                 },
         ) {
-            Image(image, contentDescription = description, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+            if (layers != null) {
+                if (layersBackground != Color.Unspecified) Box(Modifier.fillMaxSize().background(layersBackground))
+                for (l in layers) Image(remember(l) { l.asImageBitmap() }, contentDescription = description, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+            } else Image(image, contentDescription = description, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
             // a finer picture of the zoomed-in part, over the overview
             detail?.let { d ->
                 val detailImage = remember(d) { d.bitmap.asImageBitmap() }
@@ -138,6 +150,30 @@ internal fun ZoomableMap(
                     drawLine(Color.White, Offset(x, y - r), Offset(x, y + r), stroke)
                 }
             }
+        }
+    }
+}
+
+/** Two products of the same area and time one above the other: A is the page's full picture; B is its own field on the shared lines. Zoom, pan and the crosshair are shared. */
+@Composable
+internal fun ComparePanes(
+    modifier: Modifier, a: android.graphics.Bitmap, b: List<android.graphics.Bitmap>, titleA: String, titleB: String, background: Color, crosshair: Pair<Float, Float>?,
+    detail: DetailLayer?, onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit, onScrub: (Float, Float) -> Unit,
+    focus: simplemodelview.MapFocus?, onFocusApplied: () -> Unit,
+) {
+    val zoom = remember(a.width, a.height) { ZoomState() }
+    androidx.compose.foundation.layout.Column(modifier.fillMaxSize()) {
+        @Composable fun label(text: String) = androidx.compose.material3.Text(
+            text, Modifier.padding(4.dp).background(Color(0xB0000000)).padding(horizontal = 6.dp, vertical = 1.dp),
+            color = Color.White, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1,
+        )
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            ZoomableMap(a, crosshair, "First product", detail = detail, onViewport = onViewport, onTap = onTap, onScrub = onScrub, focus = focus, onFocusApplied = onFocusApplied, zoom = zoom)
+            label(titleA)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            ZoomableMap(b.first(), crosshair, "Second product", onViewport = { _, _, _, _ -> }, onTap = onTap, onScrub = onScrub, layers = b, layersBackground = background, zoom = zoom, reportViewport = false)
+            label(titleB)
         }
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -106,6 +107,10 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     // the catalog as the picker's product type (it groups, searches and stars them like the SPC page does)
     val products = remember { MrmsCatalog.all.map { Product(it.id, it.title, it.group, it.style, false, null, Grid.REFS) } }
 
+    // the heights of the strips floating over the map: the compare's two panes fit between them
+    var topPx by remember { mutableStateOf(0) }
+    var bottomPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().background(mapBackground)) {
         // the map fills the screen; thin translucent strips float over the empty bands above and below it
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -116,6 +121,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
+                bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.displayTitle, s.titleB ?: s.other!!.displayTitle, mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onScrub, s.focus, vm::focusApplied)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, onScrub = vm::onScrub, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -135,7 +142,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     ) { Text("\u21C4", fontSize = 20.sp) }
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("mrms", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true })
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -188,6 +195,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             } }
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
+            if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     LoopLengthMenu(s.loopLength, s.files.size, vm::setLoopLength)
@@ -205,8 +213,8 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             s.file?.let { "Valid at ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}  ${s.index + 1}/${s.files.size}" + if (s.live && s.index == s.files.size - 1) "  \u25CF" else "" } ?: "",
             s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
         ) else {
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { readoutBlock(); controlsBlock() }
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }
     }
 
@@ -373,12 +381,13 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
-internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null) {
+internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null, compare: Boolean = false, canCompare: Boolean = false, onCompare: ((Boolean) -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (onRain != null) DropdownMenuItem(text = { Text("Rainfall since a date and time\u2026") }, onClick = { open = false; onRain() })
+            if (onCompare != null) DropdownMenuItem(text = { Text(if (compare) "One picture" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

@@ -118,6 +118,10 @@ data class MrmsState(
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
     val stationDensity: Int = 2,                      // 1 as before, 2 and 3 closer up and down
     val station: StationDetail? = null,               // the station tapped: its reports and chart
+    val compare: Boolean = false,                     // the previous product shown under this one (same area, same time), sharing zoom and crosshair
+    val paneB: List<Bitmap>? = null,                  // the second product's own field and, over it, the shared lines (null: not ready or no scan near this time)
+    val titleB: String? = null,
+    val styleB: Style? = null,
     val other: MrmsProduct? = null,                   // the product shown before this one: the A/B button flips back to it
     val rainSince: Long? = null,                      // the rainfall total from this time to now is shown instead of the radar (epoch seconds)
     val rainInfo: String? = null,                     // the span the total covers and its sources, or what is missing
@@ -302,6 +306,30 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 if (_state.value.alertKinds.isNotEmpty()) { refreshAlerts(force = false); showFrameIfNewest() }
             }
         }
+    }
+
+    /** Shows the previous product under this one (or back to one picture). */
+    fun setCompare(on: Boolean) {
+        if (_state.value.compare == on) return
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        if (on) showFrame()
+    }
+
+    private val otherFiles = HashMap<String, Pair<Long, List<MrmsFile>>>()
+
+    /** The compare's second picture: [product]'s scan nearest [validTime], drawn as its own field only (see-through), and the lines and stations over it once. */
+    private suspend fun paneBFor(product: MrmsProduct, validTime: Long, sector: Sector, over: Bitmap?): Triple<List<Bitmap>, String, Style>? {
+        if (over == null) return null
+        val now = System.currentTimeMillis() / 1000
+        val cached = otherFiles[product.id]?.takeIf { now - it.first < 90 }?.second
+        val files = cached ?: repo.listFiles(product, now).also { otherFiles[product.id] = now to it }
+        val file = nearestFile(files, validTime, 600) ?: return null
+        val frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
+        val g = frame.window.grid
+        val bv = View(sector.name, 0, 0, g.columns, g.rows, pixelScale(g), 1, g)
+        val syn = synthetic(product, g)
+        val field = withMemory { withContext(Dispatchers.Default) { renderer.render(syn, syn.style, frame.window.values, emptyList(), bv, dark, halo = mrmsHasHalo(product), part = RenderPart.Field) } }
+        return Triple(listOf(field, over), product.displayTitle, syn.style)
     }
 
     /** The A/B button: back to the product shown before this one, at the same time, with the same zoom, crosshair and overlays. */
@@ -1014,6 +1042,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val under = ArrayList<ShownOverlay>()
         val underInfo = ArrayList<String>()
         var dirty = true
+        val cmp = if (st.compare && !st.playing) st.other else null
+        var over: Bitmap? = null
         suspend fun paint(final: Boolean) {
             if (dirty) {
                 dirty = false
@@ -1048,6 +1078,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             else { lines = listOf(dewLines(t, td, rectOn(t.grid, v))); under += dewShown(t, td); dirty = true }
         }
         paint(final = true)
+        if (cmp != null) {
+            over = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, emptyList(), alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), counties = _state.value.settings.counties, fieldLines = lines, stations = plots, part = RenderPart.Over) } }
+            val b = try { paneBFor(cmp, file.validTime, sector, over) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            update { it.copy(paneB = b?.first, titleB = b?.second, styleB = b?.third, notice = if (b == null) "No ${cmp.displayTitle} scan near this time to compare." else it.notice) }
+        } else if (_state.value.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
         scheduleDetail()
     }

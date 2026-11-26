@@ -46,29 +46,34 @@ class FieldLines(val values: FloatArray, val grid: simplemodelview.Grid, val sty
 internal fun barbsAcross(barbDensity: Int): Float = when (barbDensity) { 1 -> 10f; 2 -> 16f; 3 -> 24f; 4 -> 34f; else -> 42f }
 
 /** Draws one finished map picture: background, data (native rasteriser), an optional overlay, lines. */
+/** What [MapRenderer.render] draws: the whole picture, or (for a compare) only the product's own part on a see-through bitmap, or only what lies over it (lines, stations, alerts). */
+enum class RenderPart { All, Field, Over }
+
 class MapRenderer(private val core: Core, private val lines: MapLines) {
     fun render(product: Product, style: Style, values: FloatArray, memberNames: List<String>, view: View, dark: Boolean, overlays: List<Overlay> = emptyList(), alerts: List<AlertDraw> = emptyList(), contours: Boolean = false, halo: Boolean = false, barbDensity: Int = DEFAULT_BARB_DENSITY, counties: Int = 0, barbZoom: Float = 1f,
                /** A field under the data (the MRMS temperature): stretched over the whole picture, smoothly, before the data is drawn. */
                underlay: Overlay? = null, fieldLines: List<FieldLines> = emptyList(), stations: List<StationPlot> = emptyList(),
                /** The color behind the data (default: the map's own grays); white for a picture that is laid out with others on white. */
-               background: Int? = null): Bitmap {
+               background: Int? = null, part: RenderPart = RenderPart.All): Bitmap {
+        val fieldPart = part != RenderPart.Over
+        val overPart = part != RenderPart.Field
         val pictureStart = System.nanoTime()
         val w = view.pixelWidth
         val h = view.pixelHeight
-        val argb = IntArray(w * h)
+        val argb = IntArray(if (fieldPart) w * h else 0)
         val memberRgb = IntArray(10) { Palettes.memberColors[memberNames.getOrNull(it)] ?: 0x808080 }
         val paintLines = PaintballLines.isPaintballLines(product.id)
         // the probability contours lie over the model's own paintball (each member's cells over the threshold in its color): the mask is the same
-        Timings.timed("raster") { core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb) }
-        if (halo) outline(argb, w, h, edgeFor(w))
+        if (fieldPart) Timings.timed("raster") { core.render(values, view, if (paintLines) Style(Kind.Paintball, units = "members") else style, memberRgb, argb) }
+        if (halo && fieldPart) outline(argb, w, h, edgeFor(w))
         val picture = argb
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(background ?: if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
-        if (underlay != null) Timings.timed("underlay") { canvas.drawBitmap(underlay.bitmap, null, underlay.dst, Paint().apply { isFilterBitmap = true }) }
-        if (paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)   // the member cells go over the contours
-        canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, if (paintLines) Paint().apply { alpha = 0x90 } else null)
-        for (overlay in overlays) {
+        if (part == RenderPart.All) canvas.drawColor(background ?: if (dark) 0xFF202428.toInt() else 0xFFEDEFF2.toInt())
+        if (fieldPart && underlay != null) Timings.timed("underlay") { canvas.drawBitmap(underlay.bitmap, null, underlay.dst, Paint().apply { isFilterBitmap = true }) }
+        if (fieldPart && paintLines) drawPaintballLines(canvas, product, values, memberNames, view, dark, w)   // the member cells go over the contours
+        if (fieldPart) canvas.drawBitmap(Bitmap.createBitmap(picture, w, h, Bitmap.Config.ARGB_8888), 0f, 0f, if (paintLines) Paint().apply { alpha = 0x90 } else null)
+        if (fieldPart) for (overlay in overlays) {
             if (overlay.marker) { drawMarkers(canvas, overlay, w); continue }
             if (overlay.halo) { drawHaloed(canvas, overlay, w, h); continue }
             val paint = Paint().apply { isFilterBitmap = false }       // cells stay crisp
@@ -78,14 +83,14 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
                 canvas.drawBitmap(overlay.bitmap, null, r, paint)
             }
         }
-        Timings.timed("lines") { lines.draw(canvas, view, dark, counties) }
-        if (contours) Contours.specFor(product.id, style.units)?.let { spec -> Timings.timed("contours") { drawContourLines(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) } }
-        WindProducts.planeLevel(product.id)?.let { level ->
+        if (overPart) Timings.timed("lines") { lines.draw(canvas, view, dark, counties) }
+        if (fieldPart && contours) Contours.specFor(product.id, style.units)?.let { spec -> Timings.timed("contours") { drawContourLines(canvas, Contours.lines(values, product.grid, view, style, spec), spec.color, dark, w) } }
+        if (fieldPart) WindProducts.planeLevel(product.id)?.let { level ->
             if (WindProducts.hasPlanes(values, product.grid.cells)) drawWind(canvas, product, values, level, view, dark, w, contours, barbDensity, barbZoom)
         }
-        for (f in fieldLines) Timings.timed("contours") { drawContourLines(canvas, fieldLinesFor(f, view), f.spec.color, dark, w) }
-        if (alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
-        if (stations.isNotEmpty()) Timings.timed("stations") { drawStationPlots(canvas, stations, dark, w) }
+        if (overPart) for (f in fieldLines) Timings.timed("contours") { drawContourLines(canvas, fieldLinesFor(f, view), f.spec.color, dark, w) }
+        if (overPart && alerts.isNotEmpty()) drawAlerts(canvas, alerts, w)
+        if (overPart && stations.isNotEmpty()) Timings.timed("stations") { drawStationPlots(canvas, stations, dark, w) }
         Timings.record("picture", (System.nanoTime() - pictureStart) / 1_000_000)
         return bitmap
     }
