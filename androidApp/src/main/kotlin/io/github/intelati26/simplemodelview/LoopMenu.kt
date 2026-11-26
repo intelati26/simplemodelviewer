@@ -108,7 +108,7 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
             }
         }
         val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-        val ends = androidx.compose.material3.SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.tertiary, activeTrackColor = MaterialTheme.colorScheme.tertiary, inactiveTrackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
+        val ends = androidx.compose.material3.SliderDefaults.colors()      // the same colors as the time slider
         if (open) RangeSlider(
             modifier = Modifier.compactSlider(),
             startThumb = { androidx.compose.material3.SliderDefaults.Thumb(source, colors = ends, thumbSize = androidx.compose.ui.unit.DpSize(5.dp, 20.dp)) },
@@ -121,11 +121,6 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
                 if (a != window.first || b != window.last) onRange(times[a] to times[b])
             },
             valueRange = 0f..(n - 1).toFloat(),
-            // another color than the time bar above it: this one is the loop's two ends, that one the frame shown
-            colors = androidx.compose.material3.SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.tertiary, activeTrackColor = MaterialTheme.colorScheme.tertiary,
-                inactiveTrackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
-            ),
         )
     }
 }
