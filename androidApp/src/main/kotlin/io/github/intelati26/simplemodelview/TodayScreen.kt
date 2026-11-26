@@ -263,24 +263,33 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 s.error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
 
                 // ---- the outlook at the place
-                Card {
-                    Text("SPC outlook for ${s.place?.name ?: "your place"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                run {
                     val o = s.outlook
-                    if (s.place == null) Text("Save a place to see what the outlook says for it.", fontSize = 14.sp)
-                    else if (o == null) Text(if (s.busy) "Reading the outlook…" else "No outlook could be read.", fontSize = 14.sp)
-                    else {
-                        Text(TodayText.sentence(o.level), fontSize = 17.sp, fontWeight = FontWeight.Medium, color = if (o.level >= 2) warn else MaterialTheme.colorScheme.onSurface)
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.padding(top = 2.dp)) {
-                            val colors = listOf(Color(0xFF97C459), Color(0xFFEF9F27), Color(0xFFD85A30), Color(0xFFE24B4A), Color(0xFF993556))
-                            for (i in 1..5) Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(2.dp)).background(if (i == o.level) colors[i - 1] else colors[i - 1].copy(alpha = 0.25f)))
+                    ExpandCard(
+                        "outlook", "\u26A0\uFE0F", "SPC outlook for ${s.place?.name ?: "your place"}",
+                        summary = {
+                            if (s.place == null) Text("Save a place to see what the outlook says for it.", fontSize = 14.sp)
+                            else if (o == null) Text(if (s.busy) "Reading the outlook…" else "No outlook could be read.", fontSize = 14.sp)
+                            else {
+                                Text(TodayText.sentence(o.level), fontSize = 16.sp, fontWeight = FontWeight.Medium, color = if (o.level >= 2) warn else MaterialTheme.colorScheme.onSurface)
+                                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    val colors = listOf(Color(0xFF97C459), Color(0xFFEF9F27), Color(0xFFD85A30), Color(0xFFE24B4A), Color(0xFF993556))
+                                    for (i in 1..5) Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(2.dp)).background(if (i == o.level) colors[i - 1] else colors[i - 1].copy(alpha = 0.25f)))
+                                }
+                                if (s.day <= 2) Text("\uD83C\uDF2A\uFE0F ${o.tornado ?: "–"}%   \uD83D\uDCA8 ${o.wind ?: "–"}%   \uD83E\uDDCA ${o.hail ?: "–"}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                else o.severeChance?.let { Text("Severe chance here: $it%", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        },
+                    ) {
+                        if (o != null) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { for (n in listOf("Marginal", "Slight", "Enhanced", "Moderate", "High")) Text(n, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            if (s.day <= 2) {
+                                Text("Tornado ${o.tornado ?: "–"}% · Wind ${o.wind ?: "–"}% · Hail ${o.hail ?: "–"}%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TodayText.topThreatLine(o.top)?.let { Text(it, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+                            }
                         }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { for (n in listOf("Marginal", "Slight", "Enhanced", "Moderate", "High")) Text(n, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        if (s.day <= 2) {
-                            Text("Tornado ${o.tornado ?: "–"}% · Wind ${o.wind ?: "–"}% · Hail ${o.hail ?: "–"}%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TodayText.topThreatLine(o.top)?.let { Text(it, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
-                        } else o.severeChance?.let { Text("Severe chance here: $it%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        TextButton(onClick = { onOpen("outlook") }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("See the national outlook") }
                     }
-                    TextButton(onClick = { onOpen("outlook") }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("See the national outlook") }
                 }
 
                 // ---- the general forecast at the nearest station
@@ -293,8 +302,21 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 WindCard(s.wind, s.windNote, s.windBusy, s.place?.name, s.gustLine, vm::setGustLine, s.outlook, s.day, s.thunder)
 
                 // ---- mesoscale discussions
-                if (s.covering.isNotEmpty() || s.nearby.isNotEmpty() || s.mesoNote != null) Card {
-                    Text("Mesoscale discussions", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ExpandCard(
+                    "meso", "\uD83D\uDCCD", "Mesoscale discussions", startOpen = s.covering.isNotEmpty(),
+                    summary = {
+                        val first = s.covering.firstOrNull()
+                        when {
+                            s.mesoNote != null && s.covering.isEmpty() && s.nearby.isEmpty() -> Text(s.mesoNote!!, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                            first != null -> {
+                                Text("${s.covering.size} over your place · ${first.concerning}", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = warn)
+                                if (s.nearby.isNotEmpty()) Text("${s.nearby.size} more active elsewhere", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            s.nearby.isNotEmpty() -> Text("${s.nearby.size} active, none over your place", fontSize = 15.sp)
+                            else -> Text(if (s.busy) "Reading…" else "None active right now", fontSize = 15.sp)
+                        }
+                    },
+                ) {
                     s.mesoNote?.let { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.error) }
                     for (m in s.covering + s.nearby) {
                         val here = m in s.covering
@@ -305,15 +327,16 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                             if (expandedMcd == m.number && m.discussion.isNotBlank()) Text(m.discussion, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp))
                         }
                     }
+                    if (s.covering.isEmpty() && s.nearby.isEmpty() && s.mesoNote == null) Text("Nothing to read: no mesoscale discussion is active.", fontSize = 13.sp)
                 }
-                else if (!s.busy) Card { Text("Mesoscale discussions", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text("None active right now.", fontSize = 14.sp) }
 
                 // ---- the forecasters' words
                 s.discussion?.let { d ->
-                    Card {
-                        Text("What the forecasters say", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        d.headline?.let { Text(it, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
-                        d.sections.firstOrNull()?.paragraphs?.firstOrNull()?.let { Text(it, fontSize = 13.sp, maxLines = 6) }
+                    ExpandCard(
+                        "forecasters", "\uD83D\uDCAC", "What the forecasters say",
+                        summary = { d.headline?.let { Text(it, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) } },
+                    ) {
+                        d.sections.firstOrNull()?.paragraphs?.firstOrNull()?.let { Text(it, fontSize = 13.sp, maxLines = 8) }
                         TextButton(onClick = { onOpen("outlook") }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Read the full discussion") }
                     }
                 }

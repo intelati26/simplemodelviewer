@@ -79,19 +79,37 @@ private fun dayName(zone: ZoneId, t: Long, today: Boolean): String =
 
 private fun mph(kt: Int) = Math.round(kt * 1.15078).toInt()
 
-/** The general forecast at the nearest station: one line a day (words for the sky, high and low, rain chance, wind), and the way to the whole table. */
+/** The symbol of a day: snow, thunder or rain when those are likely, else the sky. */
+private fun daySymbol(d: PointDay): String = when {
+    (d.snowTenths ?: 0) >= 1 && (d.pop ?: 0) >= 30 -> "\u2744\uFE0F"
+    (d.thunder ?: 0) >= 30 -> "\u26C8\uFE0F"
+    (d.pop ?: 0) >= 50 -> "\uD83C\uDF27\uFE0F"
+    (d.pop ?: 0) >= 30 -> "\uD83C\uDF26\uFE0F"
+    else -> when (PointSummary.skyWords(d.sky)) { "Clear" -> "\u2600\uFE0F"; "Partly cloudy" -> "\u26C5"; "Mostly cloudy" -> "\uD83C\uDF25\uFE0F"; "Cloudy" -> "\u2601\uFE0F"; else -> "\u2753" }
+}
+
+/** The general forecast at the nearest station: folded, a symbol and high and low for each of the days; opened, a line a day in words and the way to the whole table. */
 @Composable
 internal fun PointCard(data: PointForecast?, note: String?, busy: Boolean, placeName: String?, onMore: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    val today = data?.let { ZonedDateTime.now(it.zone).toLocalDate().toEpochDay().toInt() }
+    ExpandCard(
+        "forecast", "\uD83C\uDF24\uFE0F", "Forecast at ${placeName ?: "your place"}",
+        summary = {
+            if (data == null) Text(note ?: if (busy) "Reading the National Blend…" else "No forecast could be read.", fontSize = 14.sp)
+            else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                for (d in data.days) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(dayName(data.zone, d.firstValid, d.day == today), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(daySymbol(d), fontSize = 22.sp)
+                    Text(d.high?.let { "$it°" } ?: "–", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(d.low?.let { "$it°" } ?: "–", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
     ) {
-        Text("Forecast at ${placeName ?: "your place"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (data == null) { Text(note ?: if (busy) "Reading the National Blend…" else "No forecast could be read.", fontSize = 14.sp); return@Column }
+        if (data == null) return@ExpandCard
         Text("Nearest station: ${data.stationName} (${data.station})", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val today = ZonedDateTime.now(data.zone).toLocalDate().toEpochDay().toInt()
         for (d in data.days) {
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(dayName(data.zone, d.firstValid, d.day == today), fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(52.dp))
                 Column(Modifier.weight(1f)) {
                     val hiLo = listOfNotNull(d.high?.let { "High $it°" }, d.low?.let { "low $it°" }).joinToString(" · ")

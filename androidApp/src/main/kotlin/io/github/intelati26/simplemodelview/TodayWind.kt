@@ -90,19 +90,28 @@ private fun gustShade(mph: Double): Color = when {
     else -> Color(0xFF993556)
 }
 
-/**
- * The wind at the place: the gust timing against the user's line, and the damaging-wind side from the outlook (today's SPC wind chance) and the model (GREFS 4-hour
- * chance with how it changed from the last run).
- */
+/** The wind at the place: folded, a symbol, the gust against the line in one line and the next hours as blocks; opened, the labels, the damaging-wind chances and the line. */
 @Composable
 internal fun WindCard(wind: WindData?, note: String?, busy: Boolean, placeName: String?, line: Int, onLine: (Int) -> Unit, outlook: PlaceOutlook?, day: Int, thunder: ThunderData?) {
     var menu by remember { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    val summary = wind?.let { WindTiming.summarize(it.hours, line) }
+    ExpandCard(
+        "wind", "\uD83D\uDCA8", "Wind at ${placeName ?: "your place"}",
+        summary = {
+            if (wind == null || summary == null) Text(note ?: if (busy) "Reading the model…" else "No gust forecast could be read.", fontSize = 14.sp)
+            else {
+                val head = when {
+                    summary.firstOver != null -> "Gusts past $line mph from about ${clockLabel(summary.firstOver.valid)}"
+                    summary.peak != null -> "Gusts to ${Math.round(summary.peak.percent)} mph around ${clockLabel(summary.peak.valid)}"
+                    else -> "No gust forecast"
+                }
+                Text(head, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = if (summary.firstOver != null) Color(0xFFB3261E) else MaterialTheme.colorScheme.onSurface)
+                MiniStrip(wind.hours.map { gustShade(it.percent) to (it.percent >= line) })
+            }
+        },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Wind at ${placeName ?: "your place"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text("Gusts, up to 12 hours from now", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             Box {
                 Text("Gust line: $line mph ▾", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -110,10 +119,8 @@ internal fun WindCard(wind: WindData?, note: String?, busy: Boolean, placeName: 
                 }
             }
         }
-        if (wind == null) Text(note ?: if (busy) "Reading the model…" else "No gust forecast could be read.", fontSize = 14.sp)
-        else {
-            val summary = WindTiming.summarize(wind.hours, line)
-            Text(WindTiming.headline(summary, ::clockLabel), fontSize = 16.sp, fontWeight = FontWeight.Medium, color = if (summary.firstOver != null) Color(0xFFB3261E) else MaterialTheme.colorScheme.onSurface)
+        if (wind != null && summary != null) {
+            Text(WindTiming.headline(summary, ::clockLabel), fontSize = 14.sp)
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 for (h in wind.hours) Box(
                     Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surface).background(gustShade(h.percent))
@@ -126,8 +133,6 @@ internal fun WindCard(wind: WindData?, note: String?, busy: Boolean, placeName: 
                 Text(clockLabel(wind.hours.last().valid), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-
-        // the damaging-wind side
         val dayWord = if (day == 1) "today" else if (day == 2) "tomorrow" else "day $day"
         outlook?.wind?.let { Text("SPC damaging-wind chance $dayWord: $it%", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
         thunder?.severe?.firstOrNull { it.name == "Damaging wind" }?.let { c ->

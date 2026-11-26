@@ -154,16 +154,38 @@ private fun shade(p: Double): Color = when {
     else -> Color(0xFF993556)
 }
 
-/** The thunder chance at the place: the headline against the user's line, the three periods, and the next 12 hours. */
+private fun severeSymbol(name: String) = when (name) { "Tornado" -> "\uD83C\uDF2A\uFE0F"; "Damaging wind" -> "\uD83D\uDCA8"; else -> "\uD83E\uDDCA" }
+
+/** A short line for the folded card: where the chance first reaches the line, or how high it gets. */
+private fun shortHeadline(s: simplemodelview.ThunderSummary): String = when {
+    s.firstOver != null -> "Past ${s.line}% from about ${clockLabel(s.firstOver.valid)}"
+    s.peak != null && s.peak.percent < 5 -> "Little chance of thunder (under 5%)"
+    s.peak != null -> "Under ${s.line}% · peak ${Math.round(s.peak.percent)}% around ${clockLabel(s.peak.valid)}"
+    else -> "No chance could be read"
+}
+
+/** The thunder chance at the place: folded, a symbol, one line against the user's line and the next 12 hours as blocks; opened, the periods, the severe types and the line. */
 @Composable
 internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, placeName: String?, line: Int, onLine: (Int) -> Unit) {
     var menu by remember { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    val summary = data?.let { ThunderTiming.summarize(it.hours, line) }
+    val over = summary?.firstOver != null
+    ExpandCard(
+        "thunder", "\u26C8\uFE0F", "Thunder at ${placeName ?: "your place"}",
+        summary = {
+            if (data == null || summary == null) Text(note ?: if (busy) "Reading the model…" else "No thunder chance could be read.", fontSize = 14.sp)
+            else {
+                Text(shortHeadline(summary), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = if (over) Color(0xFFB3261E) else MaterialTheme.colorScheme.onSurface)
+                MiniStrip(data.hours.map { shade(it.percent) to (it.percent >= line) })
+                if (data.severe.isNotEmpty()) Text(
+                    data.severe.joinToString("   ") { c -> severeSymbol(c.name) + " " + (if (c.percent < 1.0) "<1%" else "${Math.round(c.percent)}%") },
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Thunder chance at ${placeName ?: "your place"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text("Up to 12 hours from now", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             Box {
                 Text("Your line: $line% ▾", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -171,11 +193,8 @@ internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, place
                 }
             }
         }
-        if (data == null) { Text(note ?: if (busy) "Reading the model…" else "No thunder chance could be read.", fontSize = 14.sp); return@Column }
-        val summary = ThunderTiming.summarize(data.hours, line)
-        val over = summary.firstOver != null
-        Text(ThunderTiming.headline(summary, ::clockLabel), fontSize = 16.sp, fontWeight = FontWeight.Medium, color = if (over) Color(0xFFB3261E) else MaterialTheme.colorScheme.onSurface)
-
+        if (data == null || summary == null) return@ExpandCard
+        Text(ThunderTiming.headline(summary, ::clockLabel), fontSize = 14.sp)
         // the hours
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             for (h in data.hours) {
@@ -224,5 +243,5 @@ internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, place
             if (top != null && top.percent >= 1.0) Text("Highest at your place: ${top.name.lowercase()}", fontSize = 12.sp)
         }
         Text("Model guidance (SPC REFS thunder probability, ${data.run} run), not a forecast.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+}
 }
