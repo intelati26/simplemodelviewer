@@ -118,6 +118,7 @@ data class MrmsState(
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
     val stationDensity: Int = 2,                      // 1 as before, 2 and 3 closer up and down
     val station: StationDetail? = null,               // the station tapped: its reports and chart
+    val other: MrmsProduct? = null,                   // the product shown before this one: the A/B button flips back to it
     val rainSince: Long? = null,                      // the rainfall total from this time to now is shown instead of the radar (epoch seconds)
     val rainInfo: String? = null,                     // the span the total covers and its sources, or what is missing
     val alertKinds: Set<AlertKind> = emptySet(),      // which alert layers are on (none by default)
@@ -224,6 +225,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(favorites = prefs.getStringSet("favorites", emptySet()).orEmpty(), places = decodePlaces(prefs.getString("places", "").orEmpty()), settings = readSettings())
     }
 
+    private var keepTime: Long? = null
+
     /** (Re)reads the list of newest files and shows the latest one. */
     fun load() {
         stopPlaying()
@@ -236,7 +239,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                     val files = repo.listFiles(_state.value.product, System.currentTimeMillis() / 1000)
                     if (files.isEmpty()) throw IllegalStateException("No recent ${_state.value.product.title} files on the MRMS server.")
                     lastLoad = System.currentTimeMillis()
-                    update { it.copy(files = files, index = files.size - 1) }
+                    // another product picked while looking at a scan: the one nearest that time (the newest when none is close)
+                    val near = keepTime?.let { t -> files.indices.minByOrNull { kotlin.math.abs(files[it].validTime - t) }?.takeIf { kotlin.math.abs(files[it].validTime - t) <= 600 } }
+                    keepTime = null
+                    update { it.copy(files = files, index = near ?: (files.size - 1)) }
                     refreshOverlayFiles()
                     showCurrent()
                     return@launch
@@ -298,6 +304,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The A/B button: back to the product shown before this one, at the same time, with the same zoom, crosshair and overlays. */
+    fun flipProduct() { _state.value.other?.let { pickProduct(it) } }
+
     /** The product [delta] places along in the catalog (the arrows beside the product chip). */
     fun stepProduct(delta: Int) {
         val all = MrmsCatalog.all
@@ -316,6 +325,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
+        val before = _state.value
+        if (before.rainSince == null && before.product.id != product.id) { keepTime = before.file?.validTime; update { it.copy(other = before.product) } }
         update { it.copy(product = product, rainSince = null, rainInfo = null) }      // the crosshair stays: showCurrent reads the new product there
         load()
     }

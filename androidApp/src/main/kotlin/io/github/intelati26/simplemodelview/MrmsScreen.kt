@@ -30,6 +30,9 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -126,6 +129,10 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     val at = MrmsCatalog.all.indexOfFirst { it.id == s.product.id }
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
                     AssistChip(onClick = { picker = true }, label = { Text(s.product.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = vm::flipProduct, enabled = s.other != null,
+                        modifier = Modifier.height(32.dp).widthIn(min = 32.dp).semantics { contentDescription = "Flip to the previous product" }, contentPadding = PaddingValues(horizontal = 6.dp),
+                    ) { Text("\u21C4", fontSize = 20.sp) }
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("mrms", onOpen)
                     MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true })
