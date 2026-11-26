@@ -27,7 +27,7 @@ internal fun ProductStepButton(next: Boolean, enabled: Boolean, onClick: () -> U
 
 /** A line under the timeline: back (‹), Play / Pause and forward (›) one time step, with the place in the list ("12 / 48"). Used by the model pages and MRMS. */
 @Composable
-internal fun TimeStepRow(index: Int, count: Int, playing: Boolean, onToggle: () -> Unit, onPick: (Int) -> Unit) {
+internal fun TimeStepRow(index: Int, count: Int, playing: Boolean, onToggle: () -> Unit, onPick: (Int) -> Unit, loopToggle: Boolean = false) {
     androidx.compose.foundation.layout.Row(
         androidx.compose.ui.Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
@@ -45,6 +45,7 @@ internal fun TimeStepRow(index: Int, count: Int, playing: Boolean, onToggle: () 
             modifier = Modifier.height(32.dp).widthIn(min = 40.dp).semantics { contentDescription = "Next time" }, contentPadding = PaddingValues(horizontal = 12.dp),
         ) { Text("\u203A", fontSize = 24.sp) }
         Text("${index + 1} / $count", Modifier.padding(start = 8.dp), style = androidx.compose.material3.MaterialTheme.typography.labelMedium)
+        if (loopToggle && count >= 3) LoopToggle()
     }
 }
 

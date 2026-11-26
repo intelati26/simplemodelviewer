@@ -200,7 +200,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     )
                 }
                 LoopRangeBar(s.files.map { it.validTime }, { vm.loopWindowFor(s) }, s.index, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopLength(0) }
-                TimeStepRow(s.index, s.files.size, s.playing, vm::togglePlay, vm::pickIndex)
+                TimeStepRow(s.index, s.files.size, s.playing, vm::togglePlay, vm::pickIndex, loopToggle = true)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }

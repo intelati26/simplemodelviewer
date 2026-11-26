@@ -57,6 +57,20 @@ internal fun LoopStartItem(onDone: () -> Unit) {
     DropdownMenuItem(text = { Text((if (on) "\u2713 " else "") + "Start at the frame shown") }, onClick = { AppContainer.setLoopFromShown(!on); onDone() })
 }
 
+/** Whether the loop's range bar is open (kept for every page; folded away by default). */
+internal object LoopBar {
+    var open by mutableStateOf(AppContainer.prefs.getBoolean("loop_bar_open", false))
+    fun toggle() { open = !open; AppContainer.prefs.edit().putBoolean("loop_bar_open", open).apply() }
+}
+
+/** The small Loop button on the line with the arrows: opens and folds the range bar above it. */
+@Composable
+internal fun LoopToggle() {
+    TextButton(onClick = LoopBar::toggle, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
+        Text("Loop " + if (LoopBar.open) "\u25BE" else "\u25B4", fontSize = 12.sp)
+    }
+}
+
 /**
  * The loop on the time bar, the same on every page: a two-handle bar over the frames (drag either end), what it covers in words (the times, the number of frames and
  * how long they span: what Play and a loop video will use), and spans in time that are turned into frames for the page ("3 h up to the frame shown"). [windowFor]
@@ -71,14 +85,13 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
     if (window.isEmpty()) return
     val n = times.size
     var menu by remember { mutableStateOf(false) }
-    // folded away unless opened (the choice is kept for every page)
-    var open by remember { mutableStateOf(AppContainer.prefs.getBoolean("loop_bar_open", false)) }
+    if (!LoopBar.open) return                    // folded away unless opened from the Loop button on the line with the arrows
+    val open = true
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                (if (open) "\u25BE " else "\u25B8 ") + "Loop  " + loopRangeSummary(times, window),
-                Modifier.weight(1f).clickable { open = !open; AppContainer.prefs.edit().putBoolean("loop_bar_open", open).apply() }.padding(vertical = if (open) 0.dp else 4.dp),
-                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                "Loop  " + loopRangeSummary(times, window), Modifier.weight(1f), fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (open) Box {
                 TextButton(onClick = { menu = true }, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Span \u25BE", fontSize = 12.sp) }
