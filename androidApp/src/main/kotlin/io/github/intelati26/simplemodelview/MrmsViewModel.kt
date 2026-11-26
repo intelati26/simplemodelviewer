@@ -78,6 +78,14 @@ import kotlin.math.floor
 /** A finer picture of the part of the map that is zoomed into, drawn over the whole-sector picture; the edges are fractions of that picture (top-down). */
 class DetailLayer(val bitmap: Bitmap, val left: Float, val top: Float, val right: Float, val bottom: Float, val cellKilometers: Double)
 
+/**
+ * What one pane of the compare shows: a scan product, or a rainfall total (a long-total product, or [since] for one from a chosen time). Panes are alike for the
+ * compare whatever they hold: each is asked for its field at a time (see MrmsViewModel.fieldOf).
+ */
+data class PaneSpec(val product: MrmsProduct, val since: Long? = null) {
+    val isTotal: Boolean get() = since != null || product.rainDays > 0
+}
+
 /** The MRMS page: a product, a sector (or the globe), the newest scans of that product and the one being shown. */
 data class MrmsState(
     val busy: Boolean = true,
@@ -123,7 +131,7 @@ data class MrmsState(
     val paneB: List<Bitmap>? = null,                  // the second product's own field and, over it, the shared lines (null: not ready or no scan near this time)
     val titleB: String? = null,
     val styleB: Style? = null,
-    val other: MrmsProduct? = null,                   // the product shown before this one: the A/B button flips back to it
+    val other: PaneSpec? = null,                      // what was shown before this: the A/B button flips back to it, and the compare shows it under this one
     val rainSince: Long? = null,                      // the rainfall total from this time to now is shown instead of the radar (epoch seconds)
     val rainInfo: String? = null,                     // the span the total covers and its sources, or what is missing
     val alertKinds: Set<AlertKind> = emptySet(),      // which alert layers are on (none by default)
@@ -319,24 +327,37 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val otherFiles = HashMap<String, Pair<Long, List<MrmsFile>>>()
 
-    /** The compare's second picture: [product]'s scan nearest [validTime], drawn as its own field only (see-through), and the lines and stations over it once. */
-    private suspend fun paneBFor(product: MrmsProduct, validTime: Long, sector: Sector, over: Bitmap?): Triple<List<Bitmap>, String, Style>? {
-        if (over == null) return null
+    /** One pane's field: what [spec] is at [validTime] on the sector's grid (a scan: the one nearest within [tolerance]; a total: the sum from its start to now). Null: nothing near. */
+    private class PaneField(val values: FloatArray, val grid: Grid, val product: Product, val halo: Boolean)
+
+    private suspend fun fieldOf(spec: PaneSpec, validTime: Long, tolerance: Long, sector: Sector): PaneField? {
         val now = System.currentTimeMillis() / 1000
+        if (spec.isTotal) {
+            val since = spec.since ?: (now / 3600 * 3600 - spec.product.rainDays * 86400L)
+            val r = rainTotal(sector, since, report = false) ?: return null
+            return PaneField(r.values, r.grid, r.product, halo = false)
+        }
+        val product = spec.product
         val cacheKey = "${product.id}|${product.level}"
         val cached = otherFiles[cacheKey]?.takeIf { now - it.first < 90 }?.second
         val files = cached ?: repo.listFiles(product, now).also { otherFiles[cacheKey] = now to it }
-        val file = nearestFile(files, validTime, 600) ?: return null
+        val file = nearestFile(files, validTime, tolerance) ?: return null
         val frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
-        val g = frame.window.grid
+        return PaneField(frame.window.values, frame.window.grid, synthetic(product, frame.window.grid), mrmsHasHalo(product))
+    }
+
+    /** The compare's second picture: [spec] drawn as its own field only (see-through), with the lines and stations [over] it once. */
+    private suspend fun paneBFor(spec: PaneSpec, validTime: Long, tolerance: Long, sector: Sector, over: Bitmap?): Triple<List<Bitmap>, String, Style>? {
+        if (over == null) return null
+        val f = fieldOf(spec, validTime, tolerance, sector) ?: return null
+        val g = f.grid
         val bv = View(sector.name, 0, 0, g.columns, g.rows, pixelScale(g), 1, g)
-        val syn = synthetic(product, g)
-        val field = withMemory { withContext(Dispatchers.Default) { renderer.render(syn, syn.style, frame.window.values, emptyList(), bv, dark, halo = mrmsHasHalo(product), part = RenderPart.Field) } }
-        return Triple(listOf(field, over), product.displayTitle, syn.style)
+        val field = withMemory { withContext(Dispatchers.Default) { renderer.render(f.product, f.product.style, f.values, emptyList(), bv, dark, halo = f.halo, part = RenderPart.Field) } }
+        return Triple(listOf(field, over), specTitle(spec), f.product.style)
     }
 
     /** The A/B button: back to the product shown before this one, at the same time, with the same zoom, crosshair and overlays. */
-    fun flipProduct() { if (_state.value.compare) swapPanes() else _state.value.other?.let { pickProduct(it) } }
+    fun flipProduct() = swapPanes()
 
     /** The product [delta] places along in the catalog (the arrows beside the product chip). */
     fun stepProduct(delta: Int) {
@@ -346,7 +367,31 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The product the controls are working on: the one above, or in a compare the one of the selected pane. */
-    fun activeProduct(st: MrmsState = _state.value): MrmsProduct = if (st.compare && st.activePane == 1) st.other ?: st.product else st.product
+    fun activeProduct(st: MrmsState = _state.value): MrmsProduct = if (st.compare && st.activePane == 1) st.other?.product ?: st.product else st.product
+
+    /** What the product chip says: the selected pane's. */
+    fun activeTitle(st: MrmsState = _state.value): String = specTitle(if (st.compare && st.activePane == 1) st.other ?: specOf(st) else specOf(st))
+
+    fun specTitle(spec: PaneSpec): String = if (spec.since != null) "Rainfall since ${formatClock(spec.since, 0)}" else spec.product.displayTitle
+
+    private fun specOf(st: MrmsState) = PaneSpec(st.product, st.rainSince.takeIf { st.product.rainDays == 0 })
+
+    /** Shows [spec] as the page's picture (in place of what is shown), keeping [otherAfter] as the one to flip back to. */
+    private fun showSpec(spec: PaneSpec, otherAfter: PaneSpec?) {
+        stopPlaying(); frameJob?.cancel()
+        val st = _state.value
+        keepTime = st.file?.validTime.takeIf { st.rainSince == null && !spec.isTotal }
+        val cleared = { m: MrmsState -> m.copy(other = otherAfter, paneB = null, titleB = null, styleB = null, rainInfo = null) }
+        when {
+            spec.since != null -> { update { cleared(it).copy(product = spec.product, rainSince = spec.since, globe = false) }; showFrame() }
+            spec.product.rainDays > 0 -> {
+                val end = System.currentTimeMillis() / 1000 / 3600 * 3600
+                update { cleared(it).copy(product = spec.product, rainSince = end - spec.product.rainDays * 86400L, globe = false) }
+                showFrame()
+            }
+            else -> { prefs.edit().putString("mrms_product", spec.product.id).apply(); update { cleared(it).copy(product = spec.product, rainSince = null) }; load() }
+        }
+    }
 
     fun selectPane(i: Int) { if (_state.value.activePane != i) update { it.copy(activePane = i) } }
 
@@ -354,20 +399,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun swapPanes() {
         val st = _state.value
         val o = st.other ?: return
-        if (st.rainSince != null || o.rainDays > 0) return
-        stopPlaying(); frameJob?.cancel()
-        keepTime = st.file?.validTime
-        prefs.edit().putString("mrms_product", o.id).apply()
-        update { it.copy(product = o, other = st.product, paneB = null, titleB = null, styleB = null, crosshair = it.crosshair) }
-        load()
+        showSpec(o, specOf(st))
     }
 
     fun pickProduct(picked: MrmsProduct) {
         val cur = _state.value
         if (cur.compare && cur.activePane == 1 && cur.other != null) {
             // the pane below: only that picture is replaced (the time, zoom and everything on the other pane stay)
-            if (picked.rainDays > 0) { update { it.copy(notice = "A rainfall total cannot be a pane of the compare.") }; return }
-            update { it.copy(other = withSavedLevel(picked), paneB = null, titleB = null, styleB = null) }
+            update { it.copy(other = PaneSpec(withSavedLevel(picked)), paneB = null, titleB = null, styleB = null) }
             showFrame()
             return
         }
@@ -375,6 +414,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             // a long rainfall total: added up from the newest whole hour back (not kept as the product to open with: it is not on the server)
             stopPlaying(); frameJob?.cancel()
             val end = System.currentTimeMillis() / 1000 / 3600 * 3600
+            if (!cur.compare && specOf(cur) != PaneSpec(picked)) update { it.copy(other = specOf(cur)) }
             update { it.copy(product = picked, rainSince = end - picked.rainDays * 86400L, rainInfo = null, globe = false, crosshair = null, readout = null, tapLatLon = null) }
             showFrame()
             return
@@ -382,7 +422,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
         val before = _state.value
-        if (before.rainSince == null && !before.compare && before.product.id != product.id) { keepTime = before.file?.validTime; update { it.copy(other = before.product) } }
+        if (!before.compare && specOf(before) != PaneSpec(product)) { keepTime = before.file?.validTime.takeIf { before.rainSince == null }; update { it.copy(other = specOf(before)) } }
         update { it.copy(product = product, rainSince = null, rainInfo = null) }      // the crosshair stays: showCurrent reads the new product there
         load()
     }
@@ -397,12 +437,12 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun pickLevel(index: Int) {
         val st = _state.value
         if (st.compare && st.activePane == 1 && st.other != null) {
-            val o = st.other
+            val o = st.other.product
             if (o.levels.isEmpty()) return
             val l = index.coerceIn(0, o.levels.size - 1)
             if (l == o.level) return
             prefs.edit().putInt("mrms_level_${o.id}", l).apply()
-            update { it.copy(other = o.copy(level = l), paneB = null) }
+            update { it.copy(other = PaneSpec(o.copy(level = l)), paneB = null) }
             showFrame()
             return
         }
@@ -761,6 +801,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun setRainSince(since: Long?) {
         if (since == null && _state.value.product.rainDays > 0) { pickProduct(MrmsCatalog.default); return }       // (back from a long total: to the radar)
         stopPlaying()
+        val before = _state.value
+        if (since != null && !before.compare && specOf(before) != PaneSpec(before.product, since)) update { it.copy(other = specOf(before)) }
         update { it.copy(rainSince = since, rainInfo = null, globe = if (since != null) false else it.globe, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
@@ -792,21 +834,23 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
     }
 
-    private suspend fun showRain(st: MrmsState, since: Long) {
-        update { it.copy(busy = true, error = null, rainInfo = "Finding the newest totals\u2026") }
+    /** A rainfall total's field: the pieces from [since] to now added up on the sector's grid. With [report], progress and failures are shown on the page. */
+    private class RainOut(val values: FloatArray, val grid: Grid, val product: Product, val plan: simplemodelview.RainSince.Plan, val fellBack: Int, val missing: Int)
+
+    private suspend fun rainTotal(sector: Sector, since: Long, report: Boolean): RainOut? {
+        val styleProduct = MrmsCatalog.byId("MultiSensor_QPE_72H_Pass2_00.00") ?: _state.value.product
         withContext(Dispatchers.IO) { rainDays.expire() }
         val multiEnd = newestOf("MultiSensor_QPE_01H_Pass2_00.00") ?: newestOf("MultiSensor_QPE_01H_Pass1_00.00")
         val radarEnd = newestOf("RadarOnly_QPE_15M_00.00") ?: (System.currentTimeMillis() / 1000)
         val plan = simplemodelview.RainSince.plan(since, multiEnd, radarEnd)
-        if (plan.pieces.isEmpty()) { update { it.copy(busy = false, rainInfo = "Nothing to add yet: the start is after the newest radar total.") }; return }
-        val sector = st.sector
+        if (plan.pieces.isEmpty()) { if (report) update { it.copy(busy = false, rainInfo = "Nothing to add yet: the start is after the newest radar total.") }; return null }
         val box = sectorBox(sector)
         var grid: Grid? = null
         var sum: FloatArray? = null
         var missing = 0
         var fellBack = 0
         for ((k, piece) in plan.pieces.withIndex()) {
-            update { it.copy(rainInfo = "Adding ${k + 1} of ${plan.pieces.size}: ${formatClock(piece.start)} \u2192 ${formatClock(piece.end)}") }
+            if (report) update { it.copy(rainInfo = "Adding ${k + 1} of ${plan.pieces.size}: ${formatClock(piece.start)} \u2192 ${formatClock(piece.end)}") }
             var added = false
             if (piece.isDay) {
                 val frame = dayFrame(piece, box, sector, grid)
@@ -828,10 +872,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (!added) missing += 1
         }
-        val g = grid ?: run { update { it.copy(busy = false, rainInfo = "The rainfall totals could not be read.") }; return }
-        val values = sum!!
-        val styleProduct = MrmsCatalog.byId("MultiSensor_QPE_72H_Pass2_00.00") ?: st.product
+        val g = grid ?: run { if (report) update { it.copy(busy = false, rainInfo = "The rainfall totals could not be read.") }; return null }
         val product = Product("rain_since", "Rainfall since ${formatClock(plan.start, 0)}", styleProduct.group, styleOf(styleProduct), hasMembers = false, timeDimension = null, grid = g)
+        return RainOut(sum!!, g, product, plan, fellBack, missing)
+    }
+
+    private suspend fun showRain(st: MrmsState, since: Long) {
+        update { it.copy(busy = true, error = null, rainInfo = "Finding the newest totals\u2026") }
+        val r = rainTotal(st.sector, since, report = true) ?: return
+        val sector = st.sector
+        val g = r.grid; val values = r.values; val product = r.product; val plan = r.plan
         val v = View(sector.name, 0, 0, g.columns, g.rows, pixelScale(g), 1, g)
         val bitmap = withMemory { withContext(Dispatchers.Default) { renderer.render(product, product.style, values, emptyList(), v, dark, contours = false, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity) } }
         view = v
@@ -842,10 +892,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val sources = buildString {
             append("${formatClock(plan.start, 0)} \u2192 ${formatClock(plan.end, 0)}")
             if (plan.multiFrom != null && plan.multiTo != null) append("  \u00B7  multi-sensor ${formatClock(plan.multiFrom, 0)} \u2192 ${formatClock(plan.multiTo, 0)}, radar-only the rest") else append("  \u00B7  radar-only")
-            if (fellBack > 0) append("  \u00B7  $fellBack multi-sensor total${if (fellBack > 1) "s" else ""} missing, radar-only used")
-            if (missing > 0) append("  \u00B7  $missing piece${if (missing > 1) "s" else ""} missing (not counted)")
+            if (r.fellBack > 0) append("  \u00B7  ${r.fellBack} multi-sensor total${if (r.fellBack > 1) "s" else ""} missing, radar-only used")
+            if (r.missing > 0) append("  \u00B7  ${r.missing} piece${if (r.missing > 1) "s" else ""} missing (not counted)")
         }
         update { it.copy(map = bitmap, detail = null, focus = handoff.takeFocus(v), style = product.style, busy = false, rainInfo = sources, overlayStyles = emptyList(), overlayInfo = null) }
+        // a compare: the other pane's field (a scan near now, or another total) on the same lines
+        val other = _state.value.other
+        if (st.compare && !_state.value.playing && other != null) {
+            val over = withMemory { withContext(Dispatchers.Default) { renderer.render(product, product.style, values, emptyList(), v, dark, counties = _state.value.settings.counties, part = RenderPart.Over) } }
+            val b = try { paneBFor(other, System.currentTimeMillis() / 1000, 1800, sector, over) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            update { it.copy(paneB = b?.first, titleB = b?.second, styleB = b?.third, notice = if (b == null) "No ${specTitle(other)} near now to compare." else it.notice) }
+        } else if (_state.value.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
@@ -1119,8 +1176,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         paint(final = true)
         if (cmp != null) {
             over = withMemory { withContext(Dispatchers.Default) { renderer.render(synthetic, synthetic.style, window.values, emptyList(), v, dark, emptyList(), alertDraws(v, alertShapes) + outlookDraws(core, outlook, v, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, v, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, v, file.validTime), counties = _state.value.settings.counties, fieldLines = lines, stations = plots, part = RenderPart.Over) } }
-            val b = try { paneBFor(cmp, file.validTime, sector, over) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
-            update { it.copy(paneB = b?.first, titleB = b?.second, styleB = b?.third, notice = if (b == null) "No ${cmp.displayTitle} scan near this time to compare." else it.notice) }
+            val b = try { paneBFor(cmp, file.validTime, 600, sector, over) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            update { it.copy(paneB = b?.first, titleB = b?.second, styleB = b?.third, notice = if (b == null) "No ${specTitle(cmp)} near this time to compare." else it.notice) }
         } else if (_state.value.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
         scheduleDetail()

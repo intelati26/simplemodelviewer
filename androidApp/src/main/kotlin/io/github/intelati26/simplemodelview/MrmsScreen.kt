@@ -122,7 +122,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
-                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.displayTitle, s.titleB ?: s.other!!.displayTitle, mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onScrub, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, vm.activeTitle(s.copy(activePane = 0)), s.titleB ?: vm.specTitle(s.other!!), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onScrub, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, onScrub = vm::onScrub, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -136,7 +136,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     val activeProduct = vm.activeProduct(s)
                     val at = MrmsCatalog.all.indexOfFirst { it.id == activeProduct.id }
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
-                    AssistChip(onClick = { picker = true }, label = { Text(activeProduct.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
+                    AssistChip(onClick = { picker = true }, label = { Text(vm.activeTitle(s), maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     TextButton(
                         onClick = vm::flipProduct, enabled = s.other != null,
                         modifier = Modifier.height(32.dp).widthIn(min = 32.dp).semantics { contentDescription = "Flip to the previous product" }, contentPadding = PaddingValues(horizontal = 6.dp),
