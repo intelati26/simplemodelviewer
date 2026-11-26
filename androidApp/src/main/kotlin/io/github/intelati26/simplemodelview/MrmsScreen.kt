@@ -122,7 +122,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
-                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.displayTitle, s.titleB ?: s.other!!.displayTitle, mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onScrub, s.focus, vm::focusApplied)
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.displayTitle, s.titleB ?: s.other!!.displayTitle, mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onScrub, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, onScrub = vm::onScrub, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -133,16 +133,17 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val at = MrmsCatalog.all.indexOfFirst { it.id == s.product.id }
+                    val activeProduct = vm.activeProduct(s)
+                    val at = MrmsCatalog.all.indexOfFirst { it.id == activeProduct.id }
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
-                    AssistChip(onClick = { picker = true }, label = { Text(s.product.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
+                    AssistChip(onClick = { picker = true }, label = { Text(activeProduct.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     TextButton(
                         onClick = vm::flipProduct, enabled = s.other != null,
                         modifier = Modifier.height(32.dp).widthIn(min = 32.dp).semantics { contentDescription = "Flip to the previous product" }, contentPadding = PaddingValues(horizontal = 6.dp),
                     ) { Text("\u21C4", fontSize = 20.sp) }
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("mrms", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -183,7 +184,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             }
         }
         val controlsBlock: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
-            if (s.product.levels.isNotEmpty()) HeightRow(s.product, vm::pickLevel)
+            vm.activeProduct(s).let { ap -> if (ap.levels.isNotEmpty()) HeightRow(ap, vm::pickLevel) }
             val contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null
             // every overlay lives in one tree popup, so the strip under the map is a single line
             TextButton(onClick = { overlayTree = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 12.dp)) {
@@ -223,7 +224,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         provider = "NOAA", server = "NOAA's servers",
     )
     if (picker) ProductPicker(
-        products, products.firstOrNull { it.id == s.product.id }, s.favorites, onToggle = vm::toggleFavorite,
+        products, products.firstOrNull { it.id == vm.activeProduct(s).id }, s.favorites, onToggle = vm::toggleFavorite,
         onPick = { picked -> picker = false; MrmsCatalog.byId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
         groups = MrmsCatalog.groups,
     )
@@ -381,13 +382,14 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
-internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null, compare: Boolean = false, canCompare: Boolean = false, onGlobe: Boolean = false, onCompare: ((Boolean) -> Unit)? = null) {
+internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null, compare: Boolean = false, canCompare: Boolean = false, onGlobe: Boolean = false, onCompare: ((Boolean) -> Unit)? = null, onSwap: (() -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (onRain != null) DropdownMenuItem(text = { Text("Rainfall since a date and time\u2026") }, onClick = { open = false; onRain() })
             if (onCompare != null) DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
+            if (compare && onSwap != null) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

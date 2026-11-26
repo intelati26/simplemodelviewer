@@ -106,6 +106,7 @@ data class UiState(
     val windColor: String = "speed",
     val other: Product? = null,                  // the product shown before this one (the compare shows it under this one)
     val compare: Boolean = false,
+    val activePane: Int = 0,                     // the compare pane the product controls change: 0 above, 1 below (a tap on a pane selects it)
     val paneB: List<Bitmap>? = null,             // the other product's own field and, over it, the shared lines
     val titleB: String? = null,
     val styleB: Style? = null,
@@ -285,8 +286,15 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     fun pickProduct(picked: Product) {
         // the picker's single Heights & Winds entry opens the level and color last used
         val product = if (picked.id == WindProducts.CHOOSER_ID) windProduct(_state.value.windLevel, _state.value.windColor) ?: windProduct(_state.value.windLevel, "speed") ?: return else picked
+        val cur = _state.value
+        if (cur.compare && cur.activePane == 1 && cur.other != null) {
+            // the pane below: only that picture is replaced (the time, zoom and the other pane stay)
+            update { it.copy(other = product, paneB = null, titleB = null, styleB = null) }
+            viewModelScope.launch { rerender() }
+            return
+        }
         stopPlaying()
-        _state.value.product?.takeIf { it.id != product.id }?.let { before -> update { it.copy(other = before) } }
+        if (!cur.compare) cur.product?.takeIf { it.id != product.id }?.let { before -> update { it.copy(other = before) } }
         viewModelScope.launch {
             update { it.copy(busy = true, error = null) }
             try { selectProductInternal(product, keepHour = true) } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -327,7 +335,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the previous product under this one (or back to one picture). */
     fun setCompare(on: Boolean) {
         if (_state.value.compare == on) return
-        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null, activePane = 0) }
         if (on && _state.value.globe) { showMapHere(); return }      // the globe has no compare: on to the flat map of the region it is looking at
         if (on) viewModelScope.launch { rerender() }
     }
@@ -359,9 +367,26 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The product [delta] places along in the picker's order (the arrows beside the product chip). */
+    /** The product the controls are working on: the one above, or in a compare the one of the selected pane. */
+    fun activeProduct(st: UiState = _state.value): Product? = if (st.compare && st.activePane == 1) st.other ?: st.product else st.product
+
+    fun selectPane(i: Int) { if (_state.value.activePane != i) update { it.copy(activePane = i) } }
+
+    /** In a compare: the two panes change places (the one above becomes the one below). */
+    fun swapPanes() {
+        val st = _state.value
+        val o = st.other ?: return
+        val mine = st.product ?: return
+        stopPlaying()
+        update { it.copy(other = mine, paneB = null, titleB = null, styleB = null, busy = true, error = null) }
+        viewModelScope.launch {
+            try { selectProductInternal(o, keepHour = true) } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(busy = false, error = e.message) } }
+        }
+    }
+
     fun stepProduct(delta: Int) {
         val st = _state.value
-        val at = st.products.indexOfFirst { it.id == st.product?.id }
+        val at = st.products.indexOfFirst { it.id == activeProduct(st)?.id }
         st.products.getOrNull(at + delta)?.let { pickProduct(it) }
     }
 

@@ -102,7 +102,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "GFS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap, polar = s.polar, onPolarGesture = vm::polarGesture)
                 bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
-                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "GFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -112,7 +112,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     var productMenu by remember { mutableStateOf(false) }
                     Box(Modifier.weight(1f)) {
-                        AssistChip(onClick = { productMenu = true }, label = { Text(s.title.ifEmpty { "Product" }, maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                        AssistChip(onClick = { productMenu = true }, label = { Text((if (s.compare && s.activePane == 1) s.titleB.orEmpty().ifEmpty { s.title } else s.title).ifEmpty { "Product" }, maxLines = 1, overflow = TextOverflow.Ellipsis) })
                         DropdownMenu(expanded = productMenu, onDismissRequest = { productMenu = false }) {
                             DropdownMenuItem(text = { Text("Heights and winds (250 to 850 mb)") }, onClick = { productMenu = false; vm.pickHeightsAndWinds() })
                             for (p in GfsCatalog.surface) DropdownMenuItem(text = { Text(p.title) }, onClick = { productMenu = false; vm.pickSurface(p.id) })
@@ -124,6 +124,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Box {
                         TextButton(onClick = { more = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
                         DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                            if (s.compare) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { more = false; vm.swapPanes() })
                             DropdownMenuItem(text = { Text(if (s.compare) "One picture" else if (s.globe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = s.compare || s.other != null, onClick = { more = false; vm.setCompare(!s.compare) })
                             if (s.frames.size > 1) DropdownMenuItem(text = { Text(if (s.history) "Save the history loop (video)" else "Save the loop (video)") }, onClick = {
                                 more = false
@@ -142,7 +143,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                         }
                     }
                 }
-                if (s.product == "hw") WindChooser(windProducts, s.level, s.color, vm::pickLevel, vm::pickColor)
+                vm.activePick(s).let { ap -> if (ap.product == "hw") WindChooser(windProducts, ap.level, ap.color, vm::pickLevel, vm::pickColor) }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)

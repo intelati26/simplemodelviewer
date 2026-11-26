@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -160,20 +161,25 @@ internal fun ComparePanes(
     modifier: Modifier, a: android.graphics.Bitmap, b: List<android.graphics.Bitmap>, titleA: String, titleB: String, background: Color, crosshair: Pair<Float, Float>?,
     detail: DetailLayer?, onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit, onScrub: (Float, Float) -> Unit,
     focus: simplemodelview.MapFocus?, onFocusApplied: () -> Unit,
+    /** Which pane the product controls change (0 above, 1 below): a tap on a pane selects it. */
+    active: Int = 0, onSelect: (Int) -> Unit = {},
 ) {
     val zoom = remember(a.width, a.height) { ZoomState() }
     androidx.compose.foundation.layout.Column(modifier.fillMaxSize()) {
-        @Composable fun label(text: String) = androidx.compose.material3.Text(
-            text, Modifier.padding(4.dp).background(Color(0xB0000000)).padding(horizontal = 6.dp, vertical = 1.dp),
+        // the selected pane's label is in the accent color, with a thin line along its top edge
+        @Composable fun label(text: String, selected: Boolean) = androidx.compose.material3.Text(
+            text, Modifier.padding(4.dp).background(if (selected) Color(0xE02F5DA8) else Color(0xB0000000)).padding(horizontal = 6.dp, vertical = 1.dp),
             color = Color.White, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1,
         )
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            ZoomableMap(a, crosshair, "First product", detail = detail, onViewport = onViewport, onTap = onTap, onScrub = onScrub, focus = focus, onFocusApplied = onFocusApplied, zoom = zoom)
-            label(titleA)
+            ZoomableMap(a, crosshair, "First product", detail = detail, onViewport = onViewport, onTap = { x, y -> onSelect(0); onTap(x, y) }, onScrub = onScrub, focus = focus, onFocusApplied = onFocusApplied, zoom = zoom)
+            label(titleA, active == 0)
+            if (active == 0) Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF2F5DA8)))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            ZoomableMap(b.first(), crosshair, "Second product", onViewport = { _, _, _, _ -> }, onTap = onTap, onScrub = onScrub, layers = b, layersBackground = background, zoom = zoom, reportViewport = false)
-            label(titleB)
+            ZoomableMap(b.first(), crosshair, "Second product", onViewport = { _, _, _, _ -> }, onTap = { x, y -> onSelect(1); onTap(x, y) }, onScrub = onScrub, layers = b, layersBackground = background, zoom = zoom, reportViewport = false)
+            label(titleB, active == 1)
+            if (active == 1) Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF2F5DA8)))
         }
     }
 }

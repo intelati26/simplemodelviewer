@@ -90,6 +90,7 @@ data class GfsState(
     val polar: PolarCamera? = null,           // set: the globe page shows this polar stereographic map instead of the sphere
     val other: GfsPick? = null,               // what was shown before this: the compare shows it under this one, at the same time
     val compare: Boolean = false,
+    val activePane: Int = 0,                  // the compare pane the product controls change: 0 above, 1 below (a tap on a pane selects it)
     val paneB: List<Bitmap>? = null,          // that product's own field and, over it, the shared lines
     val titleB: String? = null,
     val styleB: Style? = null,
@@ -320,19 +321,45 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- what is shown ----
-    fun pickHeightsAndWinds() { prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw") }; showFrame() }
+    /** In a compare with the pane below selected: [pick] replaces that pane only (the time and zoom stay). True when it did. */
+    private fun forPaneB(pick: (GfsPick) -> GfsPick): Boolean {
+        val st = _state.value
+        val o = st.other ?: return false
+        if (!st.compare || st.activePane != 1) return false
+        update { it.copy(other = pick(o), paneB = null, titleB = null, styleB = null) }
+        showFrame()
+        return true
+    }
+
+    /** What the controls are showing: the pick of the selected pane. */
+    fun activePick(st: GfsState = _state.value): GfsPick = if (st.compare && st.activePane == 1 && st.other != null) st.other else GfsPick(st.product, st.level, st.color, st.since)
+
+    fun selectPane(i: Int) { if (_state.value.activePane != i) update { it.copy(activePane = i) } }
+
+    /** In a compare: the two panes change places (the one above becomes the one below). */
+    fun swapPanes() {
+        val st = _state.value
+        val o = st.other ?: return
+        stopPlaying()
+        prefs.edit().putString("gfs_product", o.product).putInt("gfs_level", o.level).putString("gfs_color", o.color).apply()
+        update { it.copy(product = o.product, level = o.level, color = o.color, since = o.since, other = GfsPick(st.product, st.level, st.color, st.since), paneB = null, titleB = null, styleB = null) }
+        showFrame()
+    }
+
+    fun pickHeightsAndWinds() { if (forPaneB { it.copy(product = "hw") }) return; prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw") }; showFrame() }
     private fun sinceTitle(st: GfsState, file: NbmFile) = "Precipitation from ${formatUtc((st.since ?: 0L) / 21600L * 21600L)} to ${formatUtc(file.valid)}"
 
     /** Precipitation from [start] (epoch seconds, back to 2021-03-23) to the time of the frame shown: it follows the slider and plays as a loop. */
     fun pickPrecipSince(start: Long) {
+        if (forPaneB { it.copy(product = GfsHistory.SINCE_ID, since = start) }) return
         prefs.edit().putString("gfs_product", GfsHistory.SINCE_ID).apply()
         update { it.copy(product = GfsHistory.SINCE_ID, since = start, crosshair = null, readout = null) }
         showFrame()
     }
 
-    fun pickSurface(id: String) { prefs.edit().putString("gfs_product", id).apply(); update { it.copy(product = id) }; showFrame() }
-    fun pickLevel(level: Int) { prefs.edit().putInt("gfs_level", level).apply(); update { it.copy(level = level, product = "hw") }; showFrame() }
-    fun pickColor(key: String) { prefs.edit().putString("gfs_color", key).apply(); update { it.copy(color = key, product = "hw") }; showFrame() }
+    fun pickSurface(id: String) { if (forPaneB { it.copy(product = id) }) return; prefs.edit().putString("gfs_product", id).apply(); update { it.copy(product = id) }; showFrame() }
+    fun pickLevel(level: Int) { if (forPaneB { it.copy(product = "hw", level = level) }) return; prefs.edit().putInt("gfs_level", level).apply(); update { it.copy(level = level, product = "hw") }; showFrame() }
+    fun pickColor(key: String) { if (forPaneB { it.copy(product = "hw", color = key) }) return; prefs.edit().putString("gfs_color", key).apply(); update { it.copy(color = key, product = "hw") }; showFrame() }
 
     fun pickSector(sector: Sector) {
         prefs.edit().putString("gfs_sector", sector.name).apply()
@@ -604,7 +631,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the previous product under this one (or back to one picture). */
     fun setCompare(on: Boolean) {
         if (_state.value.compare == on) return
-        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null, activePane = 0) }
         if (on && _state.value.globe) { showMapHere(); return }      // the globe has no compare: on to the flat map of the region it is looking at
         if (on) showFrame()
     }
@@ -633,7 +660,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val target = gridFor(st.sector)
         // what is shown now against what was before: the compare keeps the one before
         val pick = GfsPick(st.product, st.level, st.color, st.since)
-        if (pick != shownPick) { shownPick?.let { before -> update { it.copy(other = before) } }; shownPick = pick }
+        if (pick != shownPick) { if (!st.compare) shownPick?.let { before -> update { it.copy(other = before) } }; shownPick = pick }
         val (values, product, title) = fieldFor(st, file, target)
         val scale = (1400 / target.columns).coerceIn(2, 8)
         val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)

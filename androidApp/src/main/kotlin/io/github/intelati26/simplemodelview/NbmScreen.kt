@@ -105,7 +105,8 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
             Product(f.first.pickerId, f.title + if (fromGrib && f.variants.none { simplemodelview.NbmGribFields.supports(it.id) }) "  (older run only)" else "", f.group, f.first.style, false, null, Grid.REFS)
         }
     }
-    val family = NbmCatalog.familyOf(s.product)
+    val activeProduct = vm.activeProduct(s)
+    val family = NbmCatalog.familyOf(activeProduct)
 
     var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
     var bottomPx by remember { mutableStateOf(0) }
@@ -121,7 +122,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "National Blend of Models globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
-                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "National Blend of Models map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -132,14 +133,14 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val at = NbmCatalog.families.indexOfFirst { it.id == s.product.family }
+                    val at = NbmCatalog.families.indexOfFirst { it.id == activeProduct.family }
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
                     AssistChip(onClick = { picker = true }, label = { Text(family.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.families.size - 1) { vm.stepProduct(1) }
                     PageMenu("nbm", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
                 }
-                NbmVariantRow(family, s.product, vm::pickProduct)
+                NbmVariantRow(family, activeProduct, vm::pickProduct)
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)

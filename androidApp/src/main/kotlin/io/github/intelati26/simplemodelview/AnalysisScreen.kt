@@ -90,7 +90,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "Analysis globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
                 bitmap != null && s.compare && s.paneB != null && s.other != null && !s.playing ->
-                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
+                    ComparePanes(Modifier.padding(top = with(density) { topPx.toDp() }, bottom = with(density) { bottomPx.toDp() }), bitmap, s.paneB!!, s.product.title, s.titleB.orEmpty(), mapBackground, s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
                 bitmap != null -> ZoomableMap(bitmap, s.crosshair, "Analysis map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
@@ -98,20 +98,21 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val at = AnalysisCatalog.all.indexOf(s.product)
+                    val activeProduct = vm.activeProduct(s)
+                    val at = AnalysisCatalog.all.indexOf(activeProduct)
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
                     Box(Modifier.weight(1f)) {
-                        AssistChip(onClick = { productMenu = true }, label = { Text(s.product.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.fillMaxWidth())
+                        AssistChip(onClick = { productMenu = true }, label = { Text(activeProduct.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.fillMaxWidth())
                         DropdownMenu(expanded = productMenu, onDismissRequest = { productMenu = false }) {
                             for (p in AnalysisCatalog.all) DropdownMenuItem(
-                                text = { Text(p.title, fontWeight = if (p == s.product) FontWeight.Bold else FontWeight.Normal) },
+                                text = { Text(p.title, fontWeight = if (p == activeProduct) FontWeight.Bold else FontWeight.Normal) },
                                 onClick = { productMenu = false; vm.pickProduct(p) },
                             )
                         }
                     }
                     ProductStepButton(next = true, enabled = at in 0 until AnalysisCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("analysis", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {

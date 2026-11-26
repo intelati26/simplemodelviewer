@@ -47,6 +47,7 @@ data class AnalysisState(
     val product: AnalysisProduct = AnalysisCatalog.default,
     val other: AnalysisProduct? = null,             // the product shown before this one (the compare shows it under this one)
     val compare: Boolean = false,
+    val activePane: Int = 0,                        // the compare pane the product controls change: 0 above, 1 below (a tap on a pane selects it)
     val paneB: List<Bitmap>? = null,                // that product's own field and, over it, the shared lines
     val titleB: String? = null,
     val styleB: Style? = null,
@@ -162,12 +163,32 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stepProduct(delta: Int) {
         val all = AnalysisCatalog.all
-        all.getOrNull(all.indexOf(_state.value.product) + delta)?.let(::pickProduct)
+        all.getOrNull(all.indexOf(activeProduct()) + delta)?.let(::pickProduct)
+    }
+
+    /** The product the controls are working on: the one above, or in a compare the one of the selected pane. */
+    fun activeProduct(st: AnalysisState = _state.value): AnalysisProduct = if (st.compare && st.activePane == 1) st.other ?: st.product else st.product
+
+    fun selectPane(i: Int) { if (_state.value.activePane != i) update { it.copy(activePane = i) } }
+
+    /** In a compare: the two panes change places (the one above becomes the one below). */
+    fun swapPanes() {
+        val st = _state.value
+        val o = st.other ?: return
+        prefs.edit().putString("analysis_product", o.id).apply()
+        update { it.copy(product = o, other = st.product, paneB = null, titleB = null, styleB = null) }
+        showFrame()
     }
 
     fun pickProduct(picked: AnalysisProduct) {
+        val cur = _state.value
+        if (cur.compare && cur.activePane == 1 && cur.other != null) {
+            update { it.copy(other = picked, paneB = null, titleB = null, styleB = null) }       // only the pane below changes
+            showFrame()
+            return
+        }
         prefs.edit().putString("analysis_product", picked.id).apply()
-        update { st -> st.copy(product = picked, other = st.product.takeIf { it != picked } ?: st.other) }
+        update { st -> st.copy(product = picked, other = if (st.compare) st.other else st.product.takeIf { it != picked } ?: st.other) }
         showFrame()
     }
 
@@ -234,7 +255,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the previous product under this one (or back to one picture). */
     fun setCompare(on: Boolean) {
         if (_state.value.compare == on) return
-        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null, activePane = 0) }
         if (on && _state.value.globe) { showMapHere(); return }      // the globe has no compare: on to the flat map of the region it is looking at
         if (on) showFrame()
     }

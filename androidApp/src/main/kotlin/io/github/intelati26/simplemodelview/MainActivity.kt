@@ -179,17 +179,18 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
           // compact header: chips and buttons are 32 dp tall instead of being padded out to the 48 dp touch-target minimum
           androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 0.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                val at = s.products.indexOfFirst { it.id == s.product?.id }
+                val activeProduct = vm.activeProduct(s)
+                val at = s.products.indexOfFirst { it.id == activeProduct?.id }
                 ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
-                AssistChip(onClick = { picker = true }, label = { Text(s.product?.title ?: "Product", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                AssistChip(onClick = { picker = true }, label = { Text(activeProduct?.title ?: "Product", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.weight(1f))
                 ProductStepButton(next = true, enabled = at in 0 until s.products.size - 1) { vm.stepProduct(1) }
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
                 PageMenu("spc", onOpen)
-                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare)
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
             }
-            if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
-            if (s.product?.let { simplemodelview.WindProducts.isWind(it.id) } == true) WindChooser(s.products, s.windLevel, s.windColor, vm::pickWindLevel, vm::pickWindColor)
+            if (vm.activeProduct(s)?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
+            if (vm.activeProduct(s)?.let { simplemodelview.WindProducts.isWind(it.id) } == true) WindChooser(s.products, s.windLevel, s.windColor, vm::pickWindLevel, vm::pickWindColor)
 
             s.newerCycle?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -278,7 +279,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     }
 
     if (s.contactPrompt) ContactDialog(onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt)
-    if (picker) ProductPicker(simplemodelview.Catalog.forPicker(s.products), s.product?.takeIf { !simplemodelview.WindProducts.isWind(it.id) } ?: s.products.firstOrNull { it.id == simplemodelview.WindProducts.CHOOSER_ID }, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
+    if (picker) ProductPicker(simplemodelview.Catalog.forPicker(s.products), vm.activeProduct(s)?.takeIf { !simplemodelview.WindProducts.isWind(it.id) } ?: s.products.firstOrNull { it.id == simplemodelview.WindProducts.CHOOSER_ID }, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
     if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
@@ -363,7 +364,7 @@ private fun MapView(s: UiState, vm: RefsViewModel, insetTop: Dp = 0.dp, insetBot
     val bitmap = s.map ?: return
     val second = s.paneB
     if (s.compare && second != null && s.other != null && !s.playing) {
-        ComparePanes(Modifier.padding(top = insetTop, bottom = insetBottom), bitmap, second, s.product?.title.orEmpty(), s.titleB.orEmpty(), if (isSystemInDarkTheme()) Color(0xFF202428) else Color(0xFFEDEFF2), s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
+        ComparePanes(Modifier.padding(top = insetTop, bottom = insetBottom), bitmap, second, s.product?.title.orEmpty(), s.titleB.orEmpty(), if (isSystemInDarkTheme()) Color(0xFF202428) else Color(0xFFEDEFF2), s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied, s.activePane, vm::selectPane)
         return
     }
     ZoomableMap(bitmap, s.crosshair, "SPC REFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
@@ -543,12 +544,13 @@ private fun ProductRow(product: Product, selected: Boolean, favorite: Boolean, o
 }
 
 @Composable
-private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, compare: Boolean, canCompare: Boolean, onGlobe: Boolean, onCompare: (Boolean) -> Unit) {
+private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, compare: Boolean, canCompare: Boolean, onGlobe: Boolean, onCompare: (Boolean) -> Unit, onSwap: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
+            if (compare) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

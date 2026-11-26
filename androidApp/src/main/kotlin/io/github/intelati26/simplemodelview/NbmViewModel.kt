@@ -58,6 +58,7 @@ data class NbmState(
     val product: NbmProduct = NbmCatalog.default,
     val other: NbmProduct? = null,                    // the product shown before this one (the compare shows it under this one)
     val compare: Boolean = false,
+    val activePane: Int = 0,                          // the compare pane the product controls change: 0 above, 1 below (a tap on a pane selects it)
     val paneB: List<Bitmap>? = null,                  // the other product's own field and, over it, the shared lines
     val titleB: String? = null,
     val styleB: Style? = null,
@@ -225,13 +226,34 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** The product [delta] places along in the catalog (the arrows beside the product chip). */
     fun stepProduct(delta: Int) {
         val all = NbmCatalog.families
-        val at = all.indexOfFirst { it.id == _state.value.product.family }
+        val at = all.indexOfFirst { it.id == activeProduct().family }
         all.getOrNull(at + delta)?.let { pickProduct(it.first) }
     }
 
+    /** The product the controls are working on: the one above, or in a compare the one of the selected pane. */
+    fun activeProduct(st: NbmState = _state.value): NbmProduct = if (st.compare && st.activePane == 1) st.other ?: st.product else st.product
+
+    fun selectPane(i: Int) { if (_state.value.activePane != i) update { it.copy(activePane = i) } }
+
+    /** In a compare: the two panes change places (the one above becomes the one below). */
+    fun swapPanes() {
+        val st = _state.value
+        val o = st.other ?: return
+        prefs.edit().putString("nbm_product", o.id).apply()
+        update { it.copy(product = o, other = st.product, paneB = null, titleB = null, styleB = null) }
+        load()
+    }
+
     fun pickProduct(picked: NbmProduct) {
+        val cur = _state.value
+        if (cur.compare && cur.activePane == 1 && cur.other != null) {
+            // the pane below: only that picture is replaced (the run, time and zoom stay)
+            update { it.copy(other = picked, paneB = null, titleB = null, styleB = null) }
+            viewModelScope.launch { showCurrent() }
+            return
+        }
         prefs.edit().putString("nbm_product", picked.id).apply()
-        update { st -> st.copy(product = picked, other = st.product.takeIf { it.id != picked.id } ?: st.other) }
+        update { st -> st.copy(product = picked, other = if (st.compare) st.other else st.product.takeIf { it.id != picked.id } ?: st.other) }
         load()
     }
 
@@ -325,7 +347,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the previous product under this one (or back to one picture). */
     fun setCompare(on: Boolean) {
         if (_state.value.compare == on) return
-        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null, activePane = 0) }
         if (on && _state.value.globe) { showMapHere(); return }      // the globe has no compare: on to the flat map of the region it is looking at
         if (on) viewModelScope.launch { showCurrent() }
     }

@@ -118,6 +118,7 @@ data class MrmsState(
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
     val stationDensity: Int = 2,                      // 1 as before, 2 and 3 closer up and down
     val station: StationDetail? = null,               // the station tapped: its reports and chart
+    val activePane: Int = 0,                          // the compare pane the product controls change: 0 above, 1 below (a tap on a pane selects it)
     val compare: Boolean = false,                     // the previous product shown under this one (same area, same time), sharing zoom and crosshair
     val paneB: List<Bitmap>? = null,                  // the second product's own field and, over it, the shared lines (null: not ready or no scan near this time)
     val titleB: String? = null,
@@ -311,7 +312,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows the previous product under this one (or back to one picture). */
     fun setCompare(on: Boolean) {
         if (_state.value.compare == on) return
-        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null, activePane = 0) }
         if (on && _state.value.globe) { showMapHere(); return }      // the globe has no compare: on to the flat map of the region it is looking at
         if (on) showFrame()
     }
@@ -322,8 +323,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun paneBFor(product: MrmsProduct, validTime: Long, sector: Sector, over: Bitmap?): Triple<List<Bitmap>, String, Style>? {
         if (over == null) return null
         val now = System.currentTimeMillis() / 1000
-        val cached = otherFiles[product.id]?.takeIf { now - it.first < 90 }?.second
-        val files = cached ?: repo.listFiles(product, now).also { otherFiles[product.id] = now to it }
+        val cacheKey = "${product.id}|${product.level}"
+        val cached = otherFiles[cacheKey]?.takeIf { now - it.first < 90 }?.second
+        val files = cached ?: repo.listFiles(product, now).also { otherFiles[cacheKey] = now to it }
         val file = nearestFile(files, validTime, 600) ?: return null
         val frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
         val g = frame.window.grid
@@ -334,16 +336,41 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The A/B button: back to the product shown before this one, at the same time, with the same zoom, crosshair and overlays. */
-    fun flipProduct() { _state.value.other?.let { pickProduct(it) } }
+    fun flipProduct() { if (_state.value.compare) swapPanes() else _state.value.other?.let { pickProduct(it) } }
 
     /** The product [delta] places along in the catalog (the arrows beside the product chip). */
     fun stepProduct(delta: Int) {
         val all = MrmsCatalog.all
-        val at = all.indexOfFirst { it.id == _state.value.product.id }
+        val at = all.indexOfFirst { it.id == activeProduct().id }
         all.getOrNull(at + delta)?.let { pickProduct(it) }
     }
 
+    /** The product the controls are working on: the one above, or in a compare the one of the selected pane. */
+    fun activeProduct(st: MrmsState = _state.value): MrmsProduct = if (st.compare && st.activePane == 1) st.other ?: st.product else st.product
+
+    fun selectPane(i: Int) { if (_state.value.activePane != i) update { it.copy(activePane = i) } }
+
+    /** In a compare: the two panes change places (the one above becomes the one below). */
+    fun swapPanes() {
+        val st = _state.value
+        val o = st.other ?: return
+        if (st.rainSince != null || o.rainDays > 0) return
+        stopPlaying(); frameJob?.cancel()
+        keepTime = st.file?.validTime
+        prefs.edit().putString("mrms_product", o.id).apply()
+        update { it.copy(product = o, other = st.product, paneB = null, titleB = null, styleB = null, crosshair = it.crosshair) }
+        load()
+    }
+
     fun pickProduct(picked: MrmsProduct) {
+        val cur = _state.value
+        if (cur.compare && cur.activePane == 1 && cur.other != null) {
+            // the pane below: only that picture is replaced (the time, zoom and everything on the other pane stay)
+            if (picked.rainDays > 0) { update { it.copy(notice = "A rainfall total cannot be a pane of the compare.") }; return }
+            update { it.copy(other = withSavedLevel(picked), paneB = null, titleB = null, styleB = null) }
+            showFrame()
+            return
+        }
         if (picked.rainDays > 0) {
             // a long rainfall total: added up from the newest whole hour back (not kept as the product to open with: it is not on the server)
             stopPlaying(); frameJob?.cancel()
@@ -355,7 +382,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
         val before = _state.value
-        if (before.rainSince == null && before.product.id != product.id) { keepTime = before.file?.validTime; update { it.copy(other = before.product) } }
+        if (before.rainSince == null && !before.compare && before.product.id != product.id) { keepTime = before.file?.validTime; update { it.copy(other = before.product) } }
         update { it.copy(product = product, rainSince = null, rainInfo = null) }      // the crosshair stays: showCurrent reads the new product there
         load()
     }
@@ -368,6 +395,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Chooses the height of a 3D mosaic field (an index into its levels): the newest scans of that height's directory are loaded. */
     fun pickLevel(index: Int) {
+        val st = _state.value
+        if (st.compare && st.activePane == 1 && st.other != null) {
+            val o = st.other
+            if (o.levels.isEmpty()) return
+            val l = index.coerceIn(0, o.levels.size - 1)
+            if (l == o.level) return
+            prefs.edit().putInt("mrms_level_${o.id}", l).apply()
+            update { it.copy(other = o.copy(level = l), paneB = null) }
+            showFrame()
+            return
+        }
         val current = _state.value.product
         if (current.levels.isEmpty()) return
         val level = index.coerceIn(0, current.levels.size - 1)
