@@ -15,6 +15,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -69,10 +75,43 @@ internal fun StationDialog(detail: StationDetail, celsius: Boolean, onDismiss: (
 @Composable
 private fun StationChart(history: List<Metar>, five: List<FiveMinute>, celsius: Boolean) {
     val axis = MaterialTheme.colorScheme.onSurfaceVariant
-    Canvas(Modifier.fillMaxWidth().height(220.dp).padding(top = 6.dp)) {
-        val t0 = history.first().time.toFloat()
-        val t1 = maxOf(history.last().time.toFloat(), t0 + 3600f)
-        fun conv(c: Double) = if (celsius) c else c * 1.8 + 32.0
+    val t0 = history.first().time.toFloat()
+    val t1 = maxOf(history.last().time.toFloat(), t0 + 3600f)
+    // the cursor: touch, drag or hover on the chart puts a line at that time and the nearest report's numbers above it
+    var cursor by remember { mutableStateOf<Long?>(null) }
+    val unit = if (celsius) "°C" else "°F"
+    fun conv(c: Double) = if (celsius) c else c * 1.8 + 32.0
+    Column {
+        val c = cursor
+        if (c == null) { Text("Touch or drag on the chart to read the observations", style = MaterialTheme.typography.labelMedium, color = axis); Text(" ", style = MaterialTheme.typography.labelSmall) }
+        else {
+            val r = history.minByOrNull { Math.abs(it.time - c) }!!
+            val f = five.filter { it.windKt != null }.minByOrNull { Math.abs(it.time - c) }?.takeIf { Math.abs(it.time - c) <= 450 }
+            Text(
+                formatClock(r.time) + "  ·  " + listOfNotNull(
+                    r.tempC?.let { "%.0f%s".format(conv(it), unit) }, r.dewC?.let { "dew %.0f".format(conv(it)) },
+                    r.windKt?.let { w -> "wind $w kt" + (r.gustKt?.let { " g$it" } ?: "") },
+                ).joinToString("  ·  "),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(if (f != null) "5-min " + formatClock(f.time) + "  ·  wind %.0f kt".format(f.windKt) + (f.gustKt?.let { " g%.0f".format(it) } ?: "") else " ", style = MaterialTheme.typography.labelSmall, color = axis)
+        }
+    Canvas(
+        Modifier.fillMaxWidth().height(220.dp).padding(top = 6.dp).pointerInput(Unit) {
+            // (not consumed, so the dialog still scrolls up and down)
+            awaitPointerEventScope {
+                while (true) {
+                    val e = awaitPointerEvent()
+                    val ch = e.changes.firstOrNull() ?: continue
+                    val left = 34.dp.toPx()
+                    if (ch.pressed || e.type == PointerEventType.Move || e.type == PointerEventType.Press) {
+                        val frac = ((ch.position.x - left) / (size.width - left)).coerceIn(0f, 1f)
+                        cursor = (t0 + frac * (t1 - t0)).toLong()
+                    }
+                }
+            }
+        },
+    ) {
         val temps = history.flatMap { listOfNotNull(it.tempC?.let(::conv), it.dewC?.let(::conv)) }
         val lo = (temps.minOrNull() ?: 0.0) - 2.0
         val hi = (temps.maxOrNull() ?: 1.0) + 2.0
@@ -106,5 +145,14 @@ private fun StationChart(history: List<Metar>, five: List<FiveMinute>, celsius: 
         series(history.mapNotNull { r -> r.dewC?.let { x(r.time) to yT(conv(it)) } }, Color(0xFF1B7A2E), 2.dp.toPx())
         series(history.mapNotNull { r -> r.windKt?.let { x(r.time) to yW(it.toDouble()) } }, Color(0xFF1F5FBF), 2.dp.toPx())
         series(history.mapNotNull { r -> r.gustKt?.let { x(r.time) to yW(it.toDouble()) } } + five.mapNotNull { r -> r.gustKt?.let { x(r.time) to yW(it) } }, Color(0xFF6A3D9A), 2.5.dp.toPx(), dots = true)
+        // the cursor line, and a ring on the nearest report's points
+        cursor?.let { c ->
+            val r = history.minByOrNull { Math.abs(it.time - c) }!!
+            drawLine(axis.copy(alpha = 0.8f), Offset(x(c), 0f), Offset(x(c), size.height), strokeWidth = 1.dp.toPx())
+            fun ring(y: Float?, color: Color) { if (y != null) { drawCircle(Color.White, 4.5.dp.toPx(), Offset(x(r.time), y)); drawCircle(color, 3.dp.toPx(), Offset(x(r.time), y)) } }
+            ring(r.tempC?.let { yT(conv(it)) }, Color(0xFFC62828)); ring(r.dewC?.let { yT(conv(it)) }, Color(0xFF1B7A2E))
+            ring(r.windKt?.let { yW(it.toDouble()) }, Color(0xFF1F5FBF)); ring(r.gustKt?.let { yW(it.toDouble()) }, Color(0xFF6A3D9A))
+        }
+    }
     }
 }
