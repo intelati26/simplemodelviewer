@@ -91,6 +91,9 @@ data class TodayState(
     val windNote: String? = null,
     val windBusy: Boolean = false,
     val gustLine: Int = 40,
+    val point: PointForecast? = null,
+    val pointNote: String? = null,
+    val pointBusy: Boolean = false,
     val updated: Long? = null,
 )
 
@@ -108,6 +111,8 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
     private var thunderJob: Job? = null
     private val thunderReader = ThunderReader(AppContainer.core, AppContainer.repo)
     private var windJob: Job? = null
+    private var pointJob: Job? = null
+    private val pointReader = PointForecastReader(AppContainer.nbmText, AppContainer.nws)
     private val windReader = WindReader(AppContainer.core, AppContainer.repo)
 
     init {
@@ -121,6 +126,20 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
     fun setLine(line: Int) { prefs.edit().putInt("today_thunder_line", line).apply(); update { it.copy(line = line) } }
     fun setGustLine(line: Int) { prefs.edit().putInt("today_gust_line", line).apply(); update { it.copy(gustLine = line) } }
     fun refresh() = load()
+
+    private fun loadPoint(place: Place?) {
+        pointJob?.cancel()
+        if (place == null) { update { it.copy(point = null, pointNote = null, pointBusy = false) }; return }
+        pointJob = viewModelScope.launch {
+            update { it.copy(pointBusy = true, pointNote = null) }
+            try {
+                val data = pointReader.read(place, System.currentTimeMillis() / 1000)
+                update { it.copy(point = data, pointNote = if (data == null) "The National Blend forecast is not available for this place." else null, pointBusy = false) }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                update { it.copy(point = null, pointNote = e.message ?: "The forecast could not be read.", pointBusy = false) }
+            }
+        }
+    }
 
     private fun loadWind(place: Place?) {
         windJob?.cancel()
@@ -154,6 +173,7 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
         job?.cancel()
         loadThunder(_state.value.place)
         loadWind(_state.value.place)
+        loadPoint(_state.value.place)
         val st = _state.value
         val place = st.place
         job = viewModelScope.launch {
@@ -262,6 +282,9 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                     }
                     TextButton(onClick = { onOpen("outlook") }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("See the national outlook") }
                 }
+
+                // ---- the general forecast at the nearest station
+                PointCard(s.point, s.pointNote, s.pointBusy, s.place?.name) { onOpen("point") }
 
                 // ---- thunder chance and timing
                 ThunderCard(s.thunder, s.thunderNote, s.thunderBusy, s.place?.name, s.line, vm::setLine)
