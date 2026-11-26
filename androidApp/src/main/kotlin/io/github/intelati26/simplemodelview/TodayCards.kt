@@ -100,7 +100,7 @@ private object ThumbBorders {
  */
 @Composable
 internal fun OutlookThumb(shapes: List<simplemodelview.OutlookShape>, lat: Double?, lon: Double?, modifier: Modifier = Modifier) {
-    val bg = MaterialTheme.colorScheme.surface
+    val bg = Color(0xFFEDEAF0)      // a little darker than white, so SPC's pale general-thunder green can be seen
     val edge = MaterialTheme.colorScheme.outline
     val context = androidx.compose.ui.platform.LocalContext.current
     val borders = androidx.compose.runtime.remember { ThumbBorders.path(context) }
@@ -115,7 +115,8 @@ internal fun OutlookThumb(shapes: List<simplemodelview.OutlookShape>, lat: Doubl
         fun x(lon: Double) = ox + ((lon * k - west).toFloat()) * scale
         fun y(lat: Double) = oy + ((north - lat).toFloat()) * scale
         for (shape in shapes.filter { !it.hatched }.sortedBy { it.rank }) {
-            val color = androidx.compose.ui.graphics.Color(0xFF000000.toInt() or shape.color)
+            // general thunderstorms (rank 1) come pale from SPC: a stronger green for a picture this small
+            val color = if (shape.rank == 1) Color(0xFF86C986) else Color(0xFF000000.toInt() or shape.color)
             for (polygon in shape.polygons) {
                 val path = androidx.compose.ui.graphics.Path().apply { fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd }
                 for (ring in polygon) {
