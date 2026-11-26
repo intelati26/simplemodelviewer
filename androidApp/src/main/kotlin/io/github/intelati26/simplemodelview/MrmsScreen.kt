@@ -226,7 +226,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     if (picker) ProductPicker(
         products, products.firstOrNull { it.id == vm.activeProduct(s).id }, s.favorites, onToggle = vm::toggleFavorite,
         onPick = { picked -> picker = false; MrmsCatalog.byId(picked.id)?.let(vm::pickProduct) }, onDismiss = { picker = false },
-        groups = MrmsCatalog.groups,
+        groups = MrmsCatalog.groups, simpleIds = simplemodelview.SimpleProducts.mrms,
     )
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }

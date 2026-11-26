@@ -281,7 +281,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     }
 
     if (s.contactPrompt) ContactDialog(onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt)
-    if (picker) ProductPicker(simplemodelview.Catalog.forPicker(s.products), vm.activeProduct(s)?.takeIf { !simplemodelview.WindProducts.isWind(it.id) } ?: s.products.firstOrNull { it.id == simplemodelview.WindProducts.CHOOSER_ID }, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false })
+    if (picker) ProductPicker(simplemodelview.Catalog.forPicker(s.products), vm.activeProduct(s)?.takeIf { !simplemodelview.WindProducts.isWind(it.id) } ?: s.products.firstOrNull { it.id == simplemodelview.WindProducts.CHOOSER_ID }, s.favorites, onToggle = vm::toggleFavorite, onPick = { picker = false; vm.pickProduct(it) }, onDismiss = { picker = false }, simpleIds = simplemodelview.SimpleProducts.refs)
     if (outlookDialog) OutlookDialog(outlookState.type, onPick = { outlookDialog = false; AppContainer.outlook.setType(it) }, onDismiss = { outlookDialog = false })
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
         var name by remember { mutableStateOf(placeLabel(lat, lon)) }
@@ -494,12 +494,16 @@ internal fun ProductPicker(
     products: List<Product>, current: Product?, favorites: Set<String>,
     onToggle: (Product) -> Unit, onPick: (Product) -> Unit, onDismiss: () -> Unit, groups: List<String> = Groups.ordered,
     topItem: (@Composable () -> Unit)? = null,
+    /** Simple mode: only these ids (and the starred ones and the one on screen) are listed until "All products" is tapped; a search looks through everything. */
+    simpleIds: Set<String>? = null,
 ) {
     var query by remember { mutableStateOf("") }
+    var showAll by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf(setOf<String>()) }        // buckets the user has expanded
     val words = query.split(' ').filter { it.isNotBlank() }
     val searching = words.isNotEmpty()
-    val shown = products.filter { p -> words.all { p.title.contains(it, ignoreCase = true) } }
+    val short = simpleIds != null && AppMode.simple && !showAll && !searching
+    val shown = products.filter { p -> words.all { p.title.contains(it, ignoreCase = true) } && (!short || p.id in simpleIds!! || p.id in favorites || p.id == current?.id) }
     // while searching, every bucket with a match is open; otherwise only the ones the user opened
     val buckets: List<Pair<String, List<Product>>> =
         listOf(FAVORITES to shown.filter { it.id in favorites }) + groups.map { g -> g to shown.filter { it.group == g } }
@@ -509,7 +513,7 @@ internal fun ProductPicker(
         LazyColumn(Modifier.fillMaxWidth()) {
             for ((name, list) in buckets) {
                 if (list.isEmpty() && (name != FAVORITES || searching)) continue
-                val expanded = if (searching) true else name in open
+                val expanded = if (searching || short) true else name in open
                 item(key = "h-$name") {
                     BucketHeader(name, list.size, expanded) { if (!searching) open = if (expanded) open - name else open + name }
                 }
@@ -519,6 +523,9 @@ internal fun ProductPicker(
                 } else {
                     items(list, key = { "$name/${it.id}" }) { ProductRow(it, it.id == current?.id, it.id in favorites, onToggle, onPick) }
                 }
+            }
+            if (simpleIds != null && AppMode.simple && !searching) item(key = "all-toggle") {
+                TextButton(onClick = { showAll = !showAll }, Modifier.fillMaxWidth().padding(horizontal = 8.dp)) { Text(if (showAll) "Fewer products" else "All products (${products.size})") }
             }
         }
     }
