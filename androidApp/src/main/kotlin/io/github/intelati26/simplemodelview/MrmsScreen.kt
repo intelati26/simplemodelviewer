@@ -142,7 +142,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     ) { Text("\u21C4", fontSize = 20.sp) }
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("mrms", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null && !s.globe, onCompare = vm::setCompare)
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {

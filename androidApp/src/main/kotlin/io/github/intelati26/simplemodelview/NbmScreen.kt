@@ -137,7 +137,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                     AssistChip(onClick = { picker = true }, label = { Text(family.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.families.size - 1) { vm.stepProduct(1) }
                     PageMenu("nbm", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null && !s.globe, onCompare = vm::setCompare)
                 }
                 NbmVariantRow(family, s.product, vm::pickProduct)
                 s.notice?.let {

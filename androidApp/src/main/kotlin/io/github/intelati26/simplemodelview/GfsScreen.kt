@@ -124,7 +124,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                     Box {
                         TextButton(onClick = { more = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
                         DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                            DropdownMenuItem(text = { Text(if (s.compare) "One picture" else "Compare with the previous product") }, enabled = s.compare || s.other != null, onClick = { more = false; vm.setCompare(!s.compare) })
+                            DropdownMenuItem(text = { Text(if (s.compare) "One picture" else "Compare with the previous product") }, enabled = s.compare || (s.other != null && !s.globe), onClick = { more = false; vm.setCompare(!s.compare) })
                             if (s.frames.size > 1) DropdownMenuItem(text = { Text(if (s.history) "Save the history loop (video)" else "Save the loop (video)") }, onClick = {
                                 more = false
                                 scope.launch {

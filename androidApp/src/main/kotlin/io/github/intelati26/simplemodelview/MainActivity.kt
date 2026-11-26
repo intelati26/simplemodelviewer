@@ -186,7 +186,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                 ProductStepButton(next = true, enabled = at in 0 until s.products.size - 1) { vm.stepProduct(1) }
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
                 PageMenu("spc", onOpen)
-                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null && !s.globe, onCompare = vm::setCompare)
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
             if (s.product?.let { simplemodelview.WindProducts.isWind(it.id) } == true) WindChooser(s.products, s.windLevel, s.windColor, vm::pickWindLevel, vm::pickWindColor)
