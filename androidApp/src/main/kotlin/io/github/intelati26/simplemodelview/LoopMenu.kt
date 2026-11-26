@@ -1,5 +1,6 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,13 +70,16 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
     if (window.isEmpty()) return
     val n = times.size
     var menu by remember { mutableStateOf(false) }
+    // folded away unless opened (the choice is kept for every page)
+    var open by remember { mutableStateOf(AppContainer.prefs.getBoolean("loop_bar_open", false)) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "Loop  " + loopRangeSummary(times, window), Modifier.weight(1f), fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                (if (open) "\u25BE " else "\u25B8 ") + "Loop  " + loopRangeSummary(times, window),
+                Modifier.weight(1f).clickable { open = !open; AppContainer.prefs.edit().putBoolean("loop_bar_open", open).apply() }.padding(vertical = if (open) 0.dp else 4.dp),
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Box {
+            if (open) Box {
                 TextButton(onClick = { menu = true }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Span \u25BE", fontSize = 12.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     val spans = loopSpanOptions(times)
@@ -89,7 +93,7 @@ internal fun LoopRangeBar(times: List<Long>, windowFor: () -> IntRange, shown: I
                 }
             }
         }
-        RangeSlider(
+        if (open) RangeSlider(
             value = window.first.toFloat()..window.last.toFloat(),
             onValueChange = { r ->
                 val a = Math.round(r.start).coerceIn(0, n - 2)
