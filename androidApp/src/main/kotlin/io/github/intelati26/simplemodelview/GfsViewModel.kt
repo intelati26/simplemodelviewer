@@ -605,6 +605,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun setCompare(on: Boolean) {
         if (_state.value.compare == on) return
         update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        if (on && _state.value.globe) { showMapHere(); return }      // the globe has no compare: on to the flat map of the region it is looking at
         if (on) showFrame()
     }
 
