@@ -248,7 +248,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, s.members) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
+                    if (!AppMode.simple) LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
                     TextButton(onClick = vm::goToNow, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Now") }
                     TimeMenu(s.times, s.timeIndex, { i -> s.cycle?.let { c -> "${formatUtc(s.times[i])}  (f${((s.times[i] - c.epochSeconds) / 3600).toString().padStart(2, '0')})" } ?: formatUtc(s.times[i]) }, vm::pickTime)
                     CompactSlider(
@@ -256,8 +256,8 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         valueRange = 0f..(s.times.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
-                LoopRangeBar(s.times, { vm.loopWindowFor(s) }, s.timeIndex, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopLength(0) }
-                TimeStepRow(s.timeIndex, s.times.size, s.playing, vm::togglePlay, vm::pickTime, loopToggle = true)
+                if (!AppMode.simple) LoopRangeBar(s.times, { vm.loopWindowFor(s) }, s.timeIndex, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopLength(0) }
+                TimeStepRow(s.timeIndex, s.times.size, s.playing, vm::togglePlay, vm::pickTime, loopToggle = !AppMode.simple)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
@@ -558,8 +558,8 @@ private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
-            if (compare) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
+            if (!AppMode.simple) DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
+            if (compare && !AppMode.simple) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

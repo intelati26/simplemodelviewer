@@ -137,7 +137,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     val at = MrmsCatalog.all.indexOfFirst { it.id == activeProduct.id }
                     ProductStepButton(next = false, enabled = at > 0) { vm.stepProduct(-1) }
                     AssistChip(onClick = { picker = true }, label = { Text(vm.activeTitle(s), maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
-                    TextButton(
+                    if (!AppMode.simple) TextButton(
                         onClick = vm::flipProduct, enabled = s.other != null,
                         modifier = Modifier.height(32.dp).widthIn(min = 32.dp).semantics { contentDescription = "Flip to the previous product" }, contentPadding = PaddingValues(horizontal = 6.dp),
                     ) { Text("\u21C4", fontSize = 20.sp) }
@@ -199,14 +199,14 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }
             if (s.files.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LoopLengthMenu(s.loopLength, s.files.size, vm::setLoopLength)
+                    if (!AppMode.simple) LoopLengthMenu(s.loopLength, s.files.size, vm::setLoopLength)      // (Simple keeps Play, the arrows and the slider)
                     CompactSlider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.files.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                 }
-                LoopRangeBar(s.files.map { it.validTime }, { vm.loopWindowFor(s) }, s.index, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopLength(0) }
-                TimeStepRow(s.index, s.files.size, s.playing, vm::togglePlay, vm::pickIndex, loopToggle = true)
+                if (!AppMode.simple) LoopRangeBar(s.files.map { it.validTime }, { vm.loopWindowFor(s) }, s.index, s.loopTimes != null, vm::setLoopTimes) { vm.setLoopLength(0) }
+                TimeStepRow(s.index, s.files.size, s.playing, vm::togglePlay, vm::pickIndex, loopToggle = !AppMode.simple)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
         }
@@ -388,8 +388,8 @@ internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () 
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (onRain != null) DropdownMenuItem(text = { Text("Rainfall since a date and time\u2026") }, onClick = { open = false; onRain() })
-            if (onCompare != null) DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
-            if (compare && onSwap != null) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
+            if (onCompare != null && !AppMode.simple) DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
+            if (compare && onSwap != null && !AppMode.simple) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
