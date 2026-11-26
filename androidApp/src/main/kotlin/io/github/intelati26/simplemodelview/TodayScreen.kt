@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -71,6 +73,7 @@ data class PlaceOutlook(
     val severeChance: Int?,                                // Day 3: the total severe chance
     val top: Pair<String, Int>?,
     val map: simplemodelview.OutlookData? = null,         // the categorical outlook's areas, for the small picture
+    val panels: List<Pair<String, simplemodelview.OutlookData>> = emptyList(),   // the day's maps for the discussion card: categorical, then tornado / wind / hail (Day 3: severe)
 )
 
 data class TodayState(
@@ -207,8 +210,11 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
         val categoryTitle = atPoint(catData, p)?.title
         // no area on a hazard map is 0 %, but a map that could not be read is unknown
         fun pct(d: OutlookData?): Int? = d?.let { TodayText.percent(atPoint(it, p)?.title) ?: 0 }
-        val (t, w, h) = hazards.map { it.await() }.map { d -> pct(d) }.let { if (it.size == 3) Triple(it[0], it[1], it[2]) else Triple(null, null, null) }
-        PlaceOutlook(TodayText.level(categoryTitle), categoryTitle, t, w, h, severe?.await()?.let { pct(it) }, TodayText.topThreat(t, w, h), catData)
+        val hazardData = hazards.map { it.await() }
+        val severeData = severe?.await()
+        val (t, w, h) = hazardData.map { d -> pct(d) }.let { if (it.size == 3) Triple(it[0], it[1], it[2]) else Triple(null, null, null) }
+        val panels = listOf("Categorical" to catData) + (if (day <= 2) listOf("Tornado", "Wind", "Hail").zip(hazardData) else listOf("Severe" to severeData)).map { (n, d) -> n to d }
+        PlaceOutlook(TodayText.level(categoryTitle), categoryTitle, t, w, h, severeData?.let { pct(it) }, TodayText.topThreat(t, w, h), catData, panels.mapNotNull { (n, d) -> d?.let { n to it } })
     }
 
     private suspend fun readDiscussion(day: Int): SpcDiscussion? {
@@ -346,9 +352,18 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 s.discussion?.let { d ->
                     ExpandCard(
                         "forecasters", "\uD83D\uDCAC", "What the forecasters say",
-                        icon = s.outlook?.map?.let { m -> { OutlookThumb(m.shapes, s.place?.lat, s.place?.lon) } },
+                        icon = s.outlook?.map?.let { m -> { OutlookThumb(m.shapes, s.place?.lat, s.place?.lon, Modifier.width(36.dp).height(24.dp)) } },
                         summary = { d.headline?.let { Text(it, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) } },
                     ) {
+                        // the day's maps: categorical and the three hazards (Day 3: categorical and the severe chance), each with its name
+                        val panels = s.outlook?.panels.orEmpty()
+                        if (panels.isNotEmpty()) for (row in panels.chunked(2)) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for ((name, data) in row) Column(Modifier.weight(1f).clickable { onOpen("outlook") }, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                OutlookThumb(data.shapes, s.place?.lat, s.place?.lon, Modifier.fillMaxWidth().aspectRatio(1.8f))
+                                Text(name, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (row.size == 1) Box(Modifier.weight(1f))
+                        }
                         d.sections.firstOrNull()?.paragraphs?.firstOrNull()?.let { Text(it, fontSize = 13.sp, maxLines = 8) }
                         TextButton(onClick = { onOpen("outlook") }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Read the full discussion") }
                     }

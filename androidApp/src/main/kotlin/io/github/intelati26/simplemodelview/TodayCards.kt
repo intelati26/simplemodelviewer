@@ -104,7 +104,7 @@ internal fun OutlookThumb(shapes: List<simplemodelview.OutlookShape>, lat: Doubl
     val edge = MaterialTheme.colorScheme.outline
     val context = androidx.compose.ui.platform.LocalContext.current
     val borders = androidx.compose.runtime.remember { ThumbBorders.path(context) }
-    androidx.compose.foundation.Canvas(modifier.width(36.dp).height(24.dp).clip(RoundedCornerShape(4.dp))) {
+    androidx.compose.foundation.Canvas(modifier.clip(RoundedCornerShape(4.dp))) {
         drawRect(bg)
         val k = ThumbBorders.K
         val west = ThumbBorders.WEST * k; val east = ThumbBorders.EAST * k
@@ -137,8 +137,9 @@ internal fun OutlookThumb(shapes: List<simplemodelview.OutlookShape>, lat: Doubl
         drawRect(edge.copy(alpha = 0.5f), style = androidx.compose.ui.graphics.drawscope.Stroke(1f))
         if (lat != null && lon != null) {
             val c = androidx.compose.ui.geometry.Offset(x(lon), y(lat))
-            drawCircle(Color.White, radius = 3.2.dp.toPx(), center = c)
-            drawCircle(Color.Black, radius = 2.dp.toPx(), center = c)
+            val r = minOf(3.2.dp.toPx(), size.width / 14f)
+            drawCircle(Color.White, radius = r, center = c)
+            drawCircle(Color.Black, radius = r * 0.62f, center = c)
         }
     }
 }
