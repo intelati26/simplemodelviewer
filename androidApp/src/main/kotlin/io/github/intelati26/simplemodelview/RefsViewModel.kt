@@ -104,6 +104,11 @@ data class UiState(
     val loopTimes: Pair<Long, Long>? = null,     // the loop as a range of valid times chosen on the time bar (overrides the length / span below)
     val windLevel: Int = 500,                    // the Heights & Winds product: the level (mb) and the key of what is in color under it
     val windColor: String = "speed",
+    val other: Product? = null,                  // the product shown before this one (the compare shows it under this one)
+    val compare: Boolean = false,
+    val paneB: List<Bitmap>? = null,             // the other product's own field and, over it, the shared lines
+    val titleB: String? = null,
+    val styleB: Style? = null,
 ) {
     val validLabel: String
         get() = times.getOrNull(timeIndex)?.let { formatUtc(it) } ?: ""
@@ -281,6 +286,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         // the picker's single Heights & Winds entry opens the level and color last used
         val product = if (picked.id == WindProducts.CHOOSER_ID) windProduct(_state.value.windLevel, _state.value.windColor) ?: windProduct(_state.value.windLevel, "speed") ?: return else picked
         stopPlaying()
+        _state.value.product?.takeIf { it.id != product.id }?.let { before -> update { it.copy(other = before) } }
         viewModelScope.launch {
             update { it.copy(busy = true, error = null) }
             try { selectProductInternal(product, keepHour = true) } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -316,6 +322,39 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         } else if (hour == null) 0 else times.indexOfFirst { (it - s.cycle.epochSeconds) / 3600 == hour.toLong() }.coerceAtLeast(0)
         update { it.copy(product = product, times = times, timeIndex = index) }
         loadFrame()
+    }
+
+    /** Shows the previous product under this one (or back to one picture). */
+    fun setCompare(on: Boolean) {
+        if (_state.value.compare == on) return
+        update { it.copy(compare = on, paneB = null, titleB = null, styleB = null) }
+        if (on) viewModelScope.launch { rerender() }
+    }
+
+    /** The compare's second picture: the other product at the time nearest the one shown, as its own field only, with the lines and alerts over it once. */
+    private suspend fun computePaneB(product: Product, data: FloatArray, v: View, valid: Long?) {
+        val st = _state.value
+        val s = store
+        val b = st.other
+        if (!st.compare || st.playing || s == null || b == null || valid == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
+        try {
+            val times = repo.validTimes(s, b)
+            val idx = times.indices.minByOrNull { kotlin.math.abs(times[it] - valid) }?.takeIf { kotlin.math.abs(times[it] - valid) <= 1800 }
+            if (idx == null) { update { it.copy(paneB = null, notice = "${b.title} has no time near this one.") }; return }
+            val frame = repo.readFrameTimed(s, b, idx, st.member)
+            val sector = st.sector
+            val settings = st.settings
+            val (over, field, style) = withContext(Dispatchers.Default) {
+                val bv = if (b.grid == product.grid) v else if (sector.name == "CONUS") View.whole(b.grid) else sector.view(core, b.grid)
+                val style = withAutoStops(b.style, frame.values)
+                Triple(
+                    renderer.render(product, product.style, data, st.members, v, dark, alerts = outlookDraws(core, outlook, v, valid), counties = settings.counties, part = RenderPart.Over),
+                    renderer.render(b, style, frame.values, st.members, bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field),
+                    style,
+                )
+            }
+            update { it.copy(paneB = listOf(field, over), titleB = b.title, styleB = style) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
     }
 
     /** The product [delta] places along in the picker's order (the arrows beside the product chip). */
@@ -415,6 +454,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         }
         view = v
         update { it.copy(map = bitmap, style = style, busy = false, detail = null, focus = handoff.takeFocus(v)) }
+        computePaneB(product, data, v, valid)
         scheduleDetail()
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }

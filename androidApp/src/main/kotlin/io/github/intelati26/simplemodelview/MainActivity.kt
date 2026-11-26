@@ -61,7 +61,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -168,6 +170,9 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
 
     // The map fills the whole screen (under the system bars); the controls are two thin translucent strips floating over the empty
     // bands above and below it. Tablets / landscape: controls in a column on the left, the map filling the rest.
+    var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
+    var bottomPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(mapBackground)) {
         val wide = maxWidth >= 720.dp && maxWidth > maxHeight
         val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
@@ -181,7 +186,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                 ProductStepButton(next = true, enabled = at in 0 until s.products.size - 1) { vm.stepProduct(1) }
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
                 PageMenu("spc", onOpen)
-                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true })
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onCompare = vm::setCompare)
             }
             if (s.product?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
             if (s.product?.let { simplemodelview.WindProducts.isWind(it.id) } == true) WindChooser(s.products, s.windLevel, s.windColor, vm::pickWindLevel, vm::pickWindColor)
@@ -219,7 +224,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                         Text(s.error!!, color = MaterialTheme.colorScheme.error)
                         Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                     }
-                    s.map != null || s.globe -> if (s.globe) GlobeView(s, vm) else MapView(s, vm)
+                    s.map != null || s.globe -> if (s.globe) GlobeView(s, vm) else MapView(s, vm, with(density) { topPx.toDp() }, with(density) { bottomPx.toDp() })
                     else -> BusySpinner(big = true)
                 }
             }
@@ -237,6 +242,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             OutlookRow(outlookState, s.times.getOrNull(s.timeIndex), onClick = { outlookDialog = true })
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, s.members, withMembers = s.product?.id?.let(simplemodelview.PaintballLines::isPaintballLines) == true) }
+            if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, s.members) }
             if (s.times.size > 1) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     LoopLengthMenu(s.loopLength, s.times.size, vm::setLoopLength)
@@ -266,8 +272,8 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             }
         } else {
             mapArea(Modifier.fillMaxSize())
-            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).statusBarsPadding()) { head() }
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).navigationBarsPadding()) { foot() }
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { foot() }
         }
     }
 
@@ -353,8 +359,13 @@ private fun GlobeView(s: UiState, vm: RefsViewModel) {
 
 /** The REFS map picture (see [ZoomableMap]). */
 @Composable
-private fun MapView(s: UiState, vm: RefsViewModel) {
+private fun MapView(s: UiState, vm: RefsViewModel, insetTop: Dp = 0.dp, insetBottom: Dp = 0.dp) {
     val bitmap = s.map ?: return
+    val second = s.paneB
+    if (s.compare && second != null && s.other != null && !s.playing) {
+        ComparePanes(Modifier.padding(top = insetTop, bottom = insetBottom), bitmap, second, s.product?.title.orEmpty(), s.titleB.orEmpty(), if (isSystemInDarkTheme()) Color(0xFF202428) else Color(0xFFEDEFF2), s.crosshair, s.detail, vm::setViewport, vm::onTap, vm::onTap, s.focus, vm::focusApplied)
+        return
+    }
     ZoomableMap(bitmap, s.crosshair, "SPC REFS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
 }
 
@@ -532,11 +543,12 @@ private fun ProductRow(product: Product, selected: Boolean, favorite: Boolean, o
 }
 
 @Composable
-private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, compare: Boolean, canCompare: Boolean, onCompare: (Boolean) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(if (compare) "One picture" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })
