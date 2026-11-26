@@ -70,6 +70,7 @@ data class PlaceOutlook(
     val tornado: Int?, val wind: Int?, val hail: Int?,     // percent; null where the day has no such map
     val severeChance: Int?,                                // Day 3: the total severe chance
     val top: Pair<String, Int>?,
+    val map: simplemodelview.OutlookData? = null,         // the categorical outlook's areas, for the small picture
 )
 
 data class TodayState(
@@ -202,11 +203,12 @@ class TodayViewModel(app: Application) : AndroidViewModel(app) {
         val cat = async { repo.load(outlookChoiceOf(day, OutlookType.Categorical)) }
         val hazards = if (day <= 2) listOf(OutlookType.Tornado, OutlookType.Wind, OutlookType.Hail).map { t -> async { try { repo.load(outlookChoiceOf(day, t)) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } } } else emptyList()
         val severe = if (day == 3) async { try { repo.load(outlookChoiceOf(3, OutlookType.Probability)) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } } else null
-        val categoryTitle = atPoint(cat.await(), p)?.title
+        val catData = cat.await()
+        val categoryTitle = atPoint(catData, p)?.title
         // no area on a hazard map is 0 %, but a map that could not be read is unknown
         fun pct(d: OutlookData?): Int? = d?.let { TodayText.percent(atPoint(it, p)?.title) ?: 0 }
         val (t, w, h) = hazards.map { it.await() }.map { d -> pct(d) }.let { if (it.size == 3) Triple(it[0], it[1], it[2]) else Triple(null, null, null) }
-        PlaceOutlook(TodayText.level(categoryTitle), categoryTitle, t, w, h, severe?.await()?.let { pct(it) }, TodayText.topThreat(t, w, h))
+        PlaceOutlook(TodayText.level(categoryTitle), categoryTitle, t, w, h, severe?.await()?.let { pct(it) }, TodayText.topThreat(t, w, h), catData)
     }
 
     private suspend fun readDiscussion(day: Int): SpcDiscussion? {
@@ -344,6 +346,7 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 s.discussion?.let { d ->
                     ExpandCard(
                         "forecasters", "\uD83D\uDCAC", "What the forecasters say",
+                        icon = s.outlook?.map?.let { m -> { OutlookThumb(m.shapes, s.place?.lat, s.place?.lon) } },
                         summary = { d.headline?.let { Text(it, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) } },
                     ) {
                         d.sections.firstOrNull()?.paragraphs?.firstOrNull()?.let { Text(it, fontSize = 13.sp, maxLines = 8) }
