@@ -312,7 +312,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- what is shown ----
-    fun pickHeightsAndWinds() { prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw", crosshair = null, readout = null) }; showFrame() }
+    fun pickHeightsAndWinds() { prefs.edit().putString("gfs_product", "hw").apply(); update { it.copy(product = "hw") }; showFrame() }
     private fun sinceTitle(st: GfsState, file: NbmFile) = "Precipitation from ${formatUtc((st.since ?: 0L) / 21600L * 21600L)} to ${formatUtc(file.valid)}"
 
     /** Precipitation from [start] (epoch seconds, back to 2021-03-23) to the time of the frame shown: it follows the slider and plays as a loop. */
@@ -322,7 +322,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         showFrame()
     }
 
-    fun pickSurface(id: String) { prefs.edit().putString("gfs_product", id).apply(); update { it.copy(product = id, crosshair = null, readout = null) }; showFrame() }
+    fun pickSurface(id: String) { prefs.edit().putString("gfs_product", id).apply(); update { it.copy(product = id) }; showFrame() }
     fun pickLevel(level: Int) { prefs.edit().putInt("gfs_level", level).apply(); update { it.copy(level = level, product = "hw") }; showFrame() }
     fun pickColor(key: String) { prefs.edit().putString("gfs_color", key).apply(); update { it.copy(color = key, product = "hw") }; showFrame() }
 

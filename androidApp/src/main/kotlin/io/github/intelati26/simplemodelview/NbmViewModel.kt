@@ -226,7 +226,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     fun pickProduct(picked: NbmProduct) {
         prefs.edit().putString("nbm_product", picked.id).apply()
-        update { it.copy(product = picked, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(product = picked) }
         load()
     }
 

@@ -43,8 +43,10 @@ internal fun ZoomableMap(
     focus: simplemodelview.MapFocus? = null, onFocusApplied: () -> Unit = {},
     onScrub: (Float, Float) -> Unit = onTap,
 ) {
-    var scale by remember(bitmap.width, bitmap.height) { mutableStateOf(1f) }
-    var offset by remember(bitmap.width, bitmap.height) { mutableStateOf(Offset.Zero) }
+    // keyed to the picture's shape (not its pixel count): another product over the same area comes with other cells, and keeps the zoom
+    val shape = (bitmap.width.toFloat() / bitmap.height * 1000f).roundToInt()
+    var scale by remember(shape) { mutableStateOf(1f) }
+    var offset by remember(shape) { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     // coming back from the globe: zoom to the part of the picture it was showing (this picture's first composition, so the zoom state is fresh)
@@ -72,7 +74,7 @@ internal fun ZoomableMap(
     Box(
         Modifier.fillMaxSize().clipToBounds().onSizeChanged { size = it }
             // keyed to the picture's size like the zoom state above: a handler started for the previous picture would keep driving that picture's (old) state
-            .pointerInput(bitmap.width, bitmap.height) {
+            .pointerInput(shape) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     val newScale = (scale * zoom).coerceIn(1f, 12f)
                     // keep the point under the fingers fixed, then pan

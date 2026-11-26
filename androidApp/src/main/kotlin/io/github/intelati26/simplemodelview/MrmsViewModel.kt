@@ -316,7 +316,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val product = withSavedLevel(picked)      // a 3D mosaic field comes back at the height last used for it
         prefs.edit().putString("mrms_product", product.id).apply()
-        update { it.copy(product = product, rainSince = null, rainInfo = null, crosshair = null, readout = null, tapLatLon = null) }
+        update { it.copy(product = product, rainSince = null, rainInfo = null) }      // the crosshair stays: showCurrent reads the new product there
         load()
     }
 
