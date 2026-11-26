@@ -1072,11 +1072,13 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- taps and read-outs ----
     /** A tap on the flat picture, given as fractions of its width and height. */
-    fun onTap(fx: Float, fy: Float) {
+    fun onScrub(fx: Float, fy: Float) = onTap(fx, fy, openStations = false)
+
+    fun onTap(fx: Float, fy: Float, openStations: Boolean = true) {
         val (product, values) = shown ?: return
         val v = view ?: return
         if (fx !in 0f..1f || fy !in 0f..1f) { clearTap(); return }
-        if (_state.value.stations && shownPlots.isNotEmpty()) {
+        if (openStations && _state.value.stations && shownPlots.isNotEmpty()) {
             val px = fx * v.pixelWidth; val py = fy * v.pixelHeight
             val reach = stationTextSize(v.pixelWidth) * 1.6f
             shownPlots.minByOrNull { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) }

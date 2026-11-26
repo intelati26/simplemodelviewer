@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ internal fun ZoomableMap(
     bitmap: android.graphics.Bitmap, crosshair: Pair<Float, Float>?, description: String,
     detail: DetailLayer? = null, onViewport: (Float, Float, Float, Float) -> Unit, onTap: (Float, Float) -> Unit,
     focus: simplemodelview.MapFocus? = null, onFocusApplied: () -> Unit = {},
+    onScrub: (Float, Float) -> Unit = onTap,
 ) {
     var scale by remember(bitmap.width, bitmap.height) { mutableStateOf(1f) }
     var offset by remember(bitmap.width, bitmap.height) { mutableStateOf(Offset.Zero) }
@@ -88,6 +90,13 @@ internal fun ZoomableMap(
         Box(
             Modifier.aspectRatio(aspect)
                 .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
+                // touch and hold, then drag: the crosshair follows the finger and the read-out follows the crosshair (a drag that starts at once still pans)
+                .pointerInput(bitmap) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { p -> onScrub((p.x / this.size.width).coerceIn(0f, 1f), (p.y / this.size.height).coerceIn(0f, 1f)) },
+                        onDrag = { change, _ -> change.consume(); onScrub((change.position.x / this.size.width).coerceIn(0f, 1f), (change.position.y / this.size.height).coerceIn(0f, 1f)) },
+                    )
+                }
                 .pointerInput(bitmap) {
                     detectTapGestures(
                         onTap = { p -> onTap(p.x / this.size.width, p.y / this.size.height) },

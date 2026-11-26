@@ -113,7 +113,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     Button(onClick = vm::load, modifier = Modifier.padding(top = 12.dp)) { Text("Retry") }
                 }
                 s.globe -> GlobeSurface(bitmap, s.cam, s.tapLatLon, "MRMS globe", onSize = vm::setGlobeSize, onGesture = vm::globeGesture, onTap = vm::onGlobeTap)
-                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, focus = s.focus, onFocusApplied = vm::focusApplied)
+                bitmap != null -> ZoomableMap(bitmap, s.crosshair, "MRMS map", detail = s.detail, onViewport = vm::setViewport, onTap = vm::onTap, onScrub = vm::onScrub, focus = s.focus, onFocusApplied = vm::focusApplied)
                 else -> BusySpinner(big = true)
             }
         }
