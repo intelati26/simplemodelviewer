@@ -118,4 +118,74 @@ class SoundingMathTest {
         assertNull(SoundingMath.analyze(Sounding(0, 0, unstable.levels.take(3), emptyMap()), 0.0))
         assertTrue(hypot(3.0, 4.0) == 5.0)
     }
+
+    // warm, moist and unstable under cold air aloft, the wind veering from the southeast at the ground to a strong westerly aloft
+    private val supercell = build(
+        1000.0, { z -> maxOf(30.0 - 7.0 * z / 1000.0, -70.0) }, { z -> 23.0 - 7.8 * z / 1000.0 },
+        dir = { z -> 140.0 + 130.0 * minOf(z, 6000.0) / 6000.0 }, kt = { z -> 12.0 + 50.0 * minOf(z, 8000.0) / 8000.0 },
+    )
+
+    @Test fun theEffectiveLayerStartsWhereParcelsHaveCapeAndLittleInhibition() {
+        val a = SoundingMath.analyze(supercell, 0.0, 35.0)!!
+        val eil = assertNotNull(a.effective)
+        assertEquals(0.0, eil.bottomZ, 1.0)                                       // surface based
+        assertTrue(eil.topZ > 1000.0, "top ${eil.topZ}")
+        assertNull(SoundingMath.analyze(stable, 0.0, 35.0)!!.effective)           // a capped profile has none
+    }
+
+    @Test fun aSupercellEnvironmentHasTheIngredientsTheCompositesWant() {
+        val a = SoundingMath.analyze(supercell, 0.0, 35.0)!!
+        assertTrue(a.effectiveSrh > 100.0, "esrh ${a.effectiveSrh}")
+        assertTrue(a.effectiveShearMs!! > 20.0, "ebwd ${a.effectiveShearMs}")
+        assertTrue(a.supercell > 1.0, "scp ${a.supercell}")
+        assertTrue(a.stpEffective > 0.5, "stp ${a.stpEffective}")
+        assertTrue(a.sigSevere!! > 10_000.0, "sigsevere ${a.sigSevere}")          // m3/s3
+        assertTrue(a.ship!! in 0.0..6.0, "ship ${a.ship}")
+        val none = SoundingMath.analyze(stable, 0.0, 35.0)!!
+        assertEquals(0.0, none.stpEffective, 1e-9); assertEquals(0.0, none.supercell, 1e-9)
+    }
+
+    @Test fun theCompositesFollowTheirDefinitions() {
+        val a = SoundingMath.analyze(supercell, 0.0)!!
+        val eil = a.effective
+        assertEquals(0.0, SoundingMath.stpEffective(a.mixed, 200.0, 10.0, eil), 1e-9)          // too little shear
+        assertEquals(0.0, SoundingMath.stpEffective(a.mixed, 200.0, 25.0, null), 1e-9)         // no inflow layer
+        assertEquals(0.0, SoundingMath.stpEffective(a.mixed, -50.0, 25.0, eil), 1e-9)          // negative helicity is no support
+        val base = SoundingMath.supercellComposite(a.mostUnstable, 100.0, 20.0)
+        assertEquals(2.0 * base, SoundingMath.supercellComposite(a.mostUnstable, 200.0, 20.0), 1e-6 * maxOf(1.0, base))   // linear in the helicity
+        assertEquals(0.0, SoundingMath.supercellComposite(a.mostUnstable, 100.0, 5.0), 1e-9)   // shear under 10 m/s
+    }
+
+    @Test fun veeringWindsMeanWarmAdvectionAndBackingColdAdvection() {
+        val veer = build(1000.0, { z -> 25.0 - 6.5 * z / 1000.0 }, { z -> 15.0 - 6.0 * z / 1000.0 }, dir = { z -> 180.0 + 90.0 * minOf(z, 6000.0) / 6000.0 }, kt = { 30.0 })
+        val back = build(1000.0, { z -> 25.0 - 6.5 * z / 1000.0 }, { z -> 15.0 - 6.0 * z / 1000.0 }, dir = { z -> 270.0 - 90.0 * minOf(z, 6000.0) / 6000.0 }, kt = { 30.0 })
+        val warm = SoundingMath.analyze(veer, 0.0, 40.0)!!.advection
+        val cold = SoundingMath.analyze(back, 0.0, 40.0)!!.advection
+        // the wind turns through the lowest 6 km only: the layers there advect, the ones above (a constant wind) do not
+        assertTrue(warm.filter { it.pTop >= 500.0 }.let { l -> l.isNotEmpty() && l.all { it.cPerHour > 0.0 } }, "warm ${warm.map { it.pBottom to it.cPerHour }}")
+        assertTrue(cold.filter { it.pTop >= 500.0 }.let { l -> l.isNotEmpty() && l.all { it.cPerHour < 0.0 } })
+        assertTrue(warm.filter { it.pBottom <= 400.0 }.all { kotlin.math.abs(it.cPerHour) < 0.05 })
+        assertTrue(warm.maxOf { it.cPerHour } in 0.2..10.0)                       // a few C per hour at most
+        val straight = SoundingMath.analyze(build(1000.0, { z -> 25.0 - 6.5 * z / 1000.0 }, { z -> 15.0 - 6.0 * z / 1000.0 }, kt = { 30.0 }), 0.0, 40.0)!!.advection
+        assertTrue(straight.all { kotlin.math.abs(it.cPerHour) < 1e-6 })          // a wind that does not turn advects nothing
+    }
+
+    @Test fun theMcsVectorsFollowFromTheCloudLayerWindAndTheJet() {
+        // a southerly jet near 1 km under westerly winds aloft: the upwind-propagating vector points toward the south
+        val s = build(1000.0, { z -> maxOf(30.0 - 6.5 * z / 1000.0, -70.0) }, { z -> 20.0 - 5.0 * z / 1000.0 },
+            dir = { z -> if (z < 2000.0) 180.0 else 270.0 }, kt = { z -> if (z in 800.0..1300.0) 45.0 else if (z < 2000.0) 15.0 else 35.0 })
+        val c = assertNotNull(SoundingMath.analyze(s, 0.0, 35.0)!!.corfidi)
+        assertTrue(c.upwind.v < 0.0, "upwind v ${c.upwind.v}")
+        assertTrue(c.downwind.kt > c.upwind.kt)
+    }
+
+    @Test fun humidityAndTheProfilesForThePanels() {
+        val a = SoundingMath.analyze(supercell, 0.0, 35.0)!!
+        assertTrue(a.midRh!! in 0.0..100.0 && a.lowRh!! in 0.0..100.0)
+        assertTrue(a.lowRh!! > a.midRh!!)                                          // moister near the ground in this profile
+        assertTrue(a.thetaE.isNotEmpty() && a.thetaE.first().first > a.thetaE.last().first)
+        assertTrue(a.thetaE.first().second > 330.0)                                // a 30 C / 23 C surface is very high in theta-e
+        assertEquals(49, a.stormRelative.size)
+        assertTrue(a.stormRelative.all { it.second >= 0.0 })
+    }
 }

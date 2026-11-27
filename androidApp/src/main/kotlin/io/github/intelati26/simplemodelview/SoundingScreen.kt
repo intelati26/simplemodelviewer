@@ -117,7 +117,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                     else -> {
                         val at = index.coerceIn(0, file.soundings.size - 1)
                         val s = file.soundings[at]
-                        val analysis = remember(s, file) { SoundingMath.analyze(s, file.elevationM) }
+                        val analysis = remember(s, file) { SoundingMath.analyze(s, file.elevationM, file.lat) }
                         val slider: @Composable (Modifier) -> Unit = { m ->
                             if (file.soundings.size > 1) CompactSlider(value = at.toFloat(), onValueChange = { index = it.roundToInt() }, valueRange = 0f..(file.soundings.size - 1).toFloat(), modifier = m)   // the value is rounded to an hour of the file, so the thumb sits on a forecast hour
                         }
@@ -156,6 +156,18 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                                 }
                             }
                             val windTable: @Composable () -> Unit = { analysis?.kinematics?.let { WindTable(it) } }
+                            val panels: @Composable () -> Unit = {
+                                if (analysis != null) {
+                                    Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Column(Modifier.weight(1f)) { ThetaEPanel(analysis, Modifier.fillMaxWidth().aspectRatio(0.9f)) }
+                                        Column(Modifier.weight(1f)) { StormRelativePanel(analysis, Modifier.fillMaxWidth().aspectRatio(0.9f)) }
+                                    }
+                                    Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Column(Modifier.weight(1f)) { AdvectionPanel(analysis, Modifier.fillMaxWidth().aspectRatio(0.9f)) }
+                                        Column(Modifier.weight(1f)) { CompositeNumbers(analysis) }
+                                    }
+                                }
+                            }
                             val indexTable: @Composable () -> Unit = {
                                 analysis?.let { IndexTable(it) }
                                 IndexList(s)
@@ -174,6 +186,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                                 } else {
                                     skew(); parcelTable(); hodo(); windTable()
                                 }
+                                panels()
                                 indexTable()
                             }
                         }
@@ -468,8 +481,118 @@ private fun WindTable(k: SoundingMath.Kinematics) {
 private fun IndexTable(a: SoundingMath.Analysis) {
     fun lapse(v: Double?) = v?.let { "%.1f".format(it) } ?: "M"
     Column(Modifier.padding(top = 8.dp)) {
-        Text("PW = ${"%.2f".format(a.pwMm / 25.4)} in    K = ${a.kIndex?.let { "%.0f".format(it) } ?: "M"}    STP (fixed) = ${"%.1f".format(a.stp)}", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        Text("PW = ${"%.2f".format(a.pwMm / 25.4)} in    K = ${a.kIndex?.let { "%.0f".format(it) } ?: "M"}", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
         Text("Lapse rates (C/km): sfc-3km agl ${lapse(a.lapse03)}   3-6km ${lapse(a.lapse36)}", Modifier.padding(top = 2.dp), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
         Text("                   850-500mb ${lapse(a.lapse850500)}   700-500mb ${lapse(a.lapse700500)}", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        fun pct(v: Double?) = v?.let { "%.0f%%".format(it) } ?: "M"
+        Text("RH sfc-850mb ${pct(a.lowRh)}   700-500mb ${pct(a.midRh)}", Modifier.padding(top = 2.dp), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        a.effective?.let { Text("Effective inflow layer ${it.bottomZ.roundToInt()}-${it.topZ.roundToInt()} m   eff. SRH ${"%.0f".format(a.effectiveSrh)}   eff. shear ${a.effectiveShearMs?.let { v -> "%.0f".format(v / 0.514444) } ?: "M"} kt", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp) }
+            ?: Text("No effective inflow layer (no parcel with 100 J/kg and CIN above -250)", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        a.corfidi?.let { Text("Corfidi upwind ${windText(it.upwind)} kt   downwind ${windText(it.downwind)} kt", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp) }
+        a.sigSevere?.let { Text("SigSevere ${"%.0f".format(it)} m3/s3", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp) }
+    }
+}
+
+// ---- the small panels ----
+
+private fun DrawScope.panelFrame(color: Color, left: Float, top: Float, w: Float, h: Float) =
+    drawRect(color.copy(alpha = 0.5f), Offset(left, top), androidx.compose.ui.geometry.Size(w, h), style = Stroke(1.dp.toPx()))
+
+/** SPC's theta-E panel: equivalent potential temperature against pressure, from the surface to 300 mb; a falling line is convectively unstable. */
+@Composable
+private fun ThetaEPanel(a: SoundingMath.Analysis, modifier: Modifier) {
+    val grid = MaterialTheme.colorScheme.onSurfaceVariant; val text = MaterialTheme.colorScheme.onSurface
+    Column {
+        Text("Theta-E (K) vs pressure", style = MaterialTheme.typography.labelMedium)
+        Canvas(modifier) {
+            val data = a.thetaE.filter { it.first >= 300.0 }
+            if (data.size < 2) return@Canvas
+            val left = 30.dp.toPx(); val top = 6.dp.toPx(); val right = 8.dp.toPx(); val bottom = size.height - 18.dp.toPx()
+            val pw = size.width - left - right; val ph = bottom - top
+            val lo = data.minOf { it.second }.let { kotlin.math.floor(it / 5.0) * 5.0 - 5.0 }; val hi = data.maxOf { it.second }.let { kotlin.math.ceil(it / 5.0) * 5.0 + 5.0 }
+            val p0 = data.first().first.coerceAtLeast(300.0)
+            fun px(v: Double) = (left + pw * (v - lo) / (hi - lo)).toFloat()
+            fun py(p: Double) = (top + ph * ln(p0 / p) / ln(p0 / 300.0)).toFloat()
+            val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); color = text.copy(alpha = 0.7f).hashCodeColor() }
+            for (p in listOf(1000, 850, 700, 500, 400, 300)) if (p <= p0 && p >= 300) {
+                drawLine(grid.copy(alpha = 0.25f), Offset(left, py(p.toDouble())), Offset(left + pw, py(p.toDouble())), strokeWidth = 0.8.dp.toPx())
+                drawContext.canvas.nativeCanvas.drawText(p.toString(), 2.dp.toPx(), py(p.toDouble()) + 3.5.dp.toPx(), label)
+            }
+            val center = android.graphics.Paint(label).apply { textAlign = android.graphics.Paint.Align.CENTER }
+            var v = kotlin.math.ceil(lo / 10.0) * 10.0
+            while (v <= hi) { drawLine(grid.copy(alpha = 0.25f), Offset(px(v), top), Offset(px(v), bottom), strokeWidth = 0.8.dp.toPx()); drawContext.canvas.nativeCanvas.drawText(v.roundToInt().toString(), px(v), bottom + 13.dp.toPx(), center); v += 10.0 }
+            panelFrame(grid, left, top, pw, ph)
+            val path = Path()
+            for ((i, d) in data.withIndex()) { val x = px(d.second); val y = py(d.first); if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }
+            clipRect(left, top, left + pw, bottom) { drawPath(path, TEMP_RED, style = Stroke(2.dp.toPx())) }
+        }
+    }
+}
+
+/** The speed of the wind relative to the right-moving storm against height above the ground (kt): supercells like 40 kt or more through 4 to 6 km. */
+@Composable
+private fun StormRelativePanel(a: SoundingMath.Analysis, modifier: Modifier) {
+    val grid = MaterialTheme.colorScheme.onSurfaceVariant; val text = MaterialTheme.colorScheme.onSurface
+    Column {
+        Text("Storm-relative wind (kt) vs height", style = MaterialTheme.typography.labelMedium)
+        Canvas(modifier) {
+            val data = a.stormRelative
+            if (data.size < 2) return@Canvas
+            val left = 28.dp.toPx(); val top = 6.dp.toPx(); val right = 8.dp.toPx(); val bottom = size.height - 18.dp.toPx()
+            val pw = size.width - left - right; val ph = bottom - top
+            val hi = max(60.0, kotlin.math.ceil(data.maxOf { it.second } / 20.0) * 20.0)
+            fun px(v: Double) = (left + pw * v / hi).toFloat()
+            fun py(z: Double) = (bottom - ph * z / 12000.0).toFloat()
+            val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); color = text.copy(alpha = 0.7f).hashCodeColor() }
+            val center = android.graphics.Paint(label).apply { textAlign = android.graphics.Paint.Align.CENTER }
+            for (km in 0..12 step 3) { drawLine(grid.copy(alpha = 0.25f), Offset(left, py(km * 1000.0)), Offset(left + pw, py(km * 1000.0)), strokeWidth = 0.8.dp.toPx()); drawContext.canvas.nativeCanvas.drawText("$km", 4.dp.toPx(), py(km * 1000.0) + 3.5.dp.toPx(), label) }
+            var v = 20.0
+            while (v < hi) { drawLine(grid.copy(alpha = 0.25f), Offset(px(v), top), Offset(px(v), bottom), strokeWidth = 0.8.dp.toPx()); drawContext.canvas.nativeCanvas.drawText(v.roundToInt().toString(), px(v), bottom + 13.dp.toPx(), center); v += 20.0 }
+            panelFrame(grid, left, top, pw, ph)
+            for (i in 1 until data.size) drawLine(layerColor(data[i].first), Offset(px(data[i - 1].second), py(data[i - 1].first)), Offset(px(data[i].second), py(data[i].first)), strokeWidth = 2.5.dp.toPx())
+        }
+    }
+}
+
+/** The inferred temperature advection of each layer (C per hour) as bars about a zero line: warm to the right (red), cold to the left (blue). */
+@Composable
+private fun AdvectionPanel(a: SoundingMath.Analysis, modifier: Modifier) {
+    val grid = MaterialTheme.colorScheme.onSurfaceVariant; val text = MaterialTheme.colorScheme.onSurface
+    Column {
+        Text("Inferred temp advection (C/hr)", style = MaterialTheme.typography.labelMedium)
+        Canvas(modifier) {
+            val layers = a.advection
+            if (layers.isEmpty()) return@Canvas
+            val left = 30.dp.toPx(); val top = 6.dp.toPx(); val right = 8.dp.toPx(); val bottom = size.height - 6.dp.toPx()
+            val pw = size.width - left - right; val ph = bottom - top
+            val pBottom = a.profile.p[0]
+            val extent = max(2.0, kotlin.math.ceil(layers.maxOf { abs(it.cPerHour) }))
+            fun py(p: Double) = (top + ph * ln(p / 100.0) / ln(pBottom / 100.0)).toFloat().let { bottom - (bottom - top) + (it - top) }
+            val mid = left + pw / 2
+            val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); color = text.copy(alpha = 0.7f).hashCodeColor() }
+            val tiny = android.graphics.Paint(label).apply { textSize = 9.dp.toPx(); color = text.hashCodeColor() }
+            for (p in listOf(1000, 850, 700, 500, 300, 200)) if (p < pBottom) { drawLine(grid.copy(alpha = 0.2f), Offset(left, py(p.toDouble())), Offset(left + pw, py(p.toDouble())), strokeWidth = 0.8.dp.toPx()); drawContext.canvas.nativeCanvas.drawText(p.toString(), 2.dp.toPx(), py(p.toDouble()) + 3.5.dp.toPx(), label) }
+            panelFrame(grid, left, top, pw, ph)
+            drawLine(grid.copy(alpha = 0.7f), Offset(mid, top), Offset(mid, bottom), strokeWidth = 1.dp.toPx())
+            for (l in layers) {
+                val y0 = py(l.pTop); val y1 = py(l.pBottom)
+                val half = (pw / 2 * (abs(l.cPerHour) / extent)).toFloat().coerceAtMost(pw / 2)
+                val warm = l.cPerHour >= 0
+                drawRect(if (warm) Color(0xFFD32F2F) else Color(0xFF1565C0), Offset(if (warm) mid else mid - half, y0 + 1.dp.toPx()), androidx.compose.ui.geometry.Size(half, (y1 - y0 - 2.dp.toPx()).coerceAtLeast(1f)))
+                if (y1 - y0 > 11.dp.toPx()) drawContext.canvas.nativeCanvas.drawText("%.1f".format(l.cPerHour), if (warm) mid + half + 2.dp.toPx() else mid + 2.dp.toPx(), (y0 + y1) / 2 + 3.dp.toPx(), tiny)
+            }
+        }
+    }
+}
+
+/** SPC's big orange numbers: the supercell composite, the significant tornado parameter (effective and fixed layer) and the significant hail parameter. */
+@Composable
+private fun CompositeNumbers(a: SoundingMath.Analysis) {
+    val orange = Color(0xFFE65100)
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+        for ((label, v) in listOf("Supercell" to a.supercell, "STP (eff layer)" to a.stpEffective, "STP (fixed layer)" to a.stp, "Sig Hail" to a.ship)) {
+            Text("$label = ${v?.let { "%.1f".format(it) } ?: "M"}", color = orange, fontWeight = FontWeight.Bold, fontFamily = TABLE, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+        }
+        Text("After SPC's sounding page. Composites are model guidance for one grid point, not a forecast.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
