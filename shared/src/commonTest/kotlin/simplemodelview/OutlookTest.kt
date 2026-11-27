@@ -110,6 +110,8 @@ class OutlookTest {
         assertNotNull(data.valid)
         assertFailsWith<RefsException> { OutlookRepository(FakeHttp(404, "")).load(choice) }
         assertFailsWith<RefsException> { OutlookRepository(FakeHttp(500, "")).load(choice) }
+        assertEquals(0, OutlookRepository(FakeHttp(404, "")).load(OutlookChoice(5, OutlookType.Probability)).shapes.size)      // days 4-8: no file means no 15% area
+        assertFailsWith<RefsException> { OutlookRepository(FakeHttp(404, "")).load(OutlookChoice(3, OutlookType.Categorical)) }
         assertEquals(0, OutlookRepository(FakeHttp(200, """{"features":[]}""")).load(choice).shapes.size)
     }
 

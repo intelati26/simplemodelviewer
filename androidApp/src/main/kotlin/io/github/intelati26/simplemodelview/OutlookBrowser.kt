@@ -219,7 +219,10 @@ internal fun OutlookScreen(vm: OutlookBrowserViewModel, onOpen: (String) -> Unit
                         Box(Modifier.size(12.dp).background(Color(0xFF000000.toInt() or l.color)))
                         Text(" " + l.title.removeSuffix(" Risk"), fontSize = 11.sp)
                     }
-                } else if (!s.busy) Text("No risk areas on this map.", fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
+                } else if (!s.busy) Text(
+                    if (s.day >= 4) "No area of 15% or more severe chance is forecast for Day ${s.day} (SPC draws one only at 15% or more)." else "No risk areas on this map.",
+                    fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp),
+                )
             }
             if (s.placeRisks.isNotEmpty()) Text("Your places: " + s.placeRisks.joinToString("  ·  ") { (n, r) -> "$n – ${r.removeSuffix(" Risk")}" }, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider(Modifier.padding(vertical = 6.dp))

@@ -202,13 +202,14 @@ fun outlookReadout(choice: OutlookChoice, shape: OutlookShape?): String = "SPC $
 
 /** Loads SPC outlooks from SPC's public GIS data over [http]. */
 class OutlookRepository(private val http: Http) {
-    /** The outlook of [choice]. A 404 (not issued yet) throws; a file with no areas gives an empty list. */
+    /** The outlook of [choice]. A 404 (not issued yet) throws, except for days 4-8 where it means no area of 15% or more; a file with no areas gives an empty list. */
     suspend fun load(choice: OutlookChoice): OutlookData {
         if (choice.archive.isNotEmpty()) return loadArchived(choice)
         val result = http.get(choice.url)
         when (result.status) {
             200 -> {}
-            404 -> throw RefsException("${choice.label} has not been issued")
+            // days 4-8: SPC draws an area only where the chance is 15% or more, and has no file when there is none: that is "no area", not a missing product
+            404 -> if (choice.day >= 4) return OutlookData(emptyList(), null, null, null) else throw RefsException("${choice.label} has not been issued")
             else -> throw RefsException("the SPC outlook could not be read (HTTP ${result.status})")
         }
         return parseOutlookGeoJson(result.body.decodeToString())
