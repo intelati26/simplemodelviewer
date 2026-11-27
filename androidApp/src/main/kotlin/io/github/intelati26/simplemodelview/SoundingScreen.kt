@@ -88,19 +88,25 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
         // keep the hour nearest the one that was shown (the two models start and step differently): the first hour of a new file
         index = 0
     }
+    // a wide screen (a tablet, or the phone on its side) gets the header and the time controls in fewer rows, to leave the height to the plots
+    val wideScreen = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 700
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                val modelChips: @Composable () -> Unit = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (m in BufkitModel.entries) FilterChip(selected = m == model, onClick = { model = m }, label = { Text(m.label) })
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = if (wideScreen) 4.dp else 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (wideScreen) 12.dp else 0.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text("${station.id}  ·  ${station.name}", fontWeight = FontWeight.Bold, maxLines = 1)
                         Text("%.0f km from the crosshair".format(station.km), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    if (wideScreen) modelChips()
                     TextButton(onClick = onDismiss) { Text("Close") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (m in BufkitModel.entries) FilterChip(selected = m == model, onClick = { model = m }, label = { Text(m.label) })
-                }
+                if (!wideScreen) modelChips()
                 val l = loaded
                 val file = l?.file
                 when {
@@ -110,34 +116,63 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                         val at = index.coerceIn(0, file.soundings.size - 1)
                         val s = file.soundings[at]
                         val analysis = remember(s, file) { SoundingMath.analyze(s, file.elevationM) }
+                        val slider: @Composable (Modifier) -> Unit = { m ->
+                            if (file.soundings.size > 1) Slider(value = at.toFloat(), onValueChange = { index = it.roundToInt() }, valueRange = 0f..(file.soundings.size - 1).toFloat(), modifier = m)
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(enabled = at > 0, onClick = { index = at - 1 }) { Text("\u2039") }
-                            Column(Modifier.weight(1f)) {
+                            Column(if (wideScreen) Modifier else Modifier.weight(1f)) {
                                 Text("${station.id}  ${stamp(s.valid)}  (${model.label} +${s.forecastHour} h)", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                                 file.run?.let { Text("run ${formatUtc(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                             TextButton(enabled = at < file.soundings.size - 1, onClick = { index = at + 1 }) { Text("\u203A") }
+                            if (wideScreen) slider(Modifier.weight(1f))
                         }
-                        if (file.soundings.size > 1) Slider(value = at.toFloat(), onValueChange = { index = it.roundToInt() }, valueRange = 0f..(file.soundings.size - 1).toFloat())
-                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                        if (!wideScreen) slider(Modifier)
+                        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {
+                            // SPC's page is wide: the skew-T at the left, the hodograph beside it, the tables under them. A narrow screen stacks the same pieces.
+                            val wide = maxWidth >= 700.dp
                             val parcels = analysis?.let { listOf(it.surface, it.mixed, it.mostUnstable) }
                             val shownParcel = parcels?.getOrNull(parcelAt.coerceIn(0, 2))
-                            SkewT(s, file.elevationM, analysis, shownParcel, Modifier.fillMaxWidth().aspectRatio(0.95f))
-                            Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("\u2014 temperature", color = TEMP_RED, style = MaterialTheme.typography.labelSmall)
-                                Text("\u2014 dewpoint", color = DEW_GREEN, style = MaterialTheme.typography.labelSmall)
-                                Text("\u2014 wet bulb", color = WET_CYAN, style = MaterialTheme.typography.labelSmall)
-                                Text("- - parcel", style = MaterialTheme.typography.labelSmall)
+                            val skew: @Composable () -> Unit = {
+                                SkewT(s, file.elevationM, analysis, shownParcel, Modifier.fillMaxWidth().aspectRatio(0.95f))
+                                Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("\u2014 temperature", color = TEMP_RED, style = MaterialTheme.typography.labelSmall)
+                                    Text("\u2014 dewpoint", color = DEW_GREEN, style = MaterialTheme.typography.labelSmall)
+                                    Text("\u2014 wet bulb", color = WET_CYAN, style = MaterialTheme.typography.labelSmall)
+                                    Text("- - parcel", style = MaterialTheme.typography.labelSmall)
+                                }
                             }
-                            if (analysis != null) { ParcelTable(analysis, parcelAt) { parcelAt = it }; Text("Tap a parcel to draw it on the skew-T.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                            Hodograph(s, file.elevationM, analysis?.kinematics, Modifier.fillMaxWidth().aspectRatio(1f).padding(top = 10.dp, bottom = 4.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                for (l in HODOGRAPH_LAYERS) Text("\u2014 ${l.label}", color = l.color, style = MaterialTheme.typography.labelSmall)
+                            val parcelTable: @Composable () -> Unit = {
+                                if (analysis != null) { ParcelTable(analysis, parcelAt) { parcelAt = it }; Text("Tap a parcel to draw it on the skew-T.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
-                            analysis?.kinematics?.let { WindTable(it) }
-                            analysis?.let { IndexTable(it) }
-                            IndexList(s)
-                            Text("Model profile at the airport's grid point: ${model.label}, Iowa State's BUFKIT feed.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val hodo: @Composable () -> Unit = {
+                                Hodograph(s, file.elevationM, analysis?.kinematics, Modifier.fillMaxWidth().aspectRatio(1f).padding(top = if (wide) 0.dp else 10.dp, bottom = 4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    for (l in HODOGRAPH_LAYERS) Text("\u2014 ${l.label}", color = l.color, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            val windTable: @Composable () -> Unit = { analysis?.kinematics?.let { WindTable(it) } }
+                            val indexTable: @Composable () -> Unit = {
+                                analysis?.let { IndexTable(it) }
+                                IndexList(s)
+                                Text("Model profile at the airport's grid point: ${model.label}, Iowa State's BUFKIT feed.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(Modifier.verticalScroll(rememberScrollState())) {
+                                if (wide) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        Column(Modifier.weight(1f)) { skew() }
+                                        Column(Modifier.weight(1f)) { hodo() }
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        Column(Modifier.weight(1f)) { parcelTable() }
+                                        Column(Modifier.weight(1f)) { windTable() }
+                                    }
+                                } else {
+                                    skew(); parcelTable(); hodo(); windTable()
+                                }
+                                indexTable()
+                            }
                         }
                     }
                 }
