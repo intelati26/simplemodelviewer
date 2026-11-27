@@ -188,4 +188,22 @@ class SoundingMathTest {
         assertEquals(49, a.stormRelative.size)
         assertTrue(a.stormRelative.all { it.second >= 0.0 })
     }
+
+    @Test fun theAdvectionFollowsSharppysFormulaByHand() {
+        // the wind 180 deg (south) at the ground and 270 deg (west) at 1.5 km, 20 kt at both; the temperature falls 6.5 C/km from 25 C
+        val s = build(1000.0, { z -> 25.0 - 6.5 * z / 1000.0 }, { z -> 15.0 - 6.0 * z / 1000.0 }, dir = { z -> 180.0 + 90.0 * minOf(z / 1500.0, 1.0) }, kt = { 20.0 })
+        val first = SoundingMath.analyze(s, 0.0, 35.0)!!.advection.first()
+        assertEquals(1000.0, first.pBottom, 1e-6); assertEquals(900.0, first.pTop, 1e-6)       // layers of 100 mb from the surface
+        // 100 mb is about 900 m here: the wind has turned 90 * 900 / 1500 = 54 degrees; a mean wind a little under 20 kt = 10 m/s
+        val f = 2.0 * (2.0 * Math.PI / 86164.0) * kotlin.math.sin(35.0 * Math.PI / 180.0)
+        val z = SoundingMath.analyze(s, 0.0, 35.0)!!.profile.zAt(900.0)
+        val expected = (f / 9.81) * (Math.PI / 180.0) * 9.0 * 9.0 * (2.0 * (298.15 + 298.15 - 6.5 * z / 1000.0)) * (54.0 / z) * 3600.0   // speed 9 m/s +- the mean
+        assertTrue(first.cPerHour > 0.0 && first.cPerHour in expected * 0.6..expected * 1.6, "got ${first.cPerHour}, hand ${expected}")
+        // SHARPpy's value is much smaller than SPC's: the same wind turning the other way is the same size, cold
+        val back = build(1000.0, { z -> 25.0 - 6.5 * z / 1000.0 }, { z -> 15.0 - 6.0 * z / 1000.0 }, dir = { z -> 180.0 - 90.0 * minOf(z / 1500.0, 1.0) }, kt = { 20.0 })
+        assertEquals(-first.cPerHour, SoundingMath.analyze(back, 0.0, 35.0)!!.advection.first().cPerHour, kotlin.math.abs(first.cPerHour) * 0.05)
+        // the latitude sets the Coriolis parameter: 70 N gives about 1.64 times 35 N
+        val high = SoundingMath.analyze(s, 0.0, 70.0)!!.advection.first().cPerHour
+        assertEquals(kotlin.math.sin(70.0 * Math.PI / 180.0) / kotlin.math.sin(35.0 * Math.PI / 180.0), high / first.cPerHour, 0.01)
+    }
 }

@@ -273,4 +273,42 @@ object SharpTab {
         else if (rh > 85.0 && tF in 80.0..87.0) hi += (rh - 85.0) / 10.0 * (87.0 - tF) / 5.0
         return hi
     }
+
+    /** Where the wind blows from (degrees) for a (u, v); a calm wind is 0, as SHARPpy's arctan2(0, 0) gives. */
+    private fun fromDirection(u: Double, v: Double): Double {
+        if (hypot(u, v) < 1e-9) return 0.0
+        val d = kotlin.math.atan2(-u, -v) * 180.0 / PI
+        return if (d < 0.0) d + 360.0 else d
+    }
+
+    /**
+     * SHARPpy's inferred temperature advection (params.inferred_temp_adv, the thermal-wind form of the geostrophic advection, Bluestein eq. 4.1.139) for layers of 100 mb from
+     * the surface up, in C per hour (positive: warm advection, the wind veering with height). SHARPpy keeps its "average temperature" as twice the sum of the two
+     * layer-end temperatures, and its values come out much smaller than the ones on SPC's graphic; both are kept as they are. [latitude] defaults to SHARPpy's 35.
+     */
+    fun inferredAdvection(pr: SoundingMath.Profile, w: WindColumn, latitude: Double = 35.0): List<SoundingMath.Advection> {
+        val lat = if (latitude.isNaN()) 35.0 else latitude
+        val lastP = (0 until pr.size).map { pr.p[it] }.filter { it >= 100.0 }.minOrNull() ?: return emptyList()
+        val levels = ArrayList<Double>()
+        var p = pr.p[0]
+        while (p > lastP) { levels += p; p -= 100.0 }
+        val omega = 2.0 * PI / 86164.0
+        val f = 2.0 * omega * sin(lat * PI / 180.0)
+        val multiplier = (f / 9.81) * (PI / 180.0)
+        val out = ArrayList<SoundingMath.Advection>()
+        for (i in 1 until levels.size) {
+            val pb = levels[i - 1]; val pt = levels[i]
+            val tb = pr.tAt(pb); val tt = pr.tAt(pt); val hb = pr.zAt(pb); val ht = pr.zAt(pt)
+            val vb = w.at(pb); val vt = w.at(pt); val m = meanBetweenPressures(w, pb, pt, weighted = true)
+            if (ht == hb || vb == null || vt == null || m == null) continue
+            val bottomDir = fromDirection(vb.first, vb.second)
+            var topDir = fromDirection(vt.first, vt.second) + 180.0 - bottomDir        // turn the bottom wind to 180
+            if (topDir < 0.0) topDir += 360.0 else if (topDir >= 360.0) topDir -= 360.0
+            val dTheta = topDir - 180.0
+            val speed = hypot(m.first, m.second)
+            val avgTemp = ((tt + 273.15) + (tb + 273.15)) * 2.0
+            out += SoundingMath.Advection(pb, pt, multiplier * speed * speed * avgTemp * (dTheta / (ht - hb)) * 3600.0)
+        }
+        return out
+    }
 }

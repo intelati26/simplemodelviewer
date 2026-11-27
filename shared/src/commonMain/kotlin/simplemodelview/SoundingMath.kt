@@ -307,28 +307,6 @@ object SoundingMath {
     /** One layer of the inferred temperature advection: between [pBottom] and [pTop] (mb), in C per hour (positive: warm advection). */
     class Advection(val pBottom: Double, val pTop: Double, val cPerHour: Double)
 
-    /**
-     * Temperature advection inferred from the turning of the wind with height (the thermal wind relation): winds that veer with height mean warm advection and winds
-     * that back mean cold. Layers of about 100 mb from the surface up; [latitude] sets the Coriolis parameter.
-     */
-    fun inferredAdvection(pr: Profile, latitude: Double): List<Advection> {
-        val f = 2.0 * 7.292e-5 * kotlin.math.sin(Math.toRadians(if (latitude.isNaN()) 40.0 else latitude))
-        val bounds = ArrayList<Double>(); bounds += pr.p[0]
-        var b = (kotlin.math.floor((pr.p[0] - 1.0) / 100.0) * 100.0)
-        while (b >= 100.0) { bounds += b; b -= 100.0 }
-        val out = ArrayList<Advection>()
-        for (i in 1 until bounds.size) {
-            val pb = bounds[i - 1]; val pt = bounds[i]
-            if (pb - pt < 20.0 || pr.p[pr.size - 1] > pt) continue
-            val vb = uvOrNull(pr, pr.zAt(pb)) ?: continue; val vt = uvOrNull(pr, pr.zAt(pt)) ?: continue
-            val um = (vb.first + vt.first) / 2; val vm = (vb.second + vt.second) / 2
-            val du = vt.first - vb.first; val dv = vt.second - vb.second
-            val dlnp = ln(pt / pb)
-            out += Advection(pb, pt, (f / RD) * (um * dv - vm * du) / dlnp * 3600.0)
-        }
-        return out
-    }
-
     /** Equivalent potential temperature (K) against pressure, level by level up to 200 mb. */
     fun thetaEProfile(pr: Profile): List<Pair<Double, Double>> =
         (0 until pr.size).filter { pr.p[it] >= 200.0 }.map { pr.p[it] to thetaE(pr.p[it], pr.t[it], pr.td[it]) }
@@ -378,7 +356,7 @@ object SoundingMath {
             frz, levelOf(pr, -20.0), levelOf(pr, 0.0, wetBulb = true), if (k == null) 0.0 else stpFixed(sb, k.srh1, k.shear6Ms),
             eil, esrh, ebwd, if (eil != null && rm != null) stpEffective(ml, esrh, ebwdMs, eil) else 0.0, if (eil != null && rm != null) supercellComposite(mu, esrh, ebwdMs) else 0.0,
             k?.let { ml.cape * it.shear6Ms }, SharpTab.ship(pr, w, mu), SharpTab.corfidi(pr, w), SharpTab.meanRelativeHumidity(pr, p15, p40), SharpTab.meanRelativeHumidity(pr, pr.p[0], p15).takeIf { pr.p[0] > p15 },
-            thetaEProfile(pr), if (rm == null) emptyList() else stormRelativeWinds(pr, rm), inferredAdvection(pr, latitude),
+            thetaEProfile(pr), if (rm == null) emptyList() else stormRelativeWinds(pr, rm), SharpTab.inferredAdvection(pr, w, latitude),
             SharpTab.wndg(pr, w, ml.cape, ml.cin, lapse03), SharpTab.mmp(pr, w, mu.cape), dc?.first, dc?.second, lapseRateZ(pr, 0.0, 1000.0), srw46, k?.layers?.getOrNull(3)?.shearKt,
             if (pr.spd[0].isNaN()) null else pr.spd[0] * 1.15078, pr.t[0], 100.0 * mixingRatio(pr.p[0], pr.td[0]) / mixingRatio(pr.p[0], pr.t[0]),
         )

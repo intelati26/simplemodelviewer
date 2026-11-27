@@ -3,7 +3,7 @@
 The sounding calculations of this app (`shared/src/commonMain/kotlin/simplemodelview/SoundingMath.kt`, `SoundingSharp.kt` and `SoundingHazard.kt`) reimplement algorithms
 from **SHARPpy** (https://github.com/sharppy/SHARPpy), the open-source port of the Storm Prediction Center's SHARP/NSHARP sounding software, by way of the checked ports in
 wxqt-grib (https://github.com/intelati26/wxqt-grib, GPLv3: `src/sounding/`). They follow the structure and formulas of SHARPpy's `sharptab/params.py` (`parcelx`,
-`effective_inflow_layer`, `bunkers_storm_motion`, `dcape`, `stp_fixed`, `stp_cin`, `scp`, `ship`, the WNDG and MMP indices, `inferred_temp_adv` is not ported),
+`effective_inflow_layer`, `bunkers_storm_motion`, `dcape`, `stp_fixed`, `stp_cin`, `scp`, `ship`, the WNDG and MMP indices, `inferred_temp_adv`),
 `sharptab/winds.py` (`helicity`, `mean_wind`, `wind_shear`, `non_parcel_bunkers_motion`) and `sharptab/watch_type.py` (`possible_watch`, the possible hazard type). Where
 wxqt-grib found SPC's printed values to differ from SHARPpy's code, the version here follows wxqt-grib (and so SPC): see the comments in `SoundingSharp.kt`.
 

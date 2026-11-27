@@ -561,26 +561,26 @@ private fun StormRelativePanel(a: SoundingMath.Analysis, modifier: Modifier) {
 private fun AdvectionPanel(a: SoundingMath.Analysis, modifier: Modifier) {
     val grid = MaterialTheme.colorScheme.onSurfaceVariant; val text = MaterialTheme.colorScheme.onSurface
     Column {
-        Text("Inferred temp advection (C/hr)", style = MaterialTheme.typography.labelMedium)
+        Text("Inf. Temp. Adv. (C/hr)", style = MaterialTheme.typography.labelMedium)
         Canvas(modifier) {
             val layers = a.advection
             if (layers.isEmpty()) return@Canvas
             val left = 30.dp.toPx(); val top = 6.dp.toPx(); val right = 8.dp.toPx(); val bottom = size.height - 6.dp.toPx()
             val pw = size.width - left - right; val ph = bottom - top
             val pBottom = a.profile.p[0]
-            val extent = max(2.0, kotlin.math.ceil(layers.maxOf { abs(it.cPerHour) }))
+            val extent = 13.0                                   // SHARPpy's fixed scale, -13 to +13 C/hr
             fun py(p: Double) = (top + ph * ln(p / 100.0) / ln(pBottom / 100.0)).toFloat().let { bottom - (bottom - top) + (it - top) }
             val mid = left + pw / 2
             val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); color = text.copy(alpha = 0.7f).hashCodeColor() }
             val tiny = android.graphics.Paint(label).apply { textSize = 9.dp.toPx(); color = text.hashCodeColor() }
             for (p in listOf(1000, 850, 700, 500, 300, 200)) if (p < pBottom) { drawLine(grid.copy(alpha = 0.2f), Offset(left, py(p.toDouble())), Offset(left + pw, py(p.toDouble())), strokeWidth = 0.8.dp.toPx()); drawContext.canvas.nativeCanvas.drawText(p.toString(), 2.dp.toPx(), py(p.toDouble()) + 3.5.dp.toPx(), label) }
             panelFrame(grid, left, top, pw, ph)
-            drawLine(grid.copy(alpha = 0.7f), Offset(mid, top), Offset(mid, bottom), strokeWidth = 1.dp.toPx())
+            drawLine(grid.copy(alpha = 0.7f), Offset(mid, top), Offset(mid, bottom), strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)))
             for (l in layers) {
                 val y0 = py(l.pTop); val y1 = py(l.pBottom)
                 val half = (pw / 2 * (abs(l.cPerHour) / extent)).toFloat().coerceAtMost(pw / 2)
                 val warm = l.cPerHour >= 0
-                drawRect(if (warm) Color(0xFFD32F2F) else Color(0xFF1565C0), Offset(if (warm) mid else mid - half, y0 + 1.dp.toPx()), androidx.compose.ui.geometry.Size(half, (y1 - y0 - 2.dp.toPx()).coerceAtLeast(1f)))
+                drawRect(if (warm) Color(0xFFD32F2F) else Color(0xFF3399CC), Offset(if (warm) mid else mid - half, y0 + 1.dp.toPx()), androidx.compose.ui.geometry.Size(half, (y1 - y0 - 2.dp.toPx()).coerceAtLeast(1f)))
                 if (y1 - y0 > 11.dp.toPx()) drawContext.canvas.nativeCanvas.drawText("%.1f".format(l.cPerHour), if (warm) mid + half + 2.dp.toPx() else mid + 2.dp.toPx(), (y0 + y1) / 2 + 3.dp.toPx(), tiny)
             }
         }
