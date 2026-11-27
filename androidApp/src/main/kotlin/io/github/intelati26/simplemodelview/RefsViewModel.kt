@@ -814,87 +814,74 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private val exporter = Exporter(renderer) { exportDir(getApplication()) }
+
     /**
-     * Renders every forecast time of the current product / sector into an MP4 and returns the file. [onProgress] gets (done, total).
-     * Frames come from the HTTP cache when the loop has been played.
+     * What an export of the forecast times [ts] is, taken from [st]: the extractor of each pane (the product's frame read from the store; in a compare the
+     * other product at the time nearest it), the outlook drawn on it, the area's window. The globe is drawn here. [picture]: the shown time, from memory.
      */
-    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
-        val s = store ?: return@withContext null
-        val st = _state.value
-        val product = st.product ?: return@withContext null
-        val cycle = st.cycle ?: return@withContext null
-        val window = loopWindowFor(st)
-        val n = window.count()
-        if (n < 2) return@withContext null
-        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() }
-        val file = File(dir, "spc_refs_loop_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}.mp4")
-        var exporter: LoopExporter? = null
-        val v = resolveView(area)
-        try {
-            for ((k, t) in window.withIndex()) {
-                val data = repo.readFrame(s, product, t, st.member)
-                val style = withAutoStops(product.style, data)
-                outlook.ensure(st.times[t])
-                val map = areaBitmap(area, product, style, data, st, v, st.times[t], GLOBE_LOOP_SIDE)
-                val hour = (st.times[t] - cycle.epochSeconds) / 3600
-                val header = "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${hour.toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
-                var picture = renderer.shareImage(map, product, style, header, st.members)
-                val (sw, sh) = size.scaled(picture.width, picture.height)
-                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
-                if (exporter == null) exporter = LoopExporter(file, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
-                exporter.add(picture, last = k == n - 1)
-                onProgress(k + 1, n)
-            }
-            exporter?.finish()
-            file
-        } catch (e: Exception) {
-            exporter?.abort()
-            throw e
-        }
-    }
-
-    /** The map picture of an export: a flat grid window, or the globe as turned now at export size. */
-    private fun areaBitmap(area: ShareArea, product: Product, style: Style, data: FloatArray, st: UiState, v: View = resolveView(area), valid: Long? = st.times.getOrNull(st.timeIndex), side: Int = GLOBE_EXPORT_SIDE): Bitmap =
-        if (area == ShareArea.Globe && globeW > 0) {
-            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))       // the globe as turned now, on a square at export size
-            globeRenderer.render(
-                product.grid, data, style, st.members, cam, side, side, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity,
-                alerts = outlookDrawsOn(outlook, valid) { la, lo -> globeForward(cam, side, side, la, lo) }, counties = st.settings.forExport().counties,
-            )
-        } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
-
-    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
-    /** The compare's second picture for an export: the other product at the time nearest this one, drawn in full on [area]. Null: none near. */
-    private suspend fun areaBitmapB(area: ShareArea, st: UiState, product: Product, valid: Long?): Triple<Bitmap, Product, Style>? {
+    private suspend fun exportJob(area: ShareArea, ts: List<Int>, st: UiState, picture: Boolean): ExportJob? {
         val s = store ?: return null
-        val b = st.other ?: return null
-        if (valid == null || area == ShareArea.Globe) return null
-        val times = repo.validTimes(s, b)
-        val idx = times.indices.minByOrNull { kotlin.math.abs(times[it] - valid) }?.takeIf { kotlin.math.abs(times[it] - valid) <= 1800 } ?: return null
-        val frame = repo.readFrameTimed(s, b, idx, st.member)
-        val style = withAutoStops(b.style, frame.values)
-        val v = if (b.grid == product.grid) resolveView(area) else View.whole(b.grid)
-        return Triple(areaBitmap(area, b, style, frame.values, st, v, valid), b, style)
+        val product = st.product ?: return null
+        val cycle = st.cycle ?: return null
+        val settings = st.settings.forExport()
+        val v0 = resolveView(area)
+        val other = st.other?.takeIf { st.compare && area != ShareArea.Globe }
+        val timesB = other?.let { repo.validTimes(s, it) } ?: emptyList()
+        fun extras(valid: Long?): suspend (View) -> RenderExtras = { v -> RenderExtras(alerts = outlookDraws(core, outlook, v, valid)) }
+        val panes = buildList {
+            add(ExportPane(product.title) { i ->
+                val t = ts[i]
+                val data = if (picture) values ?: return@ExportPane null else repo.readFrame(s, product, t, st.member)
+                outlook.ensure(st.times.getOrNull(t))
+                PaneField(product.grid, data, product, withAutoStops(product.style, data), st.members, extras(st.times.getOrNull(t)))
+            })
+            if (other != null) add(ExportPane(other.title) { i ->
+                val valid = st.times.getOrNull(ts[i]) ?: return@ExportPane null
+                val idx = timesB.indices.minByOrNull { kotlin.math.abs(timesB[it] - valid) }?.takeIf { kotlin.math.abs(timesB[it] - valid) <= 1800 } ?: return@ExportPane null
+                val data = repo.readFrameTimed(s, other, idx, st.member).values
+                PaneField(other.grid, data, other, withAutoStops(other.style, data), st.members, extras(valid))
+            })
+        }
+        val globe: (suspend (Int, Int) -> Pair<Bitmap, PaneField>)? = if (area == ShareArea.Globe && globeW > 0) { i, side ->
+            val pf = panes[0].field(i) ?: throw IllegalStateException("no ${product.title} for this time")
+            val valid = st.times.getOrNull(ts[i])
+            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))       // the globe as turned now, on a square at export size
+            val bitmap = withContext(Dispatchers.Default) {
+                globeRenderer.render(
+                    product.grid, pf.values, pf.style, st.members, cam, side, side, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = settings.barbDensity,
+                    alerts = outlookDrawsOn(outlook, valid) { la, lo -> globeForward(cam, side, side, la, lo) }, counties = settings.counties,
+                )
+            }
+            bitmap to pf
+        } else null
+        val digits = cycle.label.filter { it.isDigit() }
+        val id = product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)
+        val frames = ts.map { t ->
+            ExportFrame({
+                if (picture) "Run ${cycle.label}   Valid ${st.validLabel}" + (st.forecastHour?.let { "  (f${it.toString().padStart(2, '0')})" } ?: "") + "   Data: NOAA/NWS Storm Prediction Center (experimental)"
+                else "Run ${cycle.label}   Valid ${formatUtc(st.times[t])}  (f${((st.times[t] - cycle.epochSeconds) / 3600).toString().padStart(2, '0')})   Data: NOAA/NWS Storm Prediction Center (experimental)"
+            })
+        }
+        return ExportJob(
+            frames, panes, { g -> if (g == product.grid) v0 else View.whole(g) }, Drawing(st.settings.contours, settings.counties, settings.barbDensity),
+            { ext -> if (picture) "spc_refs_${id}_${digits}_f${st.timeIndex}.$ext" else "spc_refs_loop_${id}_$digits.$ext" }, globe = globe,
+        )
     }
 
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
+    /** Renders every forecast time of the current product / sector into an MP4 and returns the file. [onProgress] gets (done, total). Frames come from the HTTP cache when the loop has been played. */
+    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? {
         val st = _state.value
-        val product = st.product ?: return@withContext null
-        val data = values ?: return@withContext null
-        val cycle = st.cycle ?: return@withContext null
-        val style = withAutoStops(product.style, data)
-        outlook.ensure(st.times.getOrNull(st.timeIndex))
-        val map = areaBitmap(area, product, style, data, st)
-        val header = "Run ${cycle.label}   Valid ${st.validLabel}" + (st.forecastHour?.let { "  (f${it.toString().padStart(2, '0')})" } ?: "") +
-            "   Data: NOAA/NWS Storm Prediction Center (experimental)"
-        val b = if (st.compare && st.other != null) areaBitmapB(area, st, product, st.times.getOrNull(st.timeIndex)) else null
-        val image = if (b != null) renderer.shareCompareImage(map, b.first, product.title, st.other!!.title, product, style, b.second, b.third, header, size?.width ?: 0)
-            else renderer.shareImage(map, product, style, header, st.members)
-        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() }
-        val file = File(dir, (if (b != null) "compare_" else "") + "spc_refs_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}_f${st.timeIndex}.png")
-        image.savePng(file)
-        file
+        val window = loopWindowFor(st)
+        if (window.count() < 2) return null
+        val job = exportJob(area, window.toList(), st, picture = false) ?: return null
+        return exporter.loop(job, size, onProgress)
+    }
+
+    /** Writes the shareable picture (header, map(s), color key(s)) and returns the file, or null when there is nothing to share. */
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? {
+        val st = _state.value
+        val job = exportJob(area, listOf(st.timeIndex), st, picture = true) ?: return null
+        return exporter.picture(job, size)
     }
 }

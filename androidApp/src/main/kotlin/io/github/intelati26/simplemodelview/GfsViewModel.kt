@@ -811,118 +811,76 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             ?: if (st.history) st.frames.indices else nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
 
     /**
-     * One frame of an export, drawn from [st] alone (the page is not touched, so it can be used, or left, while the loop is made): the globe or
-     * polar map at [side] pixels square (turned as [st] had it; [globeW] x [globeH] is the screen's globe size then), or the flat map of the sector.
-     * Null when the frame cannot be drawn.
-     */
-    private suspend fun frameExport(st: GfsState, file: NbmFile, side: Int, globeSize: Int): Pair<Bitmap, Product>? {
-        outlook.ensure(file.valid, file.run)
-        if (st.globe && globeSize > 0) {
-            val since = st.product == GfsHistory.SINCE_ID
-            val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else st.product)
-            val data = globalData(st, file)
-            val (product, _) = productFor(st, surface, data.grid)
-            val f = side.toDouble() / globeSize
-            val cam = st.cam.copy(radius = st.cam.radius * f)
-            val polar = st.polar?.let { it.copy(radius = it.radius * f) }
-            val scaled = st.copy(cam = cam, polar = polar)
-            val bitmap = withContext(Dispatchers.Default) {
-                globeRenderer.render(
-                    data.grid, data.values, product.style, emptyList(), cam, side, side, 1, dark, product, st.settings.contours, st.settings.barbDensity, windInTrueFrame = true,
-                    polar = polar, counties = st.settings.counties, frameKey = frameKeyOf(st, file), alerts = outlookDrawsOn(outlook, file.valid, file.run, globeProjection(scaled, side, side)),
-                )
-            }
-            return bitmap to product
-        }
-        val target = gridFor(st.sector)
-        val (values, product, _) = fieldFor(st, file, target)
-        val scale = (1400 / target.columns).coerceIn(2, 8)
-        val view = View(st.sector.name, 0, 0, target.columns, target.rows, scale, 1, target)
-        val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
-        }
-        return bitmap to product
-    }
-
-    /**
-     * The loop (all the analyses in history, else the loop span) as an MP4, drawn from what the page showed when it was asked for: switching
-     * products, turning the globe or leaving the page does not change it. A compare has both panes in every frame. [onProgress] gets (done, total).
+     * The loop (all the analyses in history, else the loop span) as an MP4, drawn from what the page showed when it was asked for: switching products,
+     * turning the globe or leaving the page does not change it. A compare has both panes in every frame. [onProgress] gets (done, total).
      */
     suspend fun buildLoopFile(onProgress: (Int, Int) -> Unit): File? {
         val st = _state.value
-        val globeSize = minOf(globeW, globeH)
         val window = loopWindowFor(st)
-        val n = window.count()
-        if (n < 2) return null
-        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-        val out = File(dir, "gfs_loop_${st.product}_${st.frames[window.last].valid}.mp4")
-        var exporter: LoopExporter? = null
-        val size = AppContainer.videoSize
-        val other = st.other?.takeIf { st.compare && !st.globe }
-        try {
-            for ((k, i) in window.withIndex()) {
-                val fst = st.copy(index = i)
-                val file = fst.file ?: continue
-                val (map, product) = frameExport(fst, file, GLOBE_LOOP_SIDE, globeSize) ?: continue
-                val header = "Valid ${formatUtc(file.valid)} " + (if (st.history) "(analysis)" else "(+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}") + "   Data: NOAA/NWS Global Forecast System (experimental viewer)"
-                var picture = withContext(Dispatchers.Default) {
-                    if (other == null) renderer.shareImage(map, product, product.style, header, emptyList())
-                    else {
-                        // the second pane at the same frame, drawn in full
-                        val target = gridFor(st.sector)
-                        val (valuesB, productB, titleB) = fieldFor(fst.copy(product = other.product, level = other.level, color = other.color, since = other.since), file, target)
-                        val view = View(st.sector.name, 0, 0, target.columns, target.rows, (1400 / target.columns).coerceIn(2, 8), 1, target)
-                        val mapB = renderer.render(productB, productB.style, valuesB, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), contours = st.settings.contours, counties = st.settings.counties, barbDensity = st.settings.barbDensity)
-                        renderer.shareCompareImage(map, mapB, st.title, titleB, product, product.style, productB, productB.style, header)
-                    }
-                }
-                val (sw, sh) = size.scaled(picture.width, picture.height)
-                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
-                if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
-                exporter.add(picture, last = k == n - 1)
-                onProgress(k + 1, n)
-            }
-            exporter?.finish()
-            return if (exporter != null) out else null
-        } catch (e: Exception) {
-            exporter?.abort()
-            throw e
-        }
-    }
-
-    /**
-     * The picture to export: the globe or polar map drawn again on a square [side] pixels across (the screen's rotation and zoom kept), so a saved picture or loop
-     * frame is far finer than the screen; the flat map is already drawn at its own scale.
-     */
-    private suspend fun exportMap(st: GfsState, side: Int): Bitmap? {
-        if (!st.globe || globeW == 0) return st.map
-        val (product, values) = globeShown ?: return st.map
-        val f = side.toDouble() / minOf(globeW, globeH)
-        return withContext(Dispatchers.Default) {
-            globeRenderer.render(
-                product.grid, values, product.style, emptyList(), st.cam.copy(radius = st.cam.radius * f), side, side, 1, dark, product,
-                st.settings.contours, st.settings.barbDensity, windInTrueFrame = true, polar = st.polar?.let { it.copy(radius = it.radius * f) }, counties = st.settings.counties, frameKey = globeFrameKey,
-                alerts = outlookDrawsOn(outlook, st.file?.valid, st.file?.run, globeProjection(st.copy(cam = st.cam.copy(radius = st.cam.radius * f), polar = st.polar?.let { it.copy(radius = it.radius * f) }), side, side)),
-            )
-        }
+        if (window.count() < 2) return null
+        return exporter.loop(exportJob(st, window.toList()), AppContainer.videoSize, onProgress)
     }
 
     // ---- sharing ----
-    suspend fun buildShareFile(): File? = withContext(Dispatchers.Default) {
+    private val exporter = Exporter(renderer) { exportDir(getApplication()) }
+
+    /**
+     * What an export of the frames at [indices] is, taken from [st]: the extractor of each pane (the frame's field on the sector's grid; in a compare the
+     * other product), the outlook drawn on it, the sector's window. On the globe or polar map the page's own drawing of it is used.
+     */
+    private suspend fun exportJob(st: GfsState, indices: List<Int>): ExportJob {
+        val settings = st.settings
+        val globeSize = minOf(globeW, globeH)
+        val files = indices.mapNotNull { i -> st.frames.getOrNull(i)?.let { i to it } }
+        val other = st.other?.takeIf { st.compare && !st.globe }
+        suspend fun field(s: GfsState, file: NbmFile): PaneField {
+            val target = gridFor(s.sector)
+            val (values, product, _) = fieldFor(s, file, target)
+            outlook.ensure(file.valid, file.run)
+            return PaneField(target, values, product, extras = { v -> RenderExtras(alerts = outlookDraws(core, outlook, v, file.valid, file.run)) })
+        }
+        val otherState = other?.let { st.copy(product = it.product, level = it.level, color = it.color, since = it.since) }
+        val titleB = otherState?.let { o -> files.firstOrNull()?.let { (i, f) -> fieldFor(o.copy(index = i), f, gridFor(o.sector)).third } }.orEmpty()
+        val panes = buildList {
+            add(ExportPane(st.title) { k -> field(st.copy(index = files[k].first), files[k].second) })
+            if (otherState != null) add(ExportPane(titleB) { k -> field(otherState.copy(index = files[k].first), files[k].second) })
+        }
+        val globe: (suspend (Int, Int) -> Pair<Bitmap, PaneField>)? = if (st.globe && globeSize > 0) { k, side ->
+            val (i, file) = files[k]
+            val fst = st.copy(index = i)
+            outlook.ensure(file.valid, file.run)
+            val since = fst.product == GfsHistory.SINCE_ID
+            val surface = GfsCatalog.surfaceById(if (since) "apcptot_gfs" else fst.product)
+            val data = globalData(fst, file)
+            val (product, _) = productFor(fst, surface, data.grid)
+            val f = side.toDouble() / globeSize
+            val cam = fst.cam.copy(radius = fst.cam.radius * f)
+            val polar = fst.polar?.let { it.copy(radius = it.radius * f) }
+            val scaled = fst.copy(cam = cam, polar = polar)
+            val bitmap = withContext(Dispatchers.Default) {
+                globeRenderer.render(
+                    data.grid, data.values, product.style, emptyList(), cam, side, side, 1, false, product, settings.contours, settings.barbDensity, windInTrueFrame = true,
+                    polar = polar, counties = settings.counties, frameKey = frameKeyOf(fst, file), alerts = outlookDrawsOn(outlook, file.valid, file.run, globeProjection(scaled, side, side)),
+                )
+            }
+            bitmap to PaneField(data.grid, data.values, product)
+        } else null
+        val frames = files.map { (_, file) ->
+            ExportFrame({ "Valid ${formatUtc(file.valid)} " + (if (st.history) "(analysis)" else "(+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}") + "   Data: NOAA/NWS Global Forecast System (experimental viewer)" })
+        }
+        return ExportJob(
+            frames, panes, { g -> View(st.sector.name, 0, 0, g.columns, g.rows, (1400 / g.columns).coerceIn(2, 8), 1, g) }, Drawing(settings.contours, settings.counties, settings.barbDensity),
+            { ext ->
+                val c = simplemodelview.civilFromEpoch(files.first().second.valid)
+                val stamp = "${c[0]}${c[1].toString().padStart(2, '0')}${c[2].toString().padStart(2, '0')}${c[3].toString().padStart(2, '0')}"
+                if (files.size > 1) "gfs_loop_${st.product}_${files.last().second.valid}.$ext" else "gfs_${st.product}_$stamp.$ext"
+            }, globe = globe,
+        )
+    }
+
+    suspend fun buildShareFile(): File? {
         val st = _state.value
-        val file = st.file ?: return@withContext null
-        val product = (if (st.globe) globeShown?.first else shown?.first) ?: return@withContext null
-        val map = exportMap(st, GLOBE_EXPORT_SIDE) ?: return@withContext null
-        val c = simplemodelview.civilFromEpoch(file.valid)
-        fun p(n: Int) = n.toString().padStart(2, '0')
-        val header = "Valid ${formatUtc(file.valid)} (+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}   Data: NOAA/NWS Global Forecast System (experimental viewer)"
-        // a compare: the second pane (as drawn on screen) under this one
-        val layers = st.paneB?.takeIf { st.compare && !st.globe && it.isNotEmpty() }
-        val image = if (layers != null) renderer.shareCompareImage(map, renderer.composeLayers(layers, 0xFFEDEFF2.toInt()), st.title, st.titleB.orEmpty(), product, product.style, product, st.styleB ?: product.style, header, AppContainer.videoSize.width)
-            else renderer.shareImage(map, product, product.style, header, emptyList())
-        val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-        val out = File(dir, (if (layers != null) "compare_" else "") + "gfs_${product.id}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}.png")
-        image.savePng(out)
-        out
+        if (st.file == null) return null
+        return exporter.picture(exportJob(st, listOf(st.index)), AppContainer.videoSize)
     }
 }

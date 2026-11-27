@@ -661,86 +661,65 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         return "nbm_${product.id}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}.$extension"
     }
 
-    private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+    private val exporter = Exporter(renderer) { exportDir(getApplication()) }
 
-    private suspend fun areaImage(area: ShareArea, file: NbmFile, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx<NbmState> = exportCtx()): Triple<Bitmap, Product, Style> {
+    /**
+     * What an export of [frames] (the shown product's, or a loop's) is, taken from [x]: the extractor of each pane (the file decoded whole; in a compare
+     * the other product at the nearest frame of the run), the outlook drawn on it, the area's window. The globe is drawn here.
+     */
+    private suspend fun exportJob(area: ShareArea, frames: List<NbmFile>, x: ExportCtx<NbmState>): ExportJob {
         val st = x.st
-        val field = decode(file, cache = false)
-        if (area == ShareArea.Globe && x.globeW > 0) {
-            val globeProduct = synthetic(st.product, field.grid)
+        val settings = st.settings.forExport()
+        suspend fun field(product: NbmProduct, file: NbmFile): PaneField {
+            val f = decode(file, cache = false)
             outlook.ensure(file.valid, file.run)
+            return PaneField(f.grid, f.values, synthetic(product, f.grid), extras = { box -> RenderExtras(alerts = outlookDraws(core, outlook, box, file.valid, file.run)) })
+        }
+        val other = st.other?.takeIf { st.compare && area != ShareArea.Globe }
+        val cycle = st.cycle
+        val framesB = if (other != null && cycle != null) repo.listFrames(other.id, cycle) else emptyList()
+        val panes = buildList {
+            add(ExportPane(st.product.title) { i -> field(st.product, frames[i]) })
+            if (other != null) add(ExportPane(other.title) { i ->
+                val valid = frames[i].valid
+                framesB.minByOrNull { kotlin.math.abs(it.valid - valid) }?.takeIf { kotlin.math.abs(it.valid - valid) <= 5400 }?.let { field(other, it) }
+            })
+        }
+        val globe: (suspend (Int, Int) -> Pair<Bitmap, PaneField>)? = if (area == ShareArea.Globe && x.globeW > 0) { i, side ->
+            val file = frames[i]
+            val pf = field(st.product, file)
             val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))       // the globe as turned now, on a square at export size
             val bitmap = withContext(Dispatchers.Default) {
                 globeRenderer.render(
-                    field.grid, field.values, globeProduct.style, emptyList(), cam, side, side, 1, dark = false, product = globeProduct, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity,
-                    alerts = outlookDrawsOn(outlook, file.valid, file.run) { la, lo -> globeForward(cam, side, side, la, lo) }, counties = st.settings.forExport().counties,
+                    pf.grid, pf.values, pf.style, emptyList(), cam, side, side, 1, dark = false, product = pf.product, contours = st.settings.contours, barbDensity = settings.barbDensity,
+                    alerts = outlookDrawsOn(outlook, file.valid, file.run) { la, lo -> globeForward(cam, side, side, la, lo) }, counties = settings.counties,
                 )
             }
-            return Triple(bitmap, globeProduct, globeProduct.style)
-        }
-        outlook.ensure(file.valid, file.run)
-        val box = areaView(area, field.grid, x)
-        val product = synthetic(st.product, field.grid)
-        val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid, file.run), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
-        }
-        return Triple(map, product, product.style)
+            bitmap to pf
+        } else null
+        return ExportJob(
+            frames.map { ExportFrame({ header(it) }) }, panes, { grid -> areaView(area, grid, x) }, Drawing(st.settings.contours, settings.counties, settings.barbDensity),
+            { ext -> fileName(st.product, frames[0], ext) }, globe = globe,
+        )
     }
 
-    /** The compare's second picture for an export: the other product, in the same run at the frame nearest this time, drawn in full on [area]. Null: none near. */
-    private suspend fun areaImageB(area: ShareArea, file: NbmFile): Triple<Bitmap, Product, Style>? {
-        val st = _state.value
-        val b = st.other ?: return null
-        val cycle = st.cycle ?: return null
-        val fb = repo.listFrames(b.id, cycle).minByOrNull { kotlin.math.abs(it.valid - file.valid) }?.takeIf { kotlin.math.abs(it.valid - file.valid) <= 5400 } ?: return null
-        val fieldB = decode(fb, cache = false)
-        val syn = synthetic(b, fieldB.grid)
-        val box = areaView(area, fieldB.grid)
-        val map = withContext(Dispatchers.Default) {
-            renderer.render(syn, syn.style, fieldB.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid, file.run), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
-        }
-        return Triple(map, syn, syn.style)
-    }
-
-    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. In a compare both panes are on it. */
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
-        val st = _state.value
-        val file = st.file ?: return@withContext null
-        val (map, product, style) = areaImage(area, file)
-        val b = if (st.compare && st.other != null && area != ShareArea.Globe) areaImageB(area, file) else null
-        val image = if (b != null) renderer.shareCompareImage(map, b.first, st.product.title, st.other!!.title, product, style, b.second, b.third, header(file), size?.width ?: 0)
-            else renderer.shareImage(map, product, style, header(file), emptyList())
-        val out = File(sharedDir(), (if (b != null) "compare_" else "") + fileName(st.product, file, "png"))
-        image.savePng(out)
-        out
+    /** Writes the shareable picture (header, map(s), color key(s)) and returns the file, or null when there is nothing to share. In a compare both panes are on it. */
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? {
+        val x = exportCtx()
+        val file = x.st.file ?: return null
+        return exporter.picture(exportJob(area, listOf(file), x), size)
     }
 
     /** Renders the frames of the loop into an MP4 and returns it. Each frame is held for the forecast hours it stands for. [onProgress] gets (done, total). */
-    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
+    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? {
         val x = exportCtx()
         val st = x.st
         val window = loopWindowFor(st)
-        val n = window.count()
-        if (n < 2) return@withContext null
-        val out = File(sharedDir(), fileName(st.product, st.frames[window.first], "mp4"))
-        var exporter: LoopExporter? = null
-        try {
-            for ((k, i) in window.withIndex()) {
-                val file = st.frames[i]
-                val (map, product, style) = areaImage(area, file, GLOBE_LOOP_SIDE, x)
-                var picture = renderer.shareImage(map, product, style, header(file), emptyList())
-                val (sw, sh) = size.scaled(picture.width, picture.height)
-                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
-                if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, (1000 / LOOP_BASE_MILLIS).toInt()), frameMillis = LOOP_BASE_MILLIS.toInt())
-                exporter.add(picture, last = k == n - 1, hold = nbmStepHours(st.frames, i))
-                onProgress(k + 1, n)
-            }
-            exporter?.finish()
-            out
-        } catch (e: Exception) {
-            exporter?.abort()
-            throw e
-        }
+        if (window.count() < 2) return null
+        val files = window.map { st.frames[it] }
+        val job = exportJob(area, files, x)
+        val held = ExportJob(job.frames.mapIndexed { k, f -> ExportFrame(f.header, nbmStepHours(st.frames, window.first + k)) }, job.panes, job.window, job.drawing, job.fileName, LOOP_BASE_MILLIS.toInt(), job.globe)
+        return exporter.loop(held, size, onProgress)
     }
 
     /** Estimated size of a loop video of the current field and area, for the share dialog. */

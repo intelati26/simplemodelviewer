@@ -61,3 +61,6 @@ internal suspend fun readSettingsFile(resolver: ContentResolver, uri: Uri): Sett
     val text = withContext(Dispatchers.IO) { try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null } }
     return text?.let { SettingsBackup.decode(it) }
 }
+
+/** The folder an export is written to (emptied: only the latest export is kept there). */
+internal fun exportDir(context: android.content.Context): File = File(context.cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }

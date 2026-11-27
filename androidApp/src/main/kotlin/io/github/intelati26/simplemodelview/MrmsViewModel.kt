@@ -337,14 +337,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private val otherFiles = HashMap<String, Pair<Long, List<MrmsFile>>>()
 
     /** One pane's field: what [spec] is at [validTime] on the sector's grid (a scan: the one nearest within [tolerance]; a total: the sum from its start to now). Null: nothing near. */
-    private class PaneField(val values: FloatArray, val grid: Grid, val product: Product, val halo: Boolean)
+    private class SpecField(val values: FloatArray, val grid: Grid, val product: Product, val halo: Boolean)
 
-    private suspend fun fieldOf(spec: PaneSpec, validTime: Long, tolerance: Long, sector: Sector): PaneField? {
+    private suspend fun fieldOf(spec: PaneSpec, validTime: Long, tolerance: Long, sector: Sector): SpecField? {
         val now = System.currentTimeMillis() / 1000
         if (spec.isTotal) {
             val since = spec.since ?: (now / 3600 * 3600 - spec.product.rainDays * 86400L)
             val r = rainTotal(sector, since, report = false) ?: return null
-            return PaneField(r.values, r.grid, r.product, halo = false)
+            return SpecField(r.values, r.grid, r.product, halo = false)
         }
         val product = spec.product
         val cacheKey = "${product.id}|${product.level}"
@@ -352,7 +352,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val files = cached ?: repo.listFiles(product, now).also { otherFiles[cacheKey] = now to it }
         val file = nearestFile(files, validTime, tolerance) ?: return null
         val frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
-        return PaneField(frame.window.values, frame.window.grid, synthetic(product, frame.window.grid), mrmsHasHalo(product))
+        return SpecField(frame.window.values, frame.window.grid, synthetic(product, frame.window.grid), mrmsHasHalo(product))
     }
 
     /** The compare's second picture: [spec] drawn as its own field only (see-through), with the lines and stations [over] it once. */
@@ -1590,64 +1590,130 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH, shownGrid)
 
-    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx<MrmsState> = exportCtx()): Pair<Bitmap, Style> {
+    private val exporter = Exporter(renderer) { exportDir(getApplication()) }
+
+    /** One scan for an export: decoded on the area's window (the sector, or the part on screen, put onto the shown grid), with the page's overlays, temperature under it, stations and alerts laid on by the exporter. Null when the area cannot be planned. */
+    private suspend fun scanField(area: ShareArea, product: MrmsProduct, file: MrmsFile, x: ExportCtx<MrmsState>): PaneField? {
         val st = x.st
-        val style = styleOf(product)
-        if (area == ShareArea.Globe && x.globeW > 0) {
-            val frame = decode(product, file, "globe", globeBox, globeStep(product))
-            outlook.ensure(file.validTime)
-            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))       // the globe as turned now, on a square at export size
-            val project: PlaceProjection = { la, lo -> globeForward(cam, side, side, la, lo) }
-            val layers = globeOverlays(file, frame.window.grid, st).map { it.first }
-            var underlay: GlobeOverlay? = null
-            var fieldLines: List<FieldLines> = emptyList()
-            if (st.underAny) {
-                underTemp(file, frame.window.grid)?.let { t ->
-                    if (st.underTemp) underlay = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY))
-                    if (st.underLines) fieldLines = underLineSet(st, t, null).lines
-                }
-            }
-            val shapes = alertShapesFor(file, st)
-            val bitmap = withContext(Dispatchers.Default) {
-                val alerts = alertDrawsWith(shapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
-                globeRenderer.render(
-                    frame.window.grid, frame.window.values, style, emptyList(), cam, side, side, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity,
-                    alerts = alerts, counties = st.settings.forExport().counties, overlays = layers, baseHalo = mrmsHasHalo(product), underlay = underlay, fieldLines = fieldLines,
-                )
-            }
-            return bitmap to style
-        }
         val v = x.view
         val frame: MrmsFrame
-        val box: View
-        val overlayResults: List<OverlayResult>
+        val coords: DoubleArray
+        val label: String
+        val viewName: String
+        val cache: Boolean
+        val stepOf: (MrmsProduct) -> Int
         if (area == ShareArea.Screen && v != null) {
             // the visible part: a window of the shown (Lambert) grid, with the lat / lon box that surely covers it decoded and put onto it
             val g = v.grid
             val w = visibleWindow(v, x.viewport)
-            val colMin = w.colMin; val rowMin = w.rowMin; val colMax = w.colMax; val rowMax = w.rowMax
-            val south = w.south; val north = w.north; val west = w.west; val east = w.east
-            val step = mrmsStep(product.cellDegrees, west, east, 2400, false)
-            val crop = core.planLambertCrop(g, colMin, rowMin, colMax, rowMax, lambertCellMeters(product.cellDegrees * step, south, north)) ?: return Pair(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), style)
-            val coords = doubleArrayOf(west - 0.05, south - 0.05, east + 0.05, north + 0.05)
+            val step = mrmsStep(product.cellDegrees, w.west, w.east, 2400, false)
+            val crop = core.planLambertCrop(g, w.colMin, w.rowMin, w.colMax, w.rowMax, lambertCellMeters(product.cellDegrees * step, w.south, w.north)) ?: return null
+            coords = doubleArrayOf(w.west - 0.05, w.south - 0.05, w.east + 0.05, w.north + 0.05)
             frame = decode(product, file, "screen", coords, step, cache = false, target = FrameTarget.Onto(crop))
-            val g2 = frame.window.grid
-            box = View("Screen area", 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
-            overlayResults = overlayLayers(file, "screen", coords, box, cache = false, st = st) { p -> mrmsStep(p.cellDegrees, west, east, 2400, false) }
+            label = "screen"; viewName = "Screen area"; cache = false
+            stepOf = { p -> mrmsStep(p.cellDegrees, w.west, w.east, 2400, false) }
         } else {
             val sector = sectorOf(area)
-            frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
-            val g2 = frame.window.grid
-            box = View(sector.name, 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
-            overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true, st = st) { p -> stepFor(p, sector) }
+            coords = sectorBox(sector)
+            frame = decode(product, file, sector.name, coords, stepFor(product, sector), target = FrameTarget.Planned)
+            label = sector.name; viewName = sector.name; cache = true
+            stepOf = { p -> stepFor(p, sector) }
         }
         outlook.ensure(file.validTime)
-        val under = underParts(file, box, st)
-        val plots = plotsFor(file, box, gridCoverBox(core, box.grid), st)
-        val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, stations = plots, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
+        val grid = frame.window.grid
+        return PaneField(
+            grid, frame.window.values, synthetic(product, grid), styleOf(product),
+            extras = { box ->
+                val overlays = overlayLayers(file, label, coords, box, cache, st, stepOf)
+                val under = underParts(file, box, st)
+                val plots = plotsFor(file, box, gridCoverBox(core, box.grid), st)
+                RenderExtras(
+                    overlays.map { it.layer }, outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime),
+                    under.fill, under.lines, plots, halo = mrmsHasHalo(product),
+                )
+            },
+            window = { g -> View(viewName, 0, 0, g.columns, g.rows, exportScale(g.columns, g.rows), 1, g) },
+        )
+    }
+
+    /** A rainfall total for an export: the total on the sector's grid, the part on screen or all of it. Drawn without contours. */
+    private suspend fun totalField(area: ShareArea, spec: PaneSpec, validTime: Long, x: ExportCtx<MrmsState>): PaneField? {
+        val st = x.st
+        val sector = if (area is ShareArea.Meso) sectorOf(area) else st.sector
+        val f = fieldOf(spec, validTime, 600, sector) ?: return null
+        val settings = st.settings.forExport()
+        return PaneField(
+            f.grid, f.values, f.product, f.product.style,
+            window = { g ->
+                if (area == ShareArea.Screen) {
+                    val (l, t, r, b) = x.viewport.toList()
+                    val col0 = floor(l * g.columns).toInt().coerceIn(0, g.columns - 2)
+                    val row0 = floor((1f - b) * g.rows).toInt().coerceIn(0, g.rows - 2)
+                    val cols = (ceil(r * g.columns).toInt() - col0).coerceIn(2, g.columns - col0)
+                    val rows = (ceil((1f - t) * g.rows).toInt() - row0).coerceIn(2, g.rows - row0)
+                    View("Screen area", col0, row0, cols, rows, exportScale(cols, rows), 1, g)
+                } else View("Rainfall", 0, 0, g.columns, g.rows, exportScale(g.columns, g.rows), 1, g)
+            },
+            drawing = Drawing(false, settings.counties, settings.barbDensity),
+        )
+    }
+
+    /** The globe as turned now, drawn at export size with the page's overlays, temperature and alerts. */
+    private suspend fun globeFrame(product: MrmsProduct, file: MrmsFile, x: ExportCtx<MrmsState>, side: Int): Pair<Bitmap, PaneField> {
+        val st = x.st
+        val style = styleOf(product)
+        val frame = decode(product, file, "globe", globeBox, globeStep(product))
+        outlook.ensure(file.validTime)
+        val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))       // the globe as turned now, on a square at export size
+        val project: PlaceProjection = { la, lo -> globeForward(cam, side, side, la, lo) }
+        val layers = globeOverlays(file, frame.window.grid, st).map { it.first }
+        var underlay: GlobeOverlay? = null
+        var fieldLines: List<FieldLines> = emptyList()
+        if (st.underAny) {
+            underTemp(file, frame.window.grid)?.let { t ->
+                if (st.underTemp) underlay = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY))
+                if (st.underLines) fieldLines = underLineSet(st, t, null).lines
+            }
         }
-        return bitmap to style
+        val shapes = alertShapesFor(file, st)
+        val settings = st.settings.forExport()
+        val bitmap = withContext(Dispatchers.Default) {
+            val alerts = alertDrawsWith(shapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
+            globeRenderer.render(
+                frame.window.grid, frame.window.values, style, emptyList(), cam, side, side, 1, dark = false, product = synthetic(product, frame.window.grid), contours = st.settings.contours, barbDensity = settings.barbDensity,
+                alerts = alerts, counties = settings.counties, overlays = layers, baseHalo = mrmsHasHalo(product), underlay = underlay, fieldLines = fieldLines,
+            )
+        }
+        return bitmap to PaneField(frame.window.grid, frame.window.values, synthetic(product, frame.window.grid), style)
+    }
+
+    /**
+     * What an export of [files] (the shown product's scans) is, taken from [x]: each pane's extractor (a scan, or the other product's nearest one; a rainfall
+     * total), the page's extras on it, and the page's own drawing of the globe.
+     */
+    private suspend fun exportJob(area: ShareArea, files: List<MrmsFile>, x: ExportCtx<MrmsState>): ExportJob {
+        val st = x.st
+        val settings = st.settings.forExport()
+        val spec = specOf(st)
+        val cmp = compareOf(st, area)
+        val now = System.currentTimeMillis() / 1000
+        val filesB = cmp?.takeIf { !it.isTotal }?.let { repo.listFiles(it.product, now) }
+        val totals = HashMap<PaneSpec, PaneField>()       // a total is made once, for every frame
+        suspend fun pane(sp: PaneSpec, file: MrmsFile?, valid: Long): PaneField? {
+            if (sp.isTotal) return totals[sp] ?: totalField(area, sp, valid, x)?.also { totals[sp] = it }
+            val use = file ?: nearestFile(filesB ?: repo.listFiles(sp.product, now), valid, 600) ?: return null
+            return scanField(area, sp.product, use, x)
+        }
+        val panes = buildList {
+            add(ExportPane(specTitle(spec)) { i -> pane(spec, files[i], files[i].validTime) })
+            if (cmp != null) add(ExportPane(specTitle(cmp)) { i -> pane(cmp, null, files[i].validTime) })
+        }
+        val globe: (suspend (Int, Int) -> Pair<Bitmap, PaneField>)? = if (area == ShareArea.Globe && x.globeW > 0) { i, side -> globeFrame(st.product, files[i], x, side) } else null
+        return ExportJob(
+            files.map { f -> ExportFrame({ header(f, st) }) }, panes, { g -> View("Area", 0, 0, g.columns, g.rows, exportScale(g.columns, g.rows), 1, g) },
+            Drawing(st.settings.contours, settings.counties, settings.barbDensity),
+            { ext -> fileName(st.product, if (files.size > 1) st.files.last() else files[0], ext) }, globe = globe,
+        )
     }
 
     private fun header(file: MrmsFile, st: MrmsState = _state.value): String {
@@ -1661,38 +1727,9 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return "mrms_${product.directory.filter { it.isLetterOrDigit() || it == '_' }.take(44)}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}${p(c[4])}.$extension"
     }
 
-    /** One pane of a shared compare: its map picture, color key style and product. */
-    private class PanePicture(val bitmap: Bitmap, val style: Style, val product: Product)
-
     /** The second pane when a compare is on and can be shared (not on the globe), else null. */
     private fun compareOf(st: MrmsState, area: ShareArea): PaneSpec? = st.other?.takeIf { st.compare && area != ShareArea.Globe }
 
-    /** What one compare pane looks like for [area]: a scan ([file], or the one of its product nearest [validTime]), or a rainfall total. Null: nothing near. */
-    private suspend fun panePicture(area: ShareArea, spec: PaneSpec, file: MrmsFile?, x: ExportCtx<MrmsState>, validTime: Long = file?.validTime ?: 0L, filesOfSpec: List<MrmsFile>? = null): PanePicture? {
-        val st = x.st
-        if (spec.isTotal) {
-            val sector = if (area is ShareArea.Meso) sectorOf(area) else st.sector
-            val f = fieldOf(spec, validTime, 600, sector) ?: return null
-            val g = f.grid
-            val box = if (area == ShareArea.Screen) {
-                val (l, t, r, b) = x.viewport.toList()
-                val col0 = floor(l * g.columns).toInt().coerceIn(0, g.columns - 2)
-                val row0 = floor((1f - b) * g.rows).toInt().coerceIn(0, g.rows - 2)
-                val cols = (ceil(r * g.columns).toInt() - col0).coerceIn(2, g.columns - col0)
-                val rows = (ceil((1f - t) * g.rows).toInt() - row0).coerceIn(2, g.rows - row0)
-                View("Screen area", col0, row0, cols, rows, exportScale(cols, rows), 1, g)
-            } else View("Rainfall", 0, 0, g.columns, g.rows, exportScale(g.columns, g.rows), 1, g)
-            val map = renderer.render(f.product, f.product.style, f.values, emptyList(), box, dark = false, contours = false, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
-            return PanePicture(map, f.product.style, f.product)
-        }
-        val use = file ?: nearestFile(filesOfSpec ?: repo.listFiles(spec.product, System.currentTimeMillis() / 1000), validTime, 600) ?: return null
-        val (map, style) = areaBitmap(area, spec.product, use, x = x)
-        return PanePicture(map, style, synthetic(spec.product, x.grid ?: Grid.REFS))
-    }
-
-    private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-
-    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
         val x = exportCtx()
         val st = x.st
@@ -1718,63 +1755,21 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val through = parts.firstOrNull()?.substringAfter("\u2192 ", "")?.trim().orEmpty()
             val line = (listOfNotNull("through $through".takeIf { through.isNotEmpty() }) + parts.drop(1) + "NOAA/NSSL MRMS").joinToString("  \u00B7  ")
             val image = renderer.shareImage(map, p, p.style, line, emptyList())
-            val out = File(sharedDir(), "mrms_rainfall_${simplemodelview.civilFromEpoch(st.rainSince).let { c -> "%04d%02d%02d%02d".format(c[0], c[1], c[2], c[3]) }}_to_${simplemodelview.civilFromEpoch(file.validTime).let { c -> "%04d%02d%02d%02d%02d".format(c[0], c[1], c[2], c[3], c[4]) }}.png")
+            val out = File(exportDir(getApplication()), "mrms_rainfall_${simplemodelview.civilFromEpoch(st.rainSince).let { c -> "%04d%02d%02d%02d".format(c[0], c[1], c[2], c[3]) }}_to_${simplemodelview.civilFromEpoch(file.validTime).let { c -> "%04d%02d%02d%02d%02d".format(c[0], c[1], c[2], c[3], c[4]) }}.png")
             image.savePng(out)
             return@withContext out
         }
-        // a compare: the second pane (a scan nearest this time, or a rainfall total) under this one, on one picture
-        val cmp = compareOf(st, area)
-        if (cmp != null) {
-            val a = panePicture(area, specOf(st), file, x) ?: return@withContext null
-            val b = panePicture(area, cmp, null, x, file.validTime) ?: return@withContext null
-            val image = renderer.shareCompareImage(a.bitmap, b.bitmap, specTitle(specOf(st)), specTitle(cmp), a.product, a.style, b.product, b.style, header(file, st), size?.width ?: 0)
-            val out = File(sharedDir(), "compare_" + fileName(st.product, file, "png"))
-            image.savePng(out)
-            return@withContext out
-        }
-        val (map, style) = areaBitmap(area, st.product, file, x = x)
-        val image = renderer.shareImage(map, synthetic(st.product, x.grid ?: Grid.REFS), style, header(file, st), emptyList())
-        val out = File(sharedDir(), fileName(st.product, file, "png"))
-        image.savePng(out)
-        out
+        // a compare has both panes on the picture
+        exporter.picture(exportJob(area, listOf(file), x), size)
     }
 
     /** Renders every file of the loop into an MP4 and returns it. [onProgress] gets (done, total). Files come from the HTTP cache once played. */
-    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
+    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? {
         val x = exportCtx()      // what the page shows now: the loop follows this, not what the page is changed to meanwhile
         val st = x.st
         val window = loopWindowFor(st)
-        val n = window.count()
-        if (n < 2) return@withContext null
-        val dir = sharedDir()
-        val out = File(dir, fileName(st.product, st.files.last(), "mp4"))
-        var exporter: LoopExporter? = null
-        val cmp = compareOf(st, area)
-        val filesB = cmp?.takeIf { !it.isTotal }?.let { repo.listFiles(it.product, System.currentTimeMillis() / 1000) }
-        var paneB: PanePicture? = null
-        try {
-            for ((k, i) in window.withIndex()) {
-                val file = st.files[i]
-                val (map, style) = areaBitmap(area, st.product, file, GLOBE_LOOP_SIDE, x)
-                var picture: Bitmap
-                if (cmp != null) {
-                    // a compare: the second pane at this frame's time (a total stays as it is); a frame without one keeps the last
-                    paneB = (if (cmp.isTotal && paneB != null) paneB else panePicture(area, cmp, null, x, file.validTime, filesB)) ?: paneB
-                    val b = paneB ?: throw IllegalStateException("no ${specTitle(cmp)} near ${formatClock(file.validTime, 0)}")
-                    picture = renderer.shareCompareImage(map, b.bitmap, specTitle(specOf(st)), specTitle(cmp), synthetic(st.product, x.grid ?: Grid.REFS), style, b.product, b.style, header(file, st))
-                } else picture = renderer.shareImage(map, synthetic(st.product, x.grid ?: Grid.REFS), style, header(file, st), emptyList())
-                val (sw, sh) = size.scaled(picture.width, picture.height)
-                if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
-                if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
-                exporter.add(picture, last = k == n - 1)
-                onProgress(k + 1, n)
-            }
-            exporter?.finish()
-            out
-        } catch (e: Exception) {
-            exporter?.abort()
-            throw e
-        }
+        if (window.count() < 2) return null
+        return exporter.loop(exportJob(area, window.map { st.files[it] }, x), size, onProgress)
     }
 
     /** Estimated size of a loop video of the current product and area, for the share dialog. */

@@ -511,82 +511,50 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         return "analysis_${product.id.removeSuffix("_anl")}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}${p(c[4])}.$extension"
     }
 
-    private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-
     /** The picture of [frame] for an export of [area], or null when the frame has no file. */
-    private suspend fun areaImage(area: ShareArea, frame: AnalysisFrame, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx<AnalysisState> = exportCtx()): Triple<Bitmap, Product, String>? {
+    private val exporter = Exporter(renderer) { exportDir(getApplication()) }
+
+    /** What an export of [frames] is, taken from [x]: the extractor of each pane (the analysis of the frame; in a compare the other product), the lines laid over it, the area's window. The globe is drawn here. */
+    private fun exportJob(area: ShareArea, frames: List<AnalysisFrame>, x: ExportCtx<AnalysisState>): ExportJob {
         val st = x.st
-        val (grid, values, source) = field(frame, st.product, cache = false) ?: return null
-        val product = synthetic(st.product, grid)
-        if (area == ShareArea.Globe && x.globeW > 0) {
+        val settings = st.settings.forExport()
+        suspend fun field(product: AnalysisProduct, frame: AnalysisFrame, lines: Boolean): PaneField? {
+            val (grid, values, _) = field(frame, product, cache = false) ?: return null
+            val extras = if (lines) lineLayersFor(frame, product.id, grid, st.lines) else emptyList()
+            return PaneField(grid, values, synthetic(product, grid), extras = { RenderExtras(fieldLines = extras) })
+        }
+        val other = st.other?.takeIf { st.compare && area != ShareArea.Globe }
+        val panes = buildList {
+            add(ExportPane(st.product.title) { i -> field(st.product, frames[i], lines = true) })
+            if (other != null) add(ExportPane(other.title) { i -> field(other, frames[i], lines = false) })
+        }
+        val globe: (suspend (Int, Int) -> Pair<Bitmap, PaneField>)? = if (area == ShareArea.Globe && x.globeW > 0) { i, side ->
+            val pf = field(st.product, frames[i], lines = false) ?: throw IllegalStateException("no ${st.product.title} for this time")
             val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))
             val bitmap = withContext(Dispatchers.Default) {
-                globeRenderer.render(grid, values, product.style, emptyList(), cam, side, side, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity, counties = st.settings.forExport().counties)
+                globeRenderer.render(pf.grid, pf.values, pf.style, emptyList(), cam, side, side, 1, dark = false, product = pf.product, contours = st.settings.contours, barbDensity = settings.barbDensity, counties = settings.counties)
             }
-            return Triple(bitmap, product, source)
-        }
-        val box = areaView(area, grid, x)
-        val exportLines = lineLayersFor(frame, st.product.id, grid, st.lines)
-        val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), box, dark = false, contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity, fieldLines = exportLines)
-        }
-        return Triple(map, product, source)
+            bitmap to pf
+        } else null
+        return ExportJob(
+            frames.map { f -> ExportFrame({ header(f, sources[f.valid] ?: "") }) }, panes, { grid -> areaView(area, grid, x) }, Drawing(st.settings.contours, settings.counties, settings.barbDensity),
+            { ext -> fileName(st.product, frames[0], ext) }, LOOP_MILLIS.toInt(), globe,
+        )
     }
 
-    /** The compare's second picture for an export: the other analysis at this time, drawn in full on [area]. Null: none for this time. */
-    private suspend fun areaImageB(area: ShareArea, frame: AnalysisFrame): Pair<Bitmap, Product>? {
-        val st = _state.value
-        val b = st.other ?: return null
-        val (grid, values, _) = field(frame, b, cache = false) ?: return null
-        val syn = synthetic(b, grid)
-        val box = areaView(area, grid)
-        val map = withContext(Dispatchers.Default) {
-            renderer.render(syn, syn.style, values, emptyList(), box, dark = false, contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
-        }
-        return map to syn
-    }
-
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
-        val st = _state.value
-        val frame = st.frame ?: return@withContext null
-        val (map, product, source) = areaImage(area, frame) ?: return@withContext null
-        val b = if (st.compare && st.other != null && area != ShareArea.Globe) areaImageB(area, frame) else null
-        val image = if (b != null) renderer.shareCompareImage(map, b.first, st.product.title, st.other!!.title, product, product.style, b.second, b.second.style, header(frame, source), size?.width ?: 0)
-            else renderer.shareImage(map, product, product.style, header(frame, source), emptyList())
-        val out = File(sharedDir(), (if (b != null) "compare_" else "") + fileName(st.product, frame, "png"))
-        image.savePng(out)
-        out
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? {
+        val x = exportCtx()
+        val frame = x.st.frame ?: return null
+        return exporter.picture(exportJob(area, listOf(frame), x), size)
     }
 
     /** The frames of the loop as an MP4 (a frame with no file is left out). [onProgress] gets (done, total). */
-    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
+    suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? {
         val x = exportCtx()
         val st = x.st
         val window = if (AppContainer.loopFromShown.value) st.index until st.frames.size else st.frames.indices
-        val n = window.count()
-        if (n < 2) return@withContext null
-        val out = File(sharedDir(), fileName(st.product, st.frames[window.first], "mp4"))
-        var exporter: LoopExporter? = null
-        try {
-            for ((k, i) in window.withIndex()) {
-                val frame = st.frames[i]
-                val made = areaImage(area, frame, GLOBE_LOOP_SIDE, x)
-                if (made != null) {
-                    val (map, product, source) = made
-                    var picture = renderer.shareImage(map, product, product.style, header(frame, source), emptyList())
-                    val (sw, sh) = size.scaled(picture.width, picture.height)
-                    if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
-                    if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, (1000 / LOOP_MILLIS).toInt()), frameMillis = LOOP_MILLIS.toInt())
-                    exporter.add(picture, last = k == n - 1, hold = 1)
-                }
-                onProgress(k + 1, n)
-            }
-            exporter?.finish()
-            if (exporter == null) null else out
-        } catch (e: Exception) {
-            exporter?.abort()
-            throw e
-        }
+        if (window.count() < 2) return null
+        return exporter.loop(exportJob(area, window.map { st.frames[it] }, x), size, onProgress)
     }
 
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
