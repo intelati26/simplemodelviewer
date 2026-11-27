@@ -592,6 +592,7 @@ internal fun PlacesDialog(
         title = { Text("Places") },
         text = {
           Column {
+            PlaceSearchBox { hit -> val saved = Place(hit.name, hit.lat, hit.lon); AppContainer.places.save(saved.name, saved.lat, saved.lon); onGo(saved) }
             live?.let {
                 Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -614,8 +615,8 @@ internal fun PlacesDialog(
                 HorizontalDivider()
             }
             if (places.isEmpty()) Text("No saved places yet. Tap the map, then choose Save place; Show jumps back to it.")
-            else LazyColumn {
-                items(places, key = { it.name }) { p ->
+            else Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                for (p in places) {
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(p.name, fontWeight = FontWeight.Bold)
                         Text(placeLabel(p.lat, p.lon), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -952,4 +953,43 @@ internal fun RestartDialog(onLater: () -> Unit) {
         confirmButton = { TextButton(onClick = { SettingsTransfer.restart(context) }) { Text("Restart") } },
         dismissButton = { TextButton(onClick = onLater) { Text("Later") } },
     )
+}
+
+/** A name, a landmark or a zip code to look up (Wikipedia and OpenStreetMap, on Search only); a match is saved as a place and shown. */
+@Composable
+private fun PlaceSearchBox(onPick: (simplemodelview.PlaceHit) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<simplemodelview.PlaceSearchResult?>(null) }
+    val scope = rememberCoroutineScope()
+    fun go() {
+        if (busy || query.trim().length < 2) return
+        busy = true
+        scope.launch { result = AppContainer.placeSearch.search(query); busy = false }
+    }
+    Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                query, { query = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("Find a place or landmark") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { go() }),
+            )
+            TextButton(enabled = !busy && query.trim().length >= 2, onClick = { go() }) { Text("Search") }
+        }
+        if (busy) androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        result?.let { r ->
+            if (r.hits.isEmpty()) Text(
+                if (r.failed.size == 2) "Could not reach the search services (is the network on?)." else "Nothing found for that.",
+                Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall,
+            )
+            for (h in r.hits) Column(Modifier.fillMaxWidth().clickable { onPick(h) }.padding(vertical = 6.dp)) {
+                Text(h.name, fontWeight = FontWeight.Bold)
+                Text(listOf(h.detail, h.source).filter { it.isNotBlank() }.joinToString("  \u00B7  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (r.hits.isNotEmpty()) Text("Tap a match to save it as a place and show it.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (r.failed.size == 1) Text("${r.failed[0]} could not be reached.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            Text("Wikipedia, \u00A9 OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        HorizontalDivider(Modifier.padding(top = 6.dp))
+    }
 }
