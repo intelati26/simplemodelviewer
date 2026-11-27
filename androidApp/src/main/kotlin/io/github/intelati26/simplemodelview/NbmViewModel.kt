@@ -735,12 +735,16 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The window of the grid an export of [area] covers: the visible part of the picture, the sector on screen, or a meso sector; at the export scale. */
-    private fun areaView(area: ShareArea, grid: Grid): View {
-        val base = view ?: viewFor(_state.value.sector, grid)
+    /** What an export reads of the page, taken once when it is asked for: a loop follows this, not what the page is changed to meanwhile. */
+    private class ExportCtx(val st: NbmState, val view: View?, val viewport: FloatArray, val globeW: Int, val globeH: Int)
+    private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH)
+
+    private fun areaView(area: ShareArea, grid: Grid, x: ExportCtx = exportCtx()): View {
+        val base = x.view ?: viewFor(x.st.sector, grid)
         val window = when (area) {
             is ShareArea.Meso -> area.sector.view(core, grid, 1)
             ShareArea.Screen -> {
-                val (l, t, r, b) = viewport.toList()
+                val (l, t, r, b) = x.viewport.toList()
                 val col0 = (base.col0 + floor(l * base.cols).toInt()).coerceIn(0, grid.columns - 2)
                 val row0 = (base.row0 + floor((1f - b) * base.rows).toInt()).coerceIn(0, grid.rows - 2)
                 val col1 = (base.col0 + ceil(r * base.cols).toInt() - 1).coerceIn(col0 + 1, grid.columns - 1)
@@ -763,13 +767,13 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
-    private suspend fun areaImage(area: ShareArea, file: NbmFile, side: Int = GLOBE_EXPORT_SIDE): Triple<Bitmap, Product, Style> {
-        val st = _state.value
+    private suspend fun areaImage(area: ShareArea, file: NbmFile, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx = exportCtx()): Triple<Bitmap, Product, Style> {
+        val st = x.st
         val field = decode(file, cache = false)
-        if (area == ShareArea.Globe && globeW > 0) {
+        if (area == ShareArea.Globe && x.globeW > 0) {
             val globeProduct = synthetic(st.product, field.grid)
             outlook.ensure(file.valid, file.run)
-            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))       // the globe as turned now, on a square at export size
+            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))       // the globe as turned now, on a square at export size
             val bitmap = withContext(Dispatchers.Default) {
                 globeRenderer.render(
                     field.grid, field.values, globeProduct.style, emptyList(), cam, side, side, 1, dark = false, product = globeProduct, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity,
@@ -779,7 +783,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             return Triple(bitmap, globeProduct, globeProduct.style)
         }
         outlook.ensure(file.valid, file.run)
-        val box = areaView(area, field.grid)
+        val box = areaView(area, field.grid, x)
         val product = synthetic(st.product, field.grid)
         val map = withContext(Dispatchers.Default) {
             renderer.render(product, product.style, field.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid, file.run), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
@@ -817,7 +821,8 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Renders the frames of the loop into an MP4 and returns it. Each frame is held for the forecast hours it stands for. [onProgress] gets (done, total). */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
-        val st = _state.value
+        val x = exportCtx()
+        val st = x.st
         val window = loopWindowFor(st)
         val n = window.count()
         if (n < 2) return@withContext null
@@ -826,7 +831,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         try {
             for ((k, i) in window.withIndex()) {
                 val file = st.frames[i]
-                val (map, product, style) = areaImage(area, file, GLOBE_LOOP_SIDE)
+                val (map, product, style) = areaImage(area, file, GLOBE_LOOP_SIDE, x)
                 var picture = renderer.shareImage(map, product, style, header(file), emptyList())
                 val (sw, sh) = size.scaled(picture.width, picture.height)
                 if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)

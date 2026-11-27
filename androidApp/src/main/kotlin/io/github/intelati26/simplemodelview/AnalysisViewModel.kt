@@ -271,8 +271,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The line layers that are on, from the same frame's other products (the lines of the shown product itself are its own contours), when they share its grid. */
-    private suspend fun lineLayersFor(frame: AnalysisFrame, shownId: String, grid: Grid): List<FieldLines> {
-        val keys = _state.value.lines
+    private suspend fun lineLayersFor(frame: AnalysisFrame, shownId: String, grid: Grid, keys: Set<String> = _state.value.lines): List<FieldLines> {
         return LINE_KINDS.filter { it.key in keys && it.productId != shownId }.mapNotNull { k ->
             val p = AnalysisCatalog.all.firstOrNull { it.id == k.productId } ?: return@mapNotNull null
             val f = try { field(frame, p) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } ?: return@mapNotNull null
@@ -567,12 +566,16 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         return s
     }
 
-    private fun areaView(area: ShareArea, grid: Grid): View {
-        val base = view ?: viewFor(_state.value.sector, grid)
+    /** What an export reads of the page, taken once when it is asked for: a loop follows this, not what the page is changed to meanwhile. */
+    private class ExportCtx(val st: AnalysisState, val view: View?, val viewport: FloatArray, val globeW: Int, val globeH: Int)
+    private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH)
+
+    private fun areaView(area: ShareArea, grid: Grid, x: ExportCtx = exportCtx()): View {
+        val base = x.view ?: viewFor(x.st.sector, grid)
         val window = when (area) {
             is ShareArea.Meso -> area.sector.view(core, grid, 1)
             ShareArea.Screen -> {
-                val (l, t, r, b) = viewport.toList()
+                val (l, t, r, b) = x.viewport.toList()
                 val col0 = (base.col0 + floor(l * base.cols).toInt()).coerceIn(0, grid.columns - 2)
                 val row0 = (base.row0 + floor((1f - b) * base.rows).toInt()).coerceIn(0, grid.rows - 2)
                 val col1 = (base.col0 + ceil(r * base.cols).toInt() - 1).coerceIn(col0 + 1, grid.columns - 1)
@@ -596,19 +599,19 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** The picture of [frame] for an export of [area], or null when the frame has no file. */
-    private suspend fun areaImage(area: ShareArea, frame: AnalysisFrame, side: Int = GLOBE_EXPORT_SIDE): Triple<Bitmap, Product, String>? {
-        val st = _state.value
+    private suspend fun areaImage(area: ShareArea, frame: AnalysisFrame, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx = exportCtx()): Triple<Bitmap, Product, String>? {
+        val st = x.st
         val (grid, values, source) = field(frame, st.product, cache = false) ?: return null
         val product = synthetic(st.product, grid)
-        if (area == ShareArea.Globe && globeW > 0) {
-            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))
+        if (area == ShareArea.Globe && x.globeW > 0) {
+            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))
             val bitmap = withContext(Dispatchers.Default) {
                 globeRenderer.render(grid, values, product.style, emptyList(), cam, side, side, 1, dark = false, product = product, contours = st.settings.contours, barbDensity = st.settings.forExport().barbDensity, counties = st.settings.forExport().counties)
             }
             return Triple(bitmap, product, source)
         }
-        val box = areaView(area, grid)
-        val exportLines = lineLayersFor(frame, st.product.id, grid)
+        val box = areaView(area, grid, x)
+        val exportLines = lineLayersFor(frame, st.product.id, grid, st.lines)
         val map = withContext(Dispatchers.Default) {
             renderer.render(product, product.style, values, emptyList(), box, dark = false, contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity, fieldLines = exportLines)
         }
@@ -642,7 +645,8 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The frames of the loop as an MP4 (a frame with no file is left out). [onProgress] gets (done, total). */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
-        val st = _state.value
+        val x = exportCtx()
+        val st = x.st
         val window = if (AppContainer.loopFromShown.value) st.index until st.frames.size else st.frames.indices
         val n = window.count()
         if (n < 2) return@withContext null
@@ -651,7 +655,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         try {
             for ((k, i) in window.withIndex()) {
                 val frame = st.frames[i]
-                val made = areaImage(area, frame, GLOBE_LOOP_SIDE)
+                val made = areaImage(area, frame, GLOBE_LOOP_SIDE, x)
                 if (made != null) {
                     val (map, product, source) = made
                     var picture = renderer.shareImage(map, product, product.style, header(frame, source), emptyList())

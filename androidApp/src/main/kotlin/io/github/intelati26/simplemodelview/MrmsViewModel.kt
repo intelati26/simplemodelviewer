@@ -494,8 +494,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** [alertShapesNow], reading the archive first when this frame has no reading yet (a loop that is playing keeps to what has been read, so it does not stall). */
-    private suspend fun alertShapesFor(file: MrmsFile): List<AlertShape> {
-        val st = _state.value
+    private suspend fun alertShapesFor(file: MrmsFile, st: MrmsState = _state.value): List<AlertShape> {
         if (st.alertKinds.isEmpty() || isNewest(file)) return alertShapesNow(file)
         val past = st.alertKinds - AlertKind.Discussion
         if (past.isEmpty()) return emptyList()
@@ -701,8 +700,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      * and is drawn with its own style (minimum, opacity) and placed on the base picture by where its cells fall (its grid can differ a little from the
      * base's: another cell size). A layer without a file nearby is skipped.
      */
-    private suspend fun overlayLayers(baseFile: MrmsFile, label: String, box: DoubleArray, base: View, cache: Boolean, stepOf: (MrmsProduct) -> Int): List<OverlayResult> {
-        val layers = _state.value.overlays
+    private suspend fun overlayLayers(baseFile: MrmsFile, label: String, box: DoubleArray, base: View, cache: Boolean, st: MrmsState = _state.value, stepOf: (MrmsProduct) -> Int): List<OverlayResult> {
+        val layers = st.overlays
         val results = ArrayList<OverlayResult>()
         for (layer in layers) {
             val ov = layer.product
@@ -725,8 +724,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The overlay fields for the globe: each decoded onto the globe's own grid [grid], with how it is drawn and what a tap reads from it. */
-    private suspend fun globeOverlays(baseFile: MrmsFile, grid: Grid): List<Pair<GlobeOverlay, ShownOverlay>> {
-        val layers = _state.value.overlays
+    private suspend fun globeOverlays(baseFile: MrmsFile, grid: Grid, st: MrmsState = _state.value): List<Pair<GlobeOverlay, ShownOverlay>> {
+        val layers = st.overlays
         val out = ArrayList<Pair<GlobeOverlay, ShownOverlay>>()
         for (layer in layers) {
             val ov = layer.product
@@ -781,10 +780,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return metars.at(time, box[0], box[1], box[2], box[3])
     }
 
-    private suspend fun plotsFor(file: MrmsFile, v: View, box: DoubleArray): List<StationPlot> {
-        if (!_state.value.stations) return emptyList()
+    private suspend fun plotsFor(file: MrmsFile, v: View, box: DoubleArray, st: MrmsState = _state.value): List<StationPlot> {
+        if (!st.stations) return emptyList()
         val reports = stationReports(file.validTime, box)
-        return withContext(Dispatchers.Default) { stationPlots(core, reports, v, _state.value.units.celsius, _state.value.stationDensity) }
+        return withContext(Dispatchers.Default) { stationPlots(core, reports, v, st.units.celsius, st.stationDensity) }
     }
 
     /** Opens a station: its last day of reports (AWC) and its 5-minute wind (IEM, which AWC does not carry), for the chart. */
@@ -1032,8 +1031,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** The surface layers of one flat picture, all at once (a zoomed-in detail, an export). */
     private class UnderParts(val fill: Overlay?, val lines: List<FieldLines>)
 
-    private suspend fun underParts(base: MrmsFile, v: View): UnderParts {
-        val st = _state.value
+    private suspend fun underParts(base: MrmsFile, v: View, st: MrmsState = _state.value): UnderParts {
         if (!st.underAny) return UnderParts(null, emptyList())
         val t = underTemp(base, underGridFor(v.grid)) ?: return UnderParts(null, emptyList())
         val dst = rectOn(t.grid, v)
@@ -1369,8 +1367,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** The cells of the shown (Lambert) grid that are on screen, and the lat / lon box that surely covers them. */
     private class VisibleWindow(val colMin: Double, val rowMin: Double, val colMax: Double, val rowMax: Double, val south: Double, val north: Double, val west: Double, val east: Double)
 
-    private fun visibleWindow(v: View): VisibleWindow {
-        val (l, t, r, b) = viewport.toList()
+    private fun visibleWindow(v: View, vp: FloatArray = viewport): VisibleWindow {
+        val (l, t, r, b) = vp.toList()
         val g = v.grid
         val colMin = floor(l * g.columns).toDouble(); val colMax = ceil(r * g.columns) - 1.0
         val rowMin = floor((1f - b) * g.rows).toDouble(); val rowMax = ceil((1f - t) * g.rows) - 1.0
@@ -1676,15 +1674,19 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      * The map picture of an export for one file. The screen area is decoded afresh at the finest step that suits its size, so a zoomed-in
      * export has 1 km (rotation 500 m) detail, not the cells of the screen's overview.
      */
-    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile, side: Int = GLOBE_EXPORT_SIDE): Pair<Bitmap, Style> {
-        val st = _state.value
+    /** What an export reads of the page, taken once when it is asked for: the state, the view and the visible part, the globe's size. The export does not follow later changes. */
+    private class ExportCtx(val st: MrmsState, val view: View?, val viewport: FloatArray, val grid: Grid?, val globeW: Int, val globeH: Int)
+    private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), shownGrid, globeW, globeH)
+
+    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx = exportCtx()): Pair<Bitmap, Style> {
+        val st = x.st
         val style = styleOf(product)
-        if (area == ShareArea.Globe && globeW > 0) {
+        if (area == ShareArea.Globe && x.globeW > 0) {
             val frame = decode(product, file, "globe", globeBox, globeStep(product))
             outlook.ensure(file.validTime)
-            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(globeW, globeH))       // the globe as turned now, on a square at export size
+            val cam = st.cam.copy(radius = st.cam.radius * side / minOf(x.globeW, x.globeH))       // the globe as turned now, on a square at export size
             val project: PlaceProjection = { la, lo -> globeForward(cam, side, side, la, lo) }
-            val layers = globeOverlays(file, frame.window.grid).map { it.first }
+            val layers = globeOverlays(file, frame.window.grid, st).map { it.first }
             var underlay: GlobeOverlay? = null
             var fieldLines: List<FieldLines> = emptyList()
             if (st.underAny) {
@@ -1693,7 +1695,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                     if (st.underLines) fieldLines = underLineSet(st, t, null).lines
                 }
             }
-            val shapes = alertShapesFor(file)
+            val shapes = alertShapesFor(file, st)
             val bitmap = withContext(Dispatchers.Default) {
                 val alerts = alertDrawsWith(shapes, project) + outlookDrawsOn(outlook, file.validTime, project) + lightningDrawsOn(AppContainer.lightning.state.value, file.validTime, project) + probSevereDrawsOn(AppContainer.probSevere.state.value, file.validTime, project)
                 globeRenderer.render(
@@ -1703,14 +1705,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             }
             return bitmap to style
         }
-        val v = view
+        val v = x.view
         val frame: MrmsFrame
         val box: View
         val overlayResults: List<OverlayResult>
         if (area == ShareArea.Screen && v != null) {
             // the visible part: a window of the shown (Lambert) grid, with the lat / lon box that surely covers it decoded and put onto it
             val g = v.grid
-            val w = visibleWindow(v)
+            val w = visibleWindow(v, x.viewport)
             val colMin = w.colMin; val rowMin = w.rowMin; val colMax = w.colMax; val rowMax = w.rowMax
             val south = w.south; val north = w.north; val west = w.west; val east = w.east
             val step = mrmsStep(product.cellDegrees, west, east, 2400, false)
@@ -1719,25 +1721,25 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             frame = decode(product, file, "screen", coords, step, cache = false, target = FrameTarget.Onto(crop))
             val g2 = frame.window.grid
             box = View("Screen area", 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
-            overlayResults = overlayLayers(file, "screen", coords, box, cache = false) { p -> mrmsStep(p.cellDegrees, west, east, 2400, false) }
+            overlayResults = overlayLayers(file, "screen", coords, box, cache = false, st = st) { p -> mrmsStep(p.cellDegrees, west, east, 2400, false) }
         } else {
             val sector = sectorOf(area)
             frame = decode(product, file, sector.name, sectorBox(sector), stepFor(product, sector), target = FrameTarget.Planned)
             val g2 = frame.window.grid
             box = View(sector.name, 0, 0, g2.columns, g2.rows, exportScale(g2.columns, g2.rows), 1, g2)
-            overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true) { p -> stepFor(p, sector) }
+            overlayResults = overlayLayers(file, sector.name, sectorBox(sector), box, cache = true, st = st) { p -> stepFor(p, sector) }
         }
         outlook.ensure(file.validTime)
-        val under = underParts(file, box)
-        val plots = plotsFor(file, box, gridCoverBox(core, box.grid))
+        val under = underParts(file, box, st)
+        val plots = plotsFor(file, box, gridCoverBox(core, box.grid), st)
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, stations = plots, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = _state.value.settings.contours, counties = _state.value.settings.forExport().counties, barbDensity = _state.value.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
+            renderer.render(synthetic(product, frame.window.grid), style, frame.window.values, emptyList(), box, dark = false, overlayResults.map { it.layer }, underlay = under.fill, fieldLines = under.lines, stations = plots, alerts = outlookDraws(core, outlook, box, file.validTime) + lightningDraws(core, AppContainer.lightning.state.value, box, file.validTime) + probSevereDraws(core, AppContainer.probSevere.state.value, box, file.validTime), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity, halo = mrmsHasHalo(product))
         }
         return bitmap to style
     }
 
-    private fun header(file: MrmsFile): String {
-        val name = overlayName(_state.value.overlays)
+    private fun header(file: MrmsFile, st: MrmsState = _state.value): String {
+        val name = overlayName(st.overlays)
         return "Valid ${formatClock(file.validTime, 0)}" + (if (name.isNotEmpty()) "   + $name" else "") + "   Data: NOAA/NSSL MRMS (experimental viewer)"
     }
 
@@ -1761,13 +1763,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** What one compare pane looks like for [area]: a scan ([file], or the one of its product nearest [validTime]), or a rainfall total. Null: nothing near. */
-    private suspend fun panePicture(area: ShareArea, spec: PaneSpec, file: MrmsFile?, st: MrmsState, validTime: Long = file?.validTime ?: 0L, filesOfSpec: List<MrmsFile>? = null): PanePicture? {
+    private suspend fun panePicture(area: ShareArea, spec: PaneSpec, file: MrmsFile?, x: ExportCtx, validTime: Long = file?.validTime ?: 0L, filesOfSpec: List<MrmsFile>? = null): PanePicture? {
+        val st = x.st
         if (spec.isTotal) {
             val sector = if (area is ShareArea.Meso) sectorOf(area) else st.sector
             val f = fieldOf(spec, validTime, 600, sector) ?: return null
             val g = f.grid
             val box = if (area == ShareArea.Screen) {
-                val (l, t, r, b) = viewport.toList()
+                val (l, t, r, b) = x.viewport.toList()
                 val col0 = floor(l * g.columns).toInt().coerceIn(0, g.columns - 2)
                 val row0 = floor((1f - b) * g.rows).toInt().coerceIn(0, g.rows - 2)
                 val cols = (ceil(r * g.columns).toInt() - col0).coerceIn(2, g.columns - col0)
@@ -1778,15 +1781,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             return PanePicture(map, f.product.style, f.product)
         }
         val use = file ?: nearestFile(filesOfSpec ?: repo.listFiles(spec.product, System.currentTimeMillis() / 1000), validTime, 600) ?: return null
-        val (map, style) = areaBitmap(area, spec.product, use)
-        return PanePicture(map, style, synthetic(spec.product, shownGrid ?: Grid.REFS))
+        val (map, style) = areaBitmap(area, spec.product, use, x = x)
+        return PanePicture(map, style, synthetic(spec.product, x.grid ?: Grid.REFS))
     }
 
     private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
     suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
-        val st = _state.value
+        val x = exportCtx()
+        val st = x.st
         val file = st.file ?: return@withContext null
         // a rainfall total: the picture is the total on screen (the sector's grid), not a radar file
         if (st.rainSince != null && compareOf(st, area) == null) {
@@ -1816,16 +1820,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         // a compare: the second pane (a scan nearest this time, or a rainfall total) under this one, on one picture
         val cmp = compareOf(st, area)
         if (cmp != null) {
-            val a = panePicture(area, specOf(st), file, st) ?: return@withContext null
-            val b = panePicture(area, cmp, null, st, file.validTime) ?: return@withContext null
-            val raw = renderer.shareCompareImage(a.bitmap, b.bitmap, specTitle(specOf(st)), specTitle(cmp), a.product, a.style, b.product, b.style, header(file))
+            val a = panePicture(area, specOf(st), file, x) ?: return@withContext null
+            val b = panePicture(area, cmp, null, x, file.validTime) ?: return@withContext null
+            val raw = renderer.shareCompareImage(a.bitmap, b.bitmap, specTitle(specOf(st)), specTitle(cmp), a.product, a.style, b.product, b.style, header(file, st))
             val image = fitToSize(raw, size)
             val out = File(sharedDir(), "compare_" + fileName(st.product, file, "png"))
             out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             return@withContext out
         }
-        val (map, style) = areaBitmap(area, st.product, file)
-        val image = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
+        val (map, style) = areaBitmap(area, st.product, file, x = x)
+        val image = renderer.shareImage(map, synthetic(st.product, x.grid ?: Grid.REFS), style, header(file, st), emptyList())
         val out = File(sharedDir(), fileName(st.product, file, "png"))
         out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         out
@@ -1833,7 +1837,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Renders every file of the loop into an MP4 and returns it. [onProgress] gets (done, total). Files come from the HTTP cache once played. */
     suspend fun buildLoopFile(area: ShareArea, size: VideoSize, onProgress: (Int, Int) -> Unit): File? = withContext(Dispatchers.Default) {
-        val st = _state.value
+        val x = exportCtx()      // what the page shows now: the loop follows this, not what the page is changed to meanwhile
+        val st = x.st
         val window = loopWindowFor(st)
         val n = window.count()
         if (n < 2) return@withContext null
@@ -1846,14 +1851,14 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         try {
             for ((k, i) in window.withIndex()) {
                 val file = st.files[i]
-                val (map, style) = areaBitmap(area, st.product, file, GLOBE_LOOP_SIDE)
+                val (map, style) = areaBitmap(area, st.product, file, GLOBE_LOOP_SIDE, x)
                 var picture: Bitmap
                 if (cmp != null) {
                     // a compare: the second pane at this frame's time (a total stays as it is); a frame without one keeps the last
-                    paneB = (if (cmp.isTotal && paneB != null) paneB else panePicture(area, cmp, null, st, file.validTime, filesB)) ?: paneB
+                    paneB = (if (cmp.isTotal && paneB != null) paneB else panePicture(area, cmp, null, x, file.validTime, filesB)) ?: paneB
                     val b = paneB ?: throw IllegalStateException("no ${specTitle(cmp)} near ${formatClock(file.validTime, 0)}")
-                    picture = renderer.shareCompareImage(map, b.bitmap, specTitle(specOf(st)), specTitle(cmp), synthetic(st.product, shownGrid ?: Grid.REFS), style, b.product, b.style, header(file))
-                } else picture = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
+                    picture = renderer.shareCompareImage(map, b.bitmap, specTitle(specOf(st)), specTitle(cmp), synthetic(st.product, x.grid ?: Grid.REFS), style, b.product, b.style, header(file, st))
+                } else picture = renderer.shareImage(map, synthetic(st.product, x.grid ?: Grid.REFS), style, header(file, st), emptyList())
                 val (sw, sh) = size.scaled(picture.width, picture.height)
                 if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
                 if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
