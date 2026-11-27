@@ -1779,6 +1779,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             return@withContext out
         }
         val (map, style) = areaBitmap(area, st.product, file)
+        // a compare: the second product (the scan nearest this time) under this one, on one picture
+        val cmp = st.other?.takeIf { st.compare && !it.isTotal && area != ShareArea.Globe }
+        val fileB = cmp?.let { c -> nearestFile(repo.listFiles(c.product, System.currentTimeMillis() / 1000), file.validTime, 600) }
+        if (cmp != null && fileB != null) {
+            val (mapB, styleB) = areaBitmap(area, cmp.product, fileB)
+            val grid = shownGrid ?: Grid.REFS
+            val image = renderer.shareCompareImage(map, mapB, specTitle(specOf(st)), specTitle(cmp), synthetic(st.product, grid), style, synthetic(cmp.product, grid), styleB, header(file))
+            val out = File(sharedDir(), "compare_" + fileName(st.product, file, "png"))
+            out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            return@withContext out
+        }
         val image = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
         val out = File(sharedDir(), fileName(st.product, file, "png"))
         out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }

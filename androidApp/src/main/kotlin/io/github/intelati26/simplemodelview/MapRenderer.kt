@@ -360,6 +360,38 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         return out
     }
 
+    /** The picture to share from a compare: both panes one above the other, each with its name on it and its own color key. */
+    fun shareCompareImage(a: Bitmap, b: Bitmap, titleA: String, titleB: String, productA: Product, styleA: Style, productB: Product, styleB: Style, header: String): Bitmap {
+        val w = a.width
+        val bScaled = if (b.width == w) b else Bitmap.createScaledBitmap(b, w, (b.height * (w.toFloat() / b.width)).toInt().coerceAtLeast(1), true)
+        val pad = maxOf(12, w / 90)
+        val titleSize = maxOf(18f, w / 48f)
+        val legendHeight = (titleSize * 2.6f).toInt()
+        val headerHeight = (titleSize * 3.2f).toInt()
+        val out = Bitmap.createBitmap(w, headerHeight + a.height + bScaled.height + legendHeight * 2, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.WHITE)
+        val text = Paint().apply { isAntiAlias = true; color = Color.BLACK; textSize = titleSize; isFakeBoldText = true }
+        canvas.drawText("$titleA  vs  $titleB", pad.toFloat(), titleSize * 1.3f, text)
+        text.isFakeBoldText = false
+        text.textSize = titleSize * 0.8f
+        canvas.drawText(header, pad.toFloat(), titleSize * 2.4f, text)
+        fun pane(map: Bitmap, title: String, top: Int) {
+            canvas.drawBitmap(map, 0f, top.toFloat(), null)
+            val chip = Paint().apply { color = 0xB0000000.toInt() }
+            val label = Paint().apply { isAntiAlias = true; color = Color.WHITE; textSize = titleSize * 0.9f; isFakeBoldText = true }
+            val tw = label.measureText(title)
+            canvas.drawRect(pad / 2f, top + pad / 2f, pad / 2f + tw + pad, top + pad / 2f + label.textSize * 1.4f, chip)
+            canvas.drawText(title, pad.toFloat(), top + pad / 2f + label.textSize * 1.05f, label)
+        }
+        pane(a, titleA, headerHeight)
+        pane(bScaled, titleB, headerHeight + a.height)
+        val keysTop = (headerHeight + a.height + bScaled.height).toFloat()
+        drawLegend(canvas, styleA, productA, emptyList(), pad.toFloat(), keysTop, w - 2f * pad, legendHeight.toFloat(), titleSize * 0.7f)
+        drawLegend(canvas, styleB, productB, emptyList(), pad.toFloat(), keysTop + legendHeight, w - 2f * pad, legendHeight.toFloat(), titleSize * 0.7f)
+        return out
+    }
+
     private fun drawLegend(canvas: Canvas, style: Style, product: Product, members: List<String>, x: Float, y: Float, w: Float, h: Float, textSize: Float) {
         val paint = Paint().apply { isAntiAlias = true; this.textSize = textSize; color = Color.BLACK }
         if (style.kind == Kind.Paintball) {
