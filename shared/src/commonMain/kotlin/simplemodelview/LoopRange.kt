@@ -21,7 +21,8 @@ fun loopSpanLabel(seconds: Long): String {
 fun loopSpanOptions(times: List<Long>): List<Long> {
     if (times.size < 3) return emptyList()
     val total = times.last() - times.first()
-    return listOf(900L, 1800L, 3600L, 3 * 3600L, 6 * 3600L, 12 * 3600L, 24 * 3600L, 48 * 3600L, 72 * 3600L).filter { it < total }
+    val step = total / (times.size - 1)           // a span shorter than one step would hold a single frame
+    return listOf(900L, 1800L, 3600L, 3 * 3600L, 6 * 3600L, 12 * 3600L, 24 * 3600L, 48 * 3600L, 72 * 3600L, 120 * 3600L, 168 * 3600L, 240 * 3600L, 336 * 3600L).filter { it < total && it >= step }
 }
 
 /**

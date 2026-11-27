@@ -16,6 +16,13 @@ class LoopRangeTest {
         assertEquals(listOf(900L, 1800L), loopSpanOptions(scans))                      // 58 minutes of scans
         assertEquals(listOf(3600L, 3 * 3600L, 6 * 3600L, 12 * 3600L), loopSpanOptions(hourly).filter { it >= 3600 && it <= 12 * 3600 })
         assertEquals(emptyList(), loopSpanOptions(hourly.take(2)))
+        assertEquals(3600L, loopSpanOptions(hourly).first())                            // nothing shorter than the hourly step
+    }
+
+    @Test fun aSixteenDayModelRunOffersTheLongSpans() {
+        val gfs = (0..128).map { 864_000L + it * 3 * 3600L }                          // 16 days in 3-hour steps
+        assertEquals(listOf(5L, 7L, 10L, 14L), loopSpanOptions(gfs).filter { it >= 5 * 86400L }.map { it / 86400L })
+        assertEquals(emptyList<Long>(), loopSpanOptions((0..40).map { 864_000L + it * 3 * 3600L }).filter { it >= 5 * 86400L }.map { it / 86400L })   // a 5-day series stops short of its own length
     }
 
     @Test fun framesNearTheEndsAndAllBetween() {
