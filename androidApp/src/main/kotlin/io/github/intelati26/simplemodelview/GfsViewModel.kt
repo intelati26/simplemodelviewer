@@ -597,19 +597,22 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The compare's second picture: the other product at this same frame, as its own field only, with the lines and alerts over it once. */
+    private val SECOND: (SecondPane?, String?) -> Unit = { p, notice -> update { it.copy(paneB = p?.let { listOf(it.field, it.over) }, titleB = p?.title, styleB = p?.style, notice = notice ?: it.notice) } }
+
     private suspend fun computePaneB(product: Product, values: FloatArray, view: View, file: NbmFile, target: Grid) {
         val st = _state.value
         val b = st.other
-        if (!st.compare || st.playing || b == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
-        try {
-            val (valuesB, productB, titleB) = fieldFor(st.copy(product = b.product, level = b.level, color = b.color, since = b.since), file, target)
+        showSecondPane(st.compare && !st.playing && b != null, st.paneB != null, SECOND) {
+            val (valuesB, productB, titleB) = fieldFor(st.copy(product = b!!.product, level = b.level, color = b.color, since = b.since), file, target)
             val settings = st.settings
-            val (over, field) = withContext(Dispatchers.Default) {
-                renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), counties = settings.counties, part = RenderPart.Over) to
-                    renderer.render(productB, productB.style, valuesB, emptyList(), view, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
+            withContext(Dispatchers.Default) {
+                SecondPane(
+                    renderer.render(productB, productB.style, valuesB, emptyList(), view, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field),
+                    renderer.render(product, product.style, values, emptyList(), view, dark, alerts = outlookDraws(core, outlook, view, file.valid, file.run), counties = settings.counties, part = RenderPart.Over),
+                    titleB, productB.style,
+                )
             }
-            update { it.copy(paneB = listOf(field, over), titleB = titleB, styleB = productB.style) }
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+        }
     }
 
     private suspend fun showCurrent() {

@@ -342,29 +342,29 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The compare's second picture: the other product at the time nearest the one shown, as its own field only, with the lines and alerts over it once. */
+    private val SECOND: (SecondPane?, String?) -> Unit = { p, notice -> update { it.copy(paneB = p?.let { listOf(it.field, it.over) }, titleB = p?.title, styleB = p?.style, notice = notice ?: it.notice) } }
+
     private suspend fun computePaneB(product: Product, data: FloatArray, v: View, valid: Long?) {
         val st = _state.value
         val s = store
         val b = st.other
-        if (!st.compare || st.playing || s == null || b == null || valid == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
-        try {
-            val times = repo.validTimes(s, b)
-            val idx = times.indices.minByOrNull { kotlin.math.abs(times[it] - valid) }?.takeIf { kotlin.math.abs(times[it] - valid) <= 1800 }
-            if (idx == null) { update { it.copy(paneB = null, notice = "${b.title} has no time near this one.") }; return }
+        showSecondPane(st.compare && !st.playing && s != null && b != null && valid != null, st.paneB != null, SECOND) {
+            val times = repo.validTimes(s!!, b!!)
+            val idx = times.indices.minByOrNull { kotlin.math.abs(times[it] - valid!!) }?.takeIf { kotlin.math.abs(times[it] - valid!!) <= 1800 }
+                ?: throw NoSecondPane("${b.title} has no time near this one.")
             val frame = repo.readFrameTimed(s, b, idx, st.member)
             val sector = st.sector
             val settings = st.settings
-            val (over, field, style) = withContext(Dispatchers.Default) {
+            withContext(Dispatchers.Default) {
                 val bv = if (b.grid == product.grid) v else if (sector.name == "CONUS") View.whole(b.grid) else sector.view(core, b.grid)
                 val style = withAutoStops(b.style, frame.values)
-                Triple(
-                    renderer.render(product, product.style, data, st.members, v, dark, alerts = outlookDraws(core, outlook, v, valid), counties = settings.counties, part = RenderPart.Over),
+                SecondPane(
                     renderer.render(b, style, frame.values, st.members, bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field),
-                    style,
+                    renderer.render(product, product.style, data, st.members, v, dark, alerts = outlookDraws(core, outlook, v, valid!!), counties = settings.counties, part = RenderPart.Over),
+                    b.title, style,
                 )
             }
-            update { it.copy(paneB = listOf(field, over), titleB = b.title, styleB = style) }
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+        }
     }
 
     /** The product [delta] places along in the picker's order (the arrows beside the product chip). */

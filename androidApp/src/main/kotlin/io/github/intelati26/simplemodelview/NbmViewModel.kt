@@ -353,25 +353,28 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The compare's second picture: the other product in the same run at the frame nearest this time, as its own field only, with the lines and alerts over it once. */
+    private val SECOND: (SecondPane?, String?) -> Unit = { p, notice -> update { it.copy(paneB = p?.let { listOf(it.field, it.over) }, titleB = p?.title, styleB = p?.style, notice = notice ?: it.notice) } }
+
     private suspend fun computePaneB(product: Product, field: GridField, v: View, file: NbmFile) {
         val st = _state.value
         val b = st.other
         val cycle = st.cycle
-        if (!st.compare || st.playing || b == null || cycle == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
-        try {
-            val frames = repo.listFrames(b.id, cycle)
+        showSecondPane(st.compare && !st.playing && b != null && cycle != null, st.paneB != null, SECOND) {
+            val frames = repo.listFrames(b!!.id, cycle!!)
             val fb = frames.minByOrNull { kotlin.math.abs(it.valid - file.valid) }?.takeIf { kotlin.math.abs(it.valid - file.valid) <= 5400 }
-            if (fb == null) { update { it.copy(paneB = null, notice = "${b.title} has no frame near this time in this run.") }; return }
+                ?: throw NoSecondPane("${b.title} has no frame near this time in this run.")
             val fieldB = decode(fb)
             val settings = st.settings
             val syn = synthetic(b, fieldB.grid)
-            val (over, fld) = withContext(Dispatchers.Default) {
+            withContext(Dispatchers.Default) {
                 val bv = if (fieldB.grid == field.grid) v else viewFor(st.sector, fieldB.grid)
-                renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid, file.run), counties = settings.counties, part = RenderPart.Over) to
-                    renderer.render(syn, syn.style, fieldB.values, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
+                SecondPane(
+                    renderer.render(syn, syn.style, fieldB.values, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field),
+                    renderer.render(product, product.style, field.values, emptyList(), v, dark, alerts = outlookDraws(core, outlook, v, file.valid, file.run), counties = settings.counties, part = RenderPart.Over),
+                    b.title, syn.style,
+                )
             }
-            update { it.copy(paneB = listOf(fld, over), titleB = b.title, styleB = syn.style) }
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+        }
     }
 
     private fun synthetic(product: NbmProduct, grid: Grid) =

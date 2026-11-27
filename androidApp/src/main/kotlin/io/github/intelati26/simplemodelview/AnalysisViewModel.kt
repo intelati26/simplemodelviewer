@@ -283,23 +283,24 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     private var shownLines: List<FieldLines> = emptyList()
 
     /** The compare's second picture: the other product of the same frame, as its own field only, with the lines over it once. */
+    private val SECOND: (SecondPane?, String?) -> Unit = { p, notice -> update { it.copy(paneB = p?.let { listOf(it.field, it.over) }, titleB = p?.title, styleB = p?.style, notice = notice ?: it.notice) } }
+
     private suspend fun computePaneB(product: Product, values: FloatArray, v: View, frame: AnalysisFrame) {
         val st = _state.value
         val b = st.other
-        if (!st.compare || st.playing || b == null) { if (st.paneB != null) update { it.copy(paneB = null, titleB = null, styleB = null) }; return }
-        try {
-            val fb = field(frame, b)
-            if (fb == null) { update { it.copy(paneB = null, notice = "No ${b.title} analysis for this time.") }; return }
-            val (gridB, valuesB, _) = fb
+        showSecondPane(st.compare && !st.playing && b != null, st.paneB != null, SECOND) {
+            val (gridB, valuesB, _) = field(frame, b!!) ?: throw NoSecondPane("No ${b.title} analysis for this time.")
             val syn = synthetic(b, gridB)
             val settings = st.settings
-            val (over, fld) = withContext(Dispatchers.Default) {
+            withContext(Dispatchers.Default) {
                 val bv = if (gridB == product.grid) v else viewFor(st.sector, gridB)
-                renderer.render(product, product.style, values, emptyList(), v, dark, counties = settings.counties, fieldLines = shownLines, part = RenderPart.Over) to
-                    renderer.render(syn, syn.style, valuesB, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
+                SecondPane(
+                    renderer.render(syn, syn.style, valuesB, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field),
+                    renderer.render(product, product.style, values, emptyList(), v, dark, counties = settings.counties, fieldLines = shownLines, part = RenderPart.Over),
+                    b.title, syn.style,
+                )
             }
-            update { it.copy(paneB = listOf(fld, over), titleB = b.title, styleB = syn.style) }
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(paneB = null, notice = e.message) } }
+        }
     }
 
     private fun synthetic(product: AnalysisProduct, grid: Grid) = Product(product.id, product.title, "Analysis", product.style, hasMembers = false, timeDimension = null, grid = grid)

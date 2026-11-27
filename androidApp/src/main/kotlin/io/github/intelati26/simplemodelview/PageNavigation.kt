@@ -51,3 +51,18 @@ fun toggleFavorite(prefs: android.content.SharedPreferences, current: Set<String
     prefs.edit().putStringSet("favorites", favorites).apply()
     return favorites
 }
+
+/** The compare's second picture: its own field, the shared lines and alerts over it, its title and style. */
+class SecondPane(val field: android.graphics.Bitmap, val over: android.graphics.Bitmap, val title: String, val style: simplemodelview.Style)
+
+/** Thrown by a second-picture builder when the other product has nothing for this time: the text is shown as the notice. */
+class NoSecondPane(message: String) : Exception(message)
+
+/**
+ * The part every page's second picture shares: nothing unless a compare is on and not playing (an old picture is cleared), else [build] draws it;
+ * [NoSecondPane] or any failure clears it with a notice. [apply] puts the result (or null and the notice) into the page's state.
+ */
+suspend fun showSecondPane(wanted: Boolean, hasPane: Boolean, apply: (SecondPane?, String?) -> Unit, build: suspend () -> SecondPane) {
+    if (!wanted) { if (hasPane) apply(null, null); return }
+    try { apply(build(), null) } catch (e: CancellationException) { throw e } catch (e: Exception) { apply(null, e.message) }
+}
