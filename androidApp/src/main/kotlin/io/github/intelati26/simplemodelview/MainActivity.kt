@@ -22,6 +22,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
@@ -112,7 +117,8 @@ class MainActivity : ComponentActivity() {
             var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("today", "spc", "mrms", "nbm", "gfs", "point", "analysis", "compare", "outlook").firstOrNull { it == start && (AppMode.offers(it) || intent?.hasExtra("page") == true) } ?: "today") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                // in landscape the navigation bar and the camera cutout sit at the sides: keep the pages clear of them (top and bottom are padded by each page)
+                Surface(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)), color = MaterialTheme.colorScheme.background) {
                     // each page's view model is created only when the page is first opened
                     // the page menu opens any page; the page being opened reads the favorites, places and settings the others may have changed
                     val go: (String) -> Unit = { p ->
