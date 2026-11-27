@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
@@ -81,8 +85,11 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
     var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
     var bottomPx by remember { mutableStateOf(0) }
     val density = androidx.compose.ui.platform.LocalDensity.current
-    Box(Modifier.fillMaxSize().background(mapBackground)) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(mapBackground)) {
+        // landscape and tablets: the controls are a column on the left and the map fills the rest
+        val wide = maxWidth >= 720.dp && maxWidth > maxHeight
+        LaunchedEffect(wide) { if (wide) { topPx = 0; bottomPx = 0 } }
+        Box(Modifier.fillMaxSize().padding(start = if (wide && !s.settings.minimalUi) 380.dp else 0.dp), contentAlignment = Alignment.Center) {
             val bitmap = s.map
             when {
                 s.error != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
@@ -178,7 +185,9 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         }
         if (s.settings.minimalUi) MinimalChrome(
             s.frame?.let { frameLabel(it) + "  ${s.index + 1}/${s.frames.size}" } ?: "", s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
-        ) else {
+        ) else if (wide) {
+            Column(Modifier.align(Alignment.TopStart).width(380.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())) { head(); readoutBlock(); controlsBlock() }
+        } else {
             Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
             Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }

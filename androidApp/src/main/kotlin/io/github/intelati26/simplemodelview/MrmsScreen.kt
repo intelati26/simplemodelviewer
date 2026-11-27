@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.font.FontFamily
 import simplemodelview.AlertShape
@@ -112,9 +114,12 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     var topPx by remember { mutableStateOf(0) }
     var bottomPx by remember { mutableStateOf(0) }
     val density = androidx.compose.ui.platform.LocalDensity.current
-    Box(Modifier.fillMaxSize().background(mapBackground)) {
-        // the map fills the screen; thin translucent strips float over the empty bands above and below it
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(mapBackground)) {
+        // landscape and tablets: the controls are a column on the left and the map fills the rest; otherwise the map fills the screen
+        // and thin translucent strips float over the empty bands above and below it
+        val wide = maxWidth >= 720.dp && maxWidth > maxHeight
+        LaunchedEffect(wide) { if (wide) { topPx = 0; bottomPx = 0 } }
+        Box(Modifier.fillMaxSize().padding(start = if (wide && !s.settings.minimalUi) 380.dp else 0.dp), contentAlignment = Alignment.Center) {
             val bitmap = s.map
             when {
                 s.error != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
@@ -214,7 +219,9 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         if (s.settings.minimalUi) MinimalChrome(
             s.file?.let { "Valid at ${formatClock(it.validTime, System.currentTimeMillis() / 1000)}  ${s.index + 1}/${s.files.size}" + if (s.live && s.index == s.files.size - 1) "  \u25CF" else "" } ?: "",
             s.busy && s.map != null, panel, readoutBlock, { head(); controlsBlock() },
-        ) else {
+        ) else if (wide) {
+            Column(Modifier.align(Alignment.TopStart).width(380.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())) { head(); readoutBlock(); controlsBlock() }
+        } else {
             Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
             Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { readoutBlock(); controlsBlock() }
         }

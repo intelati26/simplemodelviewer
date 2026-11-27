@@ -15,6 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -93,8 +97,11 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     var topPx by remember { mutableStateOf(0) }       // the heights of the strips floating over the map: the compare's panes fit between them
     var bottomPx by remember { mutableStateOf(0) }
     val density = androidx.compose.ui.platform.LocalDensity.current
-    Box(Modifier.fillMaxSize().background(mapBackground)) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(mapBackground)) {
+        // landscape and tablets: the controls are a column on the left and the map fills the rest
+        val wide = maxWidth >= 720.dp && maxWidth > maxHeight
+        LaunchedEffect(wide) { if (wide) { topPx = 0; bottomPx = 0 } }
+        Box(Modifier.fillMaxSize().padding(start = if (wide) 380.dp else 0.dp), contentAlignment = Alignment.Center) {
             val bitmap = s.map
             when {
                 s.error != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
@@ -108,7 +115,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 else -> BusySpinner(big = true)
             }
         }
-        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) {
+        val head: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     var productMenu by remember { mutableStateOf(false) }
@@ -204,8 +211,8 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 }
                 s.loadStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-        }
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) {
+                }
+        val foot: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             s.readout?.let {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -243,7 +250,13 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                 TimeStepRow(s.index, s.frames.size, s.playing, vm::togglePlay, vm::pickIndex, loopToggle = true)
             }
             s.prefetch?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+                }
+        if (wide) Column(Modifier.align(Alignment.TopStart).width(380.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())) { head(); foot() }
+        else {
+            Column(Modifier.align(Alignment.TopStart).fillMaxWidth().background(panel).onSizeChanged { topPx = it.height }.statusBarsPadding()) { head() }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(panel).onSizeChanged { bottomPx = it.height }.navigationBarsPadding()) { foot() }
         }
+
     }
 
     if (savingPlace) s.tapLatLon?.let { (lat, lon) ->
