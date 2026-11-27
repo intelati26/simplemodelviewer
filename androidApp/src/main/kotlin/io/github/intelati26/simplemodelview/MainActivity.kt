@@ -356,7 +356,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             }
         },
     )
-        if (about) AlertDialog(
+    if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
         title = { Text("About simplemodelview") },

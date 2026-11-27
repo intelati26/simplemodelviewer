@@ -275,7 +275,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         },
         disclaimer = MRMS_DISCLAIMER,
     )
-        s.station?.let { StationDialog(it, s.units.celsius, onDismiss = vm::closeStation) }
+    s.station?.let { StationDialog(it, s.units.celsius, onDismiss = vm::closeStation) }
     if (pickRain) {
         val now = System.currentTimeMillis()
         val state = androidx.compose.material3.rememberDatePickerState(

@@ -74,6 +74,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     var pickSince by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
     var rendersOpen by remember { mutableStateOf(false) }
+    val renderJobs by AppContainer.renders.jobs.collectAsStateWithLifecycle()
     var soundingStations by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
@@ -139,8 +140,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                                 // made in the background from what is shown now (the page can be used meanwhile): the share sheet opens when it is done
                                 AppContainer.renders.enqueueLoop("GFS loop · ${s.title}", vm::reportNotice) { progress -> vm.buildLoopFile(progress) }
                             })
-                            val renderCount = AppContainer.renders.jobs.value.size
-                            if (renderCount > 0) DropdownMenuItem(text = { Text("Renders ($renderCount)") }, onClick = { more = false; rendersOpen = true })
+                            if (renderJobs.isNotEmpty()) DropdownMenuItem(text = { Text("Renders (${renderJobs.size})") }, onClick = { more = false; rendersOpen = true })
                             if (!AppMode.simple) DropdownMenuItem(text = { Text(if (s.tapLatLon != null) "Sounding stations near the crosshair" else "Sounding stations (tap the map first)") }, enabled = s.tapLatLon != null, onClick = { more = false; soundingStations = true })
                             DropdownMenuItem(text = { Text("Places") }, onClick = { more = false; places = true })
                             DropdownMenuItem(text = { Text("Settings") }, onClick = { more = false; settings = true })

@@ -264,7 +264,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
         },
         disclaimer = NBM_DISCLAIMER,
     )
-        if (about) AlertDialog(
+    if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
         title = { Text("About the Blend page") },

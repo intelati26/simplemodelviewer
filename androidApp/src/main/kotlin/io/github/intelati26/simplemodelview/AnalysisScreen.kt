@@ -259,7 +259,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         },
         disclaimer = ANALYSIS_DISCLAIMER,
     )
-        if (about) AlertDialog(
+    if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
         title = { Text("About the analysis page") },
