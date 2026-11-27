@@ -218,7 +218,7 @@ private fun SkewT(s: Sounding, elevationM: Double, analysis: SoundingMath.Analys
     val grid = MaterialTheme.colorScheme.onSurfaceVariant
     val text = MaterialTheme.colorScheme.onSurface
     Canvas(modifier) {
-        val left = 34.dp.toPx(); val right = 90.dp.toPx(); val top = 6.dp.toPx(); val bottom = size.height - 6.dp.toPx()
+        val left = 34.dp.toPx(); val right = 90.dp.toPx(); val top = 6.dp.toPx(); val bottom = size.height - 18.dp.toPx()      // room under the plot for the temperature scale
         val pw = size.width - left - right; val ph = bottom - top
         fun y(p: Double) = (top + ph * (ln(p / P_TOP) / ln(P_BOTTOM / P_TOP))).toFloat()
         fun x(t: Double, p: Double) = (left + pw * (t - T_LEFT) / (T_RIGHT - T_LEFT) + SKEW * (bottom - y(p))).toFloat()
@@ -262,6 +262,14 @@ private fun SkewT(s: Sounding, elevationM: Double, analysis: SoundingMath.Analys
             if (major) drawContext.canvas.nativeCanvas.drawText(p.toString(), 2.dp.toPx(), y(p.toDouble()) + 3.5.dp.toPx(), label)
         }
         drawRect(grid.copy(alpha = 0.5f), Offset(left, top), androidx.compose.ui.geometry.Size(pw, ph), style = Stroke(1.dp.toPx()))
+        // the temperature scale (C) along the bottom edge, where the isotherms start
+        val scale = android.graphics.Paint(label).apply { textAlign = android.graphics.Paint.Align.CENTER }
+        for (t in -30..50 step 10) {
+            val tx = x(t.toDouble(), P_BOTTOM)
+            if (tx < left + 4.dp.toPx() || tx > left + pw - 4.dp.toPx()) continue
+            drawLine(grid.copy(alpha = 0.6f), Offset(tx, bottom), Offset(tx, bottom + 3.dp.toPx()), strokeWidth = 1.dp.toPx())
+            drawContext.canvas.nativeCanvas.drawText(t.toString(), tx, bottom + 14.dp.toPx(), scale)
+        }
         val levels = s.levels.filter { it.pressure in P_TOP..P_BOTTOM }
         clipRect(left, top, left + pw, bottom) {
             fun line(color: Color, width: Float, pathEffect: PathEffect? = null, value: (simplemodelview.SoundingLevel) -> Double) {
@@ -282,6 +290,16 @@ private fun SkewT(s: Sounding, elevationM: Double, analysis: SoundingMath.Analys
                 val path = Path(); var first = true
                 for ((p, t) in pc.trace) { if (p < P_TOP) continue; val px = x(t, p); val py = y(p); if (first) { path.moveTo(px, py); first = false } else path.lineTo(px, py) }
                 drawPath(path, text.copy(alpha = 0.85f), style = Stroke(1.3.dp.toPx(), pathEffect = dash))
+            }
+        }
+        // the surface temperature and dewpoint in F at the base of the curves, as SPC prints them (dewpoint green to the left, temperature red to the right)
+        levels.firstOrNull()?.let { l0 ->
+            if (!l0.tempC.isNaN() && !l0.dewC.isNaN()) {
+                val ty = y(l0.pressure) + 12.dp.toPx()
+                val tp = tag(TEMP_RED).apply { textAlign = android.graphics.Paint.Align.LEFT }
+                val dp = tag(DEW_GREEN).apply { textAlign = android.graphics.Paint.Align.RIGHT }
+                drawContext.canvas.nativeCanvas.drawText((l0.tempC * 1.8 + 32).roundToInt().toString(), x(l0.tempC, l0.pressure) + 2.dp.toPx(), ty, tp)
+                drawContext.canvas.nativeCanvas.drawText((l0.dewC * 1.8 + 32).roundToInt().toString(), x(l0.dewC, l0.pressure) - 2.dp.toPx(), ty, dp)
             }
         }
         // heights above the ground, in km (red, at the left), and the levels worth a mark
