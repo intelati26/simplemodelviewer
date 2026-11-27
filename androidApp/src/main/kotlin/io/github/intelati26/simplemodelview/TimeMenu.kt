@@ -26,12 +26,13 @@ import simplemodelview.formatUtc
  * instead of dragging the slider to it. [times] are epoch seconds; [label] is the line for frame [i].
  */
 @Composable
-fun TimeMenu(times: List<Long>, selected: Int, label: (Int) -> String, onPick: (Int) -> Unit) {
+fun TimeMenu(times: List<Long>, selected: Int, label: (Int) -> String, onPick: (Int) -> Unit, note: String? = null) {
     var open by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Time ▾") }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }, scrollState = scroll) {
+        note?.let { DropdownMenuItem(text = { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }, onClick = {}, enabled = false) }
         var lastDay = ""
         times.forEachIndexed { i, t ->
             val day = formatUtc(t).substringBeforeLast(' ')            // "Thu 15 Oct"

@@ -264,6 +264,15 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         load()
     }
 
+    /** How far the run on screen reaches (for the note on a product that stops sooner), when the run picker has not looked it up. */
+    fun loadLead(cycle: NbmCycle?) {
+        if (cycle == null || cycle.epoch in _state.value.leads) return
+        viewModelScope.launch {
+            val lead = try { repo.lastLead("temp", cycle) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            update { it.copy(leads = it.leads + (cycle.epoch to lead)) }
+        }
+    }
+
     /** Looks up how far each listed run reaches (one small request each, a few at a time), for the run picker's notes. */
     fun loadLeads() {
         viewModelScope.launch {

@@ -187,9 +187,15 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
             s.style?.let { Legend(it, emptyList()) }
             if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }
             if (s.frames.size > 1) {
+                // a product that stops before the run's full length (the 1 h thunderstorm chance ends at +36 h; the run reaches +260 h)
+                LaunchedEffect(s.cycle?.epoch) { vm.loadLead(s.cycle) }
+                val ends = s.frames.last().leadHours
+                val runEnds = s.cycle?.let { s.leads[it.epoch] }
+                val shortNote = if (runEnds != null && ends + 6 <= runEnds) "Ends at +$ends h; this run reaches +$runEnds h" else null
+                shortNote?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary) }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     NbmLoopMenu(s.loopSpanHours, s.frames, vm::setLoopSpan)
-                    TimeMenu(s.frames.map { it.valid }, s.index, { i -> nbmFrameLabel(s.frames[i]) }, vm::pickIndex)
+                    TimeMenu(s.frames.map { it.valid }, s.index, { i -> nbmFrameLabel(s.frames[i]) }, vm::pickIndex, note = shortNote)
                     CompactSlider(
                         value = s.index.toFloat(), onValueChange = { vm.pickIndex(it.toInt()) },
                         valueRange = 0f..(s.frames.size - 1).toFloat(), modifier = Modifier.weight(1f).padding(end = 8.dp),
