@@ -33,10 +33,10 @@ class VideoSizeTest {
         assertEquals(VideoSize.SMALL, VideoSize.byName("huge"))
     }
 
-    @Test fun heldStepsLengthenTheVideoAndItsSize() {
-        // the same picture for twice the steps: about twice the file (the held last frame is the same)
-        val one = VideoSize.estimateMegabytes(VideoSize.SMALL, 960, 560, 100, frameMillis = 150)
-        val two = VideoSize.estimateMegabytes(VideoSize.SMALL, 960, 560, 200, frameMillis = 150)
-        assertTrue(two > one * 1.8 && two < one * 2.0, "$one $two")
+    @Test fun costIsPerPictureWhateverTheFrameTime() {
+        // a loop encodes each picture once (held ones just last longer): 107 pictures cost about the same at any base step
+        val slow = VideoSize.estimateMegabytes(VideoSize.SMALL, 960, 560, 107, frameMillis = 250)
+        val fast = VideoSize.estimateMegabytes(VideoSize.SMALL, 960, 560, 107, frameMillis = 150)
+        assertTrue(kotlin.math.abs(slow - fast) < slow * 0.1, "$slow $fast")
     }
 }

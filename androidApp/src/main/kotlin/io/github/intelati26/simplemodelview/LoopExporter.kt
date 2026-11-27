@@ -11,7 +11,8 @@ import java.io.File
 
 /**
  * Encodes rendered pictures into an H.264 MP4 (what messaging apps play inline). Frames are drawn onto the encoder's input
- * surface; every frame is shown for [frameMillis], the last one [lastMillis] longer so a loop reads as a loop.
+ * surface, each once, and shown for [frameMillis] times its hold (a frame that stands for a longer time is not repeated: it is encoded once and given a
+ * longer time, so a file costs about the same for every picture); the last one stays [lastMillis] longer so a loop reads as a loop.
  */
 class LoopExporter(private val file: File, width: Int, height: Int, private val bitrate: Int, private val frameMillis: Int = 250, private val lastMillis: Int = 1200) {
     // encoders want dimensions that are multiples of 16; the picture is drawn at the top left on white
@@ -45,17 +46,21 @@ class LoopExporter(private val file: File, width: Int, height: Int, private val 
     }
 
     /**
-     * Adds one picture, shown for [hold] frame slots (a loop whose frames stand for different spans of time holds each for its span); the [last] one
-     * is posted several times so it stays on screen for [lastMillis] more.
+     * Adds one picture, shown for [hold] frame slots (a loop whose frames stand for different spans of time holds each for its span, without being
+     * encoded again); the [last] one is posted a second time to stay on screen for [lastMillis] more.
      */
     fun add(picture: Bitmap, last: Boolean, hold: Int = 1) {
-        repeat(maxOf(1, hold) + (if (last) lastMillis / frameMillis else 0)) {
-            val canvas: Canvas = surface.lockCanvas(null)
-            canvas.drawColor(Color.WHITE)
-            canvas.drawBitmap(picture, 0f, 0f, null)
-            surface.unlockCanvasAndPost(canvas)
-            drain(false)
-        }
+        post(picture, maxOf(1, hold) * frameMillis)
+        if (last) post(picture, lastMillis)
+    }
+
+    private fun post(picture: Bitmap, millis: Int) {
+        spans.addLast(millis * 1000L)
+        val canvas: Canvas = surface.lockCanvas(null)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawBitmap(picture, 0f, 0f, null)
+        surface.unlockCanvasAndPost(canvas)
+        drain(false)
     }
 
     fun finish() {
@@ -99,11 +104,12 @@ class LoopExporter(private val file: File, width: Int, height: Int, private val 
         }
     }
 
-    // frames come out in the order they were drawn: space them evenly (the last post of a held frame lands lastMillis later)
+    // frames come out in the order they were drawn: each one is shown for the time it was posted with
+    private val spans = ArrayDeque<Long>()
     private var clockUs = 0L
     private fun nextPts(): Long {
         val t = clockUs
-        clockUs += frameMillis * 1000L
+        clockUs += spans.removeFirstOrNull() ?: (frameMillis * 1000L)
         return t
     }
 }
