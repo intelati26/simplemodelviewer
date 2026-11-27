@@ -726,14 +726,18 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     fun estimateLoopMegabytes(area: ShareArea, size: VideoSize): Double {
         val grid = shown?.first?.grid ?: return 0.0
         val st = _state.value
-        val frames = loopWindowFor(st).count()
-        if (area == ShareArea.Globe) { val w = GLOBE_LOOP_SIDE; return VideoSize.estimateMegabytes(size, w, w + w / 6, frames) }
-        val box = areaView(area, grid)
-        return VideoSize.estimateMegabytes(size, box.pixelWidth, box.pixelHeight + box.pixelWidth / 6, frames)   // + header and legend
+        val window = loopWindowFor(st)
+        // each frame is held for the forecast hours it stands for (see buildLoopFile): the video runs that many base steps
+        val steps = window.sumOf { nbmStepHours(st.frames, it) }
+        val (w, h) = if (area == ShareArea.Globe) GLOBE_LOOP_SIDE to GLOBE_LOOP_SIDE else areaView(area, grid).let { it.pixelWidth to it.pixelHeight }
+        // (the encoder spent about 1.2 x the target on a measured 107-frame CONUS loop at the base step, more than the 0.9 of the evenly stepped loops)
+        return VideoSize.estimateMegabytes(size, w, h + w / 6, steps, frameMillis = LOOP_BASE_MILLIS.toInt(), spendFactor = NBM_SPEND)   // + header and legend
     }
 
     private companion object {
         /** The time a loop shows one forecast hour of frame spacing. */
         const val LOOP_BASE_MILLIS = 150L
+        /** How much of its target bitrate the encoder spends on an NBM loop (measured: 22.2 MB for the 107-frame CONUS loop at Small). */
+        const val NBM_SPEND = 1.2
     }
 }

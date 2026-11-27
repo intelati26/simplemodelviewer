@@ -24,11 +24,14 @@ enum class VideoSize(val label: String, val width: Int, val bitsPerPixel: Double
 
         fun byName(name: String?) = entries.firstOrNull { it.name == name } ?: SMALL
 
-        /** Estimated file size in megabytes for [frames] time steps of a [pixelWidth] x [pixelHeight] picture, 4 fps plus the held last frame. */
-        fun estimateMegabytes(size: VideoSize, pixelWidth: Int, pixelHeight: Int, frames: Int, frameMillis: Int = 250, holdMillis: Int = 1200): Double {
+        /**
+         * Estimated file size in megabytes for [frames] time steps (each [frameMillis] long: a frame held for several steps counts each) of a [pixelWidth] x [pixelHeight]
+         * picture, plus the held last frame. [spendFactor]: how much of the target bitrate the encoder uses for this kind of loop.
+         */
+        fun estimateMegabytes(size: VideoSize, pixelWidth: Int, pixelHeight: Int, frames: Int, frameMillis: Int = 250, holdMillis: Int = 1200, spendFactor: Double = UNDERSPEND): Double {
             val (w, h) = size.scaled(pixelWidth, pixelHeight)
             val seconds = (frames * frameMillis + holdMillis) / 1000.0
-            return size.bitrate(w, h, 1000 / frameMillis) * seconds / 8 / 1e6 * UNDERSPEND
+            return size.bitrate(w, h, 1000 / frameMillis) * seconds / 8 / 1e6 * spendFactor
         }
     }
 }

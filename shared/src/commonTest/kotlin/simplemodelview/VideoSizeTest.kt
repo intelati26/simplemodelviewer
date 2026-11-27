@@ -32,4 +32,11 @@ class VideoSizeTest {
         assertEquals(VideoSize.SMALL, VideoSize.byName(null))
         assertEquals(VideoSize.SMALL, VideoSize.byName("huge"))
     }
+
+    @Test fun heldStepsLengthenTheVideoAndItsSize() {
+        // the same picture for twice the steps: about twice the file (the held last frame is the same)
+        val one = VideoSize.estimateMegabytes(VideoSize.SMALL, 960, 560, 100, frameMillis = 150)
+        val two = VideoSize.estimateMegabytes(VideoSize.SMALL, 960, 560, 200, frameMillis = 150)
+        assertTrue(two > one * 1.8 && two < one * 2.0, "$one $two")
+    }
 }
