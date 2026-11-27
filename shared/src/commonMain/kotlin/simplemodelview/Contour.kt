@@ -37,24 +37,6 @@ data class ContourSpec(
         return abs(k - k.roundToInt()) < 1e-6
     }
 
-    /**
-     * What a tap reads about the lines: the nearest drawn level to [value], and about how far away that line is, from how fast the field changes
-     * ([gradientPerMeter], in shown units per meter). Null when the spec draws no lines.
-     */
-    fun nearestNote(value: Double, gradientPerMeter: Double, metric: Boolean): String? {
-        if (!(interval > 0) || value.isNaN()) return null
-        val level = (value / interval).roundToInt() * interval
-        val name = label(level)
-        val gap = abs(value - level)
-        if (gap < interval * 0.02) return "on the $name line"
-        if (!(gradientPerMeter > 1e-12)) return "nearest line $name"
-        val meters = gap / gradientPerMeter
-        val far = if (metric) meters / 1000.0 else meters / 1609.344
-        if (far > 2000) return "nearest line $name"
-        val text = if (far < 10) fixed(far, 1) else far.roundToInt().toString()
-        return "nearest line $name, ~$text ${if (metric) "km" else "mi"}"
-    }
-
     fun label(level: Double): String {
         val v = level / labelDivisor
         return (if (abs(v - v.roundToInt()) < 1e-6) v.roundToInt().toString() else ((v * 10).roundToInt() / 10.0).toString()) + labelSuffix
