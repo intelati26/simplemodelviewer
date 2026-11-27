@@ -1,5 +1,6 @@
 package io.github.intelati26.simplemodelview
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -32,6 +33,8 @@ private class StationsFound(val model: BufkitModel, val stations: List<BufkitSta
 @Composable
 internal fun SoundingStationsDialog(lat: Double, lon: Double, onDismiss: () -> Unit) {
     var found by remember(lat, lon) { mutableStateOf<List<StationsFound>?>(null) }
+    var open by remember { mutableStateOf<Pair<BufkitStation, BufkitModel>?>(null) }
+    open?.let { (station, model) -> SoundingScreen(station, model) { open = null } }
     LaunchedEffect(lat, lon) {
         found = BufkitModel.entries.map { StationsFound(it, try { AppContainer.bufkit.near(lat, lon, it) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }) }
     }
@@ -48,14 +51,14 @@ internal fun SoundingStationsDialog(lat: Double, lon: Double, onDismiss: () -> U
                     when {
                         r.stations == null -> Text("Could not look up stations (needs a U.S. point and the network).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         r.stations.isEmpty() -> Text("No station with a ${r.model.label} file near here.", style = MaterialTheme.typography.bodySmall)
-                        else -> for (s in r.stations) Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        else -> for (s in r.stations) Column(Modifier.fillMaxWidth().clickable { open = s to r.model }.padding(vertical = 5.dp)) {
                             Text("${s.id}  ·  ${if (s.km < 10) "%.1f".format(s.km) else "%.0f".format(s.km)} km", style = MaterialTheme.typography.bodyMedium)
                             Text(s.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     HorizontalDivider(Modifier.padding(top = 4.dp))
                 }
-                Text("Model soundings: Iowa State's BUFKIT feed. Stations are the airports' ASOS ids.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Tap a station for its sounding. Model profiles: Iowa State's BUFKIT feed; stations are the airports' ASOS ids.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
     )
