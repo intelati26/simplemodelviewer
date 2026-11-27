@@ -64,7 +64,8 @@ private val TEMP_RED = Color(0xFFD32F2F)
 private val DEW_GREEN = Color(0xFF2E7D32)
 private val WET_CYAN = Color(0xFF29B6F6)
 private val VIRTUAL_BLUE = Color(0xFF3949AB)
-private val ISOTHERM_ORANGE = Color(0xFFFF9800)
+private val ISOTHERM_ORANGE = Color(0xFFFFA54F)       // SPC's isotherms
+private val ADIABAT_PEACH = Color(0xFFFFE4C4)        // and its dry adiabats
 private val MIXING_GREEN = Color(0xFF43A047)
 private val HEIGHT_RED = Color(0xFFC62828)
 
@@ -199,6 +200,9 @@ private const val P_BOTTOM = 1050.0
 private const val T_LEFT = -40.0
 private const val T_RIGHT = 50.0
 
+/** How far an isotherm leans: pixels to the right per pixel up. Measured from SPC's sounding image (the isotherms there cross 100 px of height with 69.5 px of lean). */
+private const val SKEW = 0.695
+
 private fun stamp(valid: Long): String =
     java.text.SimpleDateFormat("yyMMdd/HHmm", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date(valid * 1000))
 
@@ -217,18 +221,29 @@ private fun SkewT(s: Sounding, elevationM: Double, analysis: SoundingMath.Analys
         val left = 34.dp.toPx(); val right = 90.dp.toPx(); val top = 6.dp.toPx(); val bottom = size.height - 6.dp.toPx()
         val pw = size.width - left - right; val ph = bottom - top
         fun y(p: Double) = (top + ph * (ln(p / P_TOP) / ln(P_BOTTOM / P_TOP))).toFloat()
-        fun x(t: Double, p: Double) = (left + pw * (t - T_LEFT) / (T_RIGHT - T_LEFT) + (bottom - y(p))).toFloat()
+        fun x(t: Double, p: Double) = (left + pw * (t - T_LEFT) / (T_RIGHT - T_LEFT) + SKEW * (bottom - y(p))).toFloat()
         val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); color = text.copy(alpha = 0.7f).hashCodeColor() }
         fun tag(color: Color) = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); this.color = color.hashCodeColor(); isFakeBoldText = true }
         val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
         clipRect(left, top, left + pw, bottom) {
-            // isotherms every 10 C, the -20 C one dashed blue
-            for (t in -120..50 step 10) {
-                val cold = t == -20
-                drawLine(if (cold) Color(0xFF1565C0) else ISOTHERM_ORANGE.copy(alpha = 0.4f), Offset(x(t.toDouble(), P_BOTTOM), y(P_BOTTOM)), Offset(x(t.toDouble(), P_TOP), y(P_TOP)), strokeWidth = if (cold) 1.2.dp.toPx() else 0.8.dp.toPx(), pathEffect = if (cold) dash else null)
+            // dry adiabats every 10 C of potential temperature, light, under the isotherms
+            for (theta in -30..200 step 10) {
+                val path = Path()
+                var first = true
+                var p = P_BOTTOM
+                while (p >= P_TOP) {
+                    val temp = (theta + 273.15) * (p / 1000.0).pow(0.2857) - 273.15
+                    val px = x(temp, p); val py = y(p)
+                    if (first) { path.moveTo(px, py); first = false } else path.lineTo(px, py)
+                    p -= 25.0
+                }
+                drawPath(path, ADIABAT_PEACH, style = Stroke(1.2.dp.toPx()))
             }
-            // the 0 C isotherm, heavier
-            drawLine(ISOTHERM_ORANGE.copy(alpha = 0.9f), Offset(x(0.0, P_BOTTOM), y(P_BOTTOM)), Offset(x(0.0, P_TOP), y(P_TOP)), strokeWidth = 1.4.dp.toPx())
+            // isotherms every 10 C: orange, the 0 and -20 C ones dashed blue
+            for (t in -120..50 step 10) {
+                val blue = t == 0 || t == -20
+                drawLine(if (blue) Color(0xFF1E40FF) else ISOTHERM_ORANGE, Offset(x(t.toDouble(), P_BOTTOM), y(P_BOTTOM)), Offset(x(t.toDouble(), P_TOP), y(P_TOP)), strokeWidth = 1.dp.toPx(), pathEffect = if (blue) dash else null)
+            }
             // mixing ratio lines (g/kg), in the lowest part
             for (w in listOf(2, 3, 5, 8, 12, 16, 20)) {
                 val path = Path(); var first = true
