@@ -131,8 +131,9 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     private val lines = AppContainer.lines
     private val renderer = MapRenderer(core, lines)
     private val globeRenderer = GlobeRenderer(core, lines)
-    private var globeW = 0
-    private var globeH = 0
+    private val globe = GlobeDriver(viewModelScope, { renderGlobeNow(it) }) { turn -> update { it.copy(cam = turn(it.cam)) } }
+    private val globeW get() = globe.w
+    private val globeH get() = globe.h
 
     private var store: CycleStore? = null
     private var values: FloatArray? = null
@@ -510,23 +511,9 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     fun focusApplied() = update { it.copy(focus = null) }
 
     /** The globe's drawing area in pixels; the first call also fits the globe to the screen. */
-    fun setGlobeSize(w: Int, h: Int) {
-        if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
-        val first = globeW == 0
-        globeW = w; globeH = h
-        if (first) update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h))) }   // the whole globe fits the screen, or the map's view fills it
-        handoff.enter = null
-        if (_state.value.globe && values != null) requestGlobe(coarse = false)
-    }
+    fun setGlobeSize(w: Int, h: Int) = globe.setSize(w, h, onFirst = { w, h -> update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h))) } }, after = { handoff.enter = null }, ready = { _state.value.globe && values != null })
 
-    /** Drag ([dx], [dy] pixels) and pinch ([zoom] factor) on the globe: a coarse picture at once, the full one when the fingers rest. */
-    fun globeGesture(dx: Float, dy: Float, zoom: Float) {
-        val minR = 0.3 * minOf(globeW, globeH)
-        update { it.copy(cam = it.cam.dragged(dx.toDouble(), dy.toDouble()).zoomed(zoom.toDouble(), minR, minR * 60)) }
-        requestGlobe(coarse = true)
-        settleJob?.cancel()
-        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
-    }
+    fun globeGesture(dx: Float, dy: Float, zoom: Float) = globe.gesture(dx, dy, zoom)
 
     fun onGlobeTap(px: Float, py: Float) {
         val product = _state.value.product ?: return
@@ -545,26 +532,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(readout = readout(core, product, data, it.members, column, row), tapLatLon = ll[0] to ll[1]) }
     }
 
-    private var settleJob: Job? = null
-    private var globeBusy = false
-    private var globeDirty = false
-    private var globeCoarse = false
-
-    /** One render at a time; while one runs, further requests collapse into a single follow-up with the newest camera. */
-    private fun requestGlobe(coarse: Boolean) {
-        globeDirty = true
-        globeCoarse = coarse
-        if (globeBusy) return
-        globeBusy = true
-        viewModelScope.launch {
-            try {
-                while (globeDirty) {
-                    globeDirty = false
-                    renderGlobeNow(if (globeCoarse) 4 else 1)
-                }
-            } finally { globeBusy = false }
-        }
-    }
+    private fun requestGlobe(coarse: Boolean) = globe.request(coarse)
 
     private suspend fun renderGlobeNow(stride: Int) {
         val product = _state.value.product ?: return

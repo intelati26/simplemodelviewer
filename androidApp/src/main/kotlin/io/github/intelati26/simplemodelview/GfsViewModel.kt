@@ -115,8 +115,9 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     private var shown: Triple<Product, FloatArray, View>? = null
     private var globeShown: Pair<Product, FloatArray>? = null           // what the globe shows: the product and its values on GFS's own grid
     private val globeRenderer = GlobeRenderer(core, AppContainer.lines)
-    private var globeW = 0
-    private var globeH = 0
+    private val globe = GlobeDriver(viewModelScope, { renderGlobeNow(it) }) { turn -> update { it.copy(cam = turn(it.cam)) } }
+    private val globeW get() = globe.w
+    private val globeH get() = globe.h
     // whole-globe frames are big (4 or 8 planes of a million cells): only a few are kept
     private val globalComputed = object : LinkedHashMap<String, GfsGlobal>(4, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, GfsGlobal>?) = size > 4
@@ -535,48 +536,14 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun polarGesture(dx: Float, dy: Float, zoom: Float, cx: Float, cy: Float) {
         val minR = 0.3 * minOf(globeW, globeH)
         update { st -> st.polar?.let { st.copy(polar = it.turned(dx.toDouble(), dy.toDouble(), cx.toDouble(), cy.toDouble(), globeW, globeH).zoomed(zoom.toDouble(), minR, minR * 30)) } ?: st }
-        requestGlobe(coarse = true)
-        settleJob?.cancel()
-        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
+        globe.settle()
     }
 
-    fun setGlobeSize(w: Int, h: Int) {
-        if (w <= 0 || h <= 0 || (w == globeW && h == globeH)) return
-        val first = globeW == 0
-        globeW = w; globeH = h
-        if (first) update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h)), polar = it.polar?.copy(radius = 0.48 * minOf(w, h))) }
-        handoff.enter = null
-        if (_state.value.globe && globeShown != null) requestGlobe(coarse = false)
-    }
+    fun setGlobeSize(w: Int, h: Int) = globe.setSize(w, h, onFirst = { w, h -> update { it.copy(cam = handoff.enter?.let { b -> handoff.fit(b, w, h) } ?: it.cam.copy(radius = 0.49 * minOf(w, h)), polar = it.polar?.copy(radius = 0.48 * minOf(w, h))) } }, after = { handoff.enter = null }, ready = { _state.value.globe && globeShown != null })
 
-    private var settleJob: Job? = null
-    private var globeBusy = false
-    private var globeDirty = false
-    private var globeCoarse = false
+    fun globeGesture(dx: Float, dy: Float, zoom: Float) = globe.gesture(dx, dy, zoom)
 
-    fun globeGesture(dx: Float, dy: Float, zoom: Float) {
-        val minR = 0.3 * minOf(globeW, globeH)
-        update { it.copy(cam = it.cam.dragged(dx.toDouble(), dy.toDouble()).zoomed(zoom.toDouble(), minR, minR * 60)) }
-        requestGlobe(coarse = true)
-        settleJob?.cancel()
-        settleJob = viewModelScope.launch { delay(180); requestGlobe(coarse = false) }
-    }
-
-    /** One render at a time; while one runs, further requests collapse into a single follow-up with the newest camera. */
-    private fun requestGlobe(coarse: Boolean) {
-        globeDirty = true
-        globeCoarse = coarse
-        if (globeBusy) return
-        globeBusy = true
-        viewModelScope.launch {
-            try {
-                while (globeDirty) {
-                    globeDirty = false
-                    renderGlobeNow(if (globeCoarse) 4 else 1)
-                }
-            } finally { globeBusy = false }
-        }
-    }
+    private fun requestGlobe(coarse: Boolean) = globe.request(coarse)
 
     /** A place on the globe or polar map as the page has it now (null where it is not shown). */
     private fun globeProjection(st: GfsState, width: Int, height: Int): PlaceProjection =
