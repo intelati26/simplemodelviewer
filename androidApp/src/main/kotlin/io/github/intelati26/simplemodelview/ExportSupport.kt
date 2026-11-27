@@ -3,7 +3,12 @@ package io.github.intelati26.simplemodelview
 import simplemodelview.Core
 import simplemodelview.Grid
 import simplemodelview.View
+import android.content.ContentResolver
 import android.graphics.Bitmap
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import simplemodelview.SettingsBackup
 import java.io.File
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -40,3 +45,19 @@ internal fun exportScale(cols: Int, rows: Int, maxPerCell: Int = 6): Int {
 
 /** Writes the picture as a PNG to [file] and returns the file. */
 internal fun Bitmap.savePng(file: File): File = file.also { f -> f.outputStream().use { compress(Bitmap.CompressFormat.PNG, 100, it) } }
+
+/** The visible part of a picture as fractions (left, top, right, bottom), kept inside the picture. */
+internal fun clampedViewport(left: Float, top: Float, right: Float, bottom: Float) =
+    floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+
+/** Writes the settings backup as JSON to the file the user chose; false when it could not be written. */
+internal suspend fun writeSettingsFile(resolver: ContentResolver, uri: Uri, backup: SettingsBackup): Boolean {
+    val text = SettingsBackup.encode(backup)
+    return withContext(Dispatchers.IO) { try { resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) } != null } catch (e: Exception) { false } }
+}
+
+/** Reads a settings backup the user chose (null when the file is not one). */
+internal suspend fun readSettingsFile(resolver: ContentResolver, uri: Uri): SettingsBackup? {
+    val text = withContext(Dispatchers.IO) { try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null } }
+    return text?.let { SettingsBackup.decode(it) }
+}

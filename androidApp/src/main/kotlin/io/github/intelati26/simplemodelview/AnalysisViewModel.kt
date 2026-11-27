@@ -396,7 +396,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
-        viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        viewport = clampedViewport(left, top, right, bottom)
         scheduleDetail()
     }
 

@@ -472,7 +472,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setViewport(left: Float, top: Float, right: Float, bottom: Float) {
-        viewport = floatArrayOf(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+        viewport = clampedViewport(left, top, right, bottom)
         scheduleDetail()
     }
 
@@ -557,20 +557,14 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
-        val text = SettingsBackup.encode(backup())
-        val ok = withContext(Dispatchers.IO) {
-            try { resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) } != null } catch (e: Exception) { false }
-        }
+        val ok = writeSettingsFile(resolver, uri, backup())
         update { it.copy(notice = if (ok) "Settings exported: ${backup().favorites.size} favorites, ${backup().places.size} places." else "Could not write the settings file.") }
     }
 
     /** True when display or source choices were imported: the app restarts to take them up. */
     suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
         RainHistory.importIfArchive(resolver, uri)?.let { note -> update { it.copy(notice = note) }; return false }      // (a rain history file from the export: no restart)
-        val text = withContext(Dispatchers.IO) {
-            try { resolver.openInputStream(uri)?.use { it.readBytes().take(1_000_000).toByteArray().decodeToString() } } catch (e: Exception) { null }
-        }
-        val b = text?.let { SettingsBackup.decode(it) }
+        val b = readSettingsFile(resolver, uri)
         if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
         val current = _state.value.settings
         setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
