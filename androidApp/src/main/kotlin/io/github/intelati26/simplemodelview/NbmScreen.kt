@@ -88,7 +88,6 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
-    var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var restartAsk by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
@@ -255,33 +254,18 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                         val file = vm.buildShareFile(area, size) ?: return@launch
                         shareFile(context, file, "image/png", "Share map")
                     } else {
-                        loopProgress = 0 to s.frames.size
-                        val file = vm.buildLoopFile(area, size) { done, total -> loopProgress = done to total }
-                        loopProgress = null
-                        if (file != null) shareFile(context, file, "video/mp4", "Share loop")
-                    }
+                    // made in the background (the Renders list and a notification show how far it is): the share sheet opens when it is done
+                    AppContainer.renders.enqueue("NBM loop · ${s.product.title}") { progress -> vm.buildLoopFile(area, size, progress) }
+                    vm.reportNotice("Making the loop video in the background. Renders (in Share) shows how far it is.")
+                }
                 } catch (e: Exception) {
-                    loopProgress = null
                     vm.reportNotice("Could not make the ${if (loop) "video" else "picture"}: ${e.message}")
                 }
             }
         },
         disclaimer = NBM_DISCLAIMER,
     )
-    loopProgress?.let { (done, total) ->
-        AlertDialog(
-            onDismissRequest = {},
-            confirmButton = {},
-            title = { Text("Making the loop video") },
-            text = {
-                Column {
-                    Text("Frame $done of $total")
-                    LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                }
-            },
-        )
-    }
-    if (about) AlertDialog(
+        if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
         title = { Text("About the Blend page") },

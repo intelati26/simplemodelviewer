@@ -107,9 +107,22 @@ class MainActivity : ComponentActivity() {
     private val outlookViewModel: OutlookBrowserViewModel by viewModels()
     private val todayViewModel: TodayViewModel by viewModels()
 
+    private val notifyPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    override fun onStart() { super.onStart(); AppContainer.renders.appVisible = true }
+    override fun onStop() { AppContainer.renders.appVisible = false; super.onStop() }
+
+    /** The tap on a "ready to share" notification: offer that render. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getLongExtra(RenderService.EXTRA_RENDER, -1L).takeIf { it >= 0 }?.let { AppContainer.renders.offer.value = it }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        intent?.getLongExtra(RenderService.EXTRA_RENDER, -1L)?.takeIf { it >= 0 }?.let { AppContainer.renders.offer.value = it }
         // which page opens: an intent extra (`--es page mrms`, used by the emulator scripts), else Today
         val start = intent?.getStringExtra("page") ?: "today"
         setContent {
@@ -117,6 +130,23 @@ class MainActivity : ComponentActivity() {
             var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf("today", "spc", "mrms", "nbm", "gfs", "point", "analysis", "compare", "outlook").firstOrNull { it == start && (AppMode.offers(it) || intent?.hasExtra("page") == true) } ?: "today") }
             fun open(p: String) { AppContainer.prefs.edit().putString("page", p).apply(); page = p }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+                // a render that finished (or whose notification was tapped): the system share sheet for it
+                val offered by AppContainer.renders.offer.collectAsStateWithLifecycle()
+                val renderContext = LocalContext.current
+                LaunchedEffect(offered) {
+                    val id = offered ?: return@LaunchedEffect
+                    AppContainer.renders.offer.value = null
+                    AppContainer.renders.get(id)?.let { j -> j.file?.takeIf { it.exists() }?.let { shareFile(renderContext, it, j.mime, "Share") } }
+                }
+                // notifications for the progress of a render: asked for once, when the first one is queued
+                val renderJobs by AppContainer.renders.jobs.collectAsStateWithLifecycle()
+                LaunchedEffect(renderJobs.isNotEmpty()) {
+                    if (renderJobs.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= 33 && !AppContainer.prefs.getBoolean("asked_notifications", false) &&
+                        androidx.core.content.ContextCompat.checkSelfPermission(renderContext, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        AppContainer.prefs.edit().putBoolean("asked_notifications", true).apply()
+                        notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
                 // in landscape the navigation bar and the camera cutout sit at the sides: keep the pages clear of them (top and bottom are padded by each page)
                 Surface(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)), color = MaterialTheme.colorScheme.background) {
                     // each page's view model is created only when the page is first opened
@@ -159,7 +189,6 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     var soundingStations by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
-    var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sharing by remember { mutableStateOf(false) }
     val outlookState by AppContainer.outlook.state.collectAsStateWithLifecycle()
     var outlookDialog by remember { mutableStateOf(false) }
@@ -321,33 +350,14 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                     val file = vm.buildShareFile(area, size) ?: return@launch
                     shareFile(context, file, "image/png", "Share map")
                 } else {
-                    loopProgress = 0 to s.times.size
-                    try {
-                        val file = vm.buildLoopFile(area, size) { done, total -> loopProgress = done to total }
-                        loopProgress = null
-                        if (file != null) shareFile(context, file, "video/mp4", "Share loop")
-                    } catch (e: Exception) {
-                        loopProgress = null
-                        vm.reportNotice("Could not make the video: ${e.message}")
-                    }
+                    // made in the background (the Renders list and a notification show how far it is): the share sheet opens when it is done
+                    AppContainer.renders.enqueue("REFS loop · ${s.product?.title.orEmpty()}") { progress -> vm.buildLoopFile(area, size, progress) }
+                    vm.reportNotice("Making the loop video in the background. Renders (in Share) shows how far it is.")
                 }
             }
         },
     )
-    loopProgress?.let { (done, total) ->
-        AlertDialog(
-            onDismissRequest = {},
-            confirmButton = {},
-            title = { Text("Making the loop video") },
-            text = {
-                Column {
-                    Text("Frame $done of $total")
-                    LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                }
-            },
-        )
-    }
-    if (about) AlertDialog(
+        if (about) AlertDialog(
         onDismissRequest = { about = false },
         confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } },
         title = { Text("About simplemodelview") },
@@ -835,6 +845,9 @@ internal fun ShareDialog(
 ) {
     var area by remember { mutableStateOf<ShareArea>(if (globe) ShareArea.Globe else ShareArea.Screen) }
     var size by remember { mutableStateOf(initialSize) }
+    var renders by remember { mutableStateOf(false) }
+    val jobs by AppContainer.renders.jobs.collectAsStateWithLifecycle()
+    if (renders) RendersDialog { renders = false }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Share") },
@@ -874,7 +887,12 @@ internal fun ShareDialog(
                 if (canLoop) TextButton(onClick = { onShare(area, true, size) }) { Text("Loop video") }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                if (jobs.isNotEmpty()) TextButton(onClick = { renders = true }) { Text("Renders (${jobs.size})") }
+            }
+        },
     )
 }
 

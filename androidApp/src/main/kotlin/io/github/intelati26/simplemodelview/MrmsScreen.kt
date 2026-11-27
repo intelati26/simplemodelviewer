@@ -94,7 +94,6 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     val probSevereState by AppContainer.probSevere.state.collectAsStateWithLifecycle()
     if (probSevereLink) ProbSevereLinkDialog(AppContainer.probSevere.url, onSave = { AppContainer.probSevere.setUrl(it) }, onDismiss = { probSevereLink = false })
     if (lightningLink) LightningLinkDialog(AppContainer.lightning.url, onSave = { AppContainer.lightning.setUrl(it) }, onDismiss = { lightningLink = false })
-    var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var restartAsk by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
@@ -266,33 +265,18 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                         val file = vm.buildShareFile(area, size) ?: return@launch
                         shareFile(context, file, "image/png", "Share map")
                     } else {
-                        loopProgress = 0 to s.files.size
-                        val file = vm.buildLoopFile(area, size) { done, total -> loopProgress = done to total }
-                        loopProgress = null
-                        if (file != null) shareFile(context, file, "video/mp4", "Share loop")
-                    }
+                    // made in the background (the Renders list and a notification show how far it is): the share sheet opens when it is done
+                    AppContainer.renders.enqueue("MRMS loop · ${vm.activeTitle(s)}") { progress -> vm.buildLoopFile(area, size, progress) }
+                    vm.reportNotice("Making the loop video in the background. Renders (in Share) shows how far it is.")
+                }
                 } catch (e: Exception) {
-                    loopProgress = null
                     vm.reportNotice("Could not make the ${if (loop) "video" else "picture"}: ${e.message}")
                 }
             }
         },
         disclaimer = MRMS_DISCLAIMER,
     )
-    loopProgress?.let { (done, total) ->
-        AlertDialog(
-            onDismissRequest = {},
-            confirmButton = {},
-            title = { Text("Making the loop video") },
-            text = {
-                Column {
-                    Text("Frame $done of $total")
-                    LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                }
-            },
-        )
-    }
-    s.station?.let { StationDialog(it, s.units.celsius, onDismiss = vm::closeStation) }
+        s.station?.let { StationDialog(it, s.units.celsius, onDismiss = vm::closeStation) }
     if (pickRain) {
         val now = System.currentTimeMillis()
         val state = androidx.compose.material3.rememberDatePickerState(

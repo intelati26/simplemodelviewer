@@ -47,6 +47,8 @@ object AppContainer {
     val loopFromShown by lazy { kotlinx.coroutines.flow.MutableStateFlow(prefs.getBoolean("loop_from_shown", false)) }
     fun setLoopFromShown(on: Boolean) { prefs.edit().putBoolean("loop_from_shown", on).apply(); loopFromShown.value = on }
     val core by lazy { NativeCore() }
+    /** The loop videos being made in the background (see [RenderManager]). */
+    val renders by lazy { RenderManager(app) }
     val lines by lazy { MapLines(app, core) }
     val places by lazy { PlacesStore(prefs) }
     val placeSearch by lazy { simplemodelview.PlaceSearch(SearchHttp()) }
