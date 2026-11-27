@@ -38,6 +38,7 @@ import simplemodelview.SettingsBackup
 import simplemodelview.Style
 import simplemodelview.Units
 import simplemodelview.styleIn
+import simplemodelview.ContourSpec
 import simplemodelview.VideoSize
 import simplemodelview.View
 import simplemodelview.decodePlaces
@@ -686,7 +687,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         nearestFile(_state.value.overlayFiles[layer.product.directory].orEmpty(), base.validTime, overlayToleranceSeconds(layer.product))
 
     /** A layer of the shown picture for the read-out: its values are not kept (they are as big as the picture), [values] gets them again when a tap needs them. */
-    private class ShownOverlay(val name: String, val product: Product, val values: suspend () -> FloatArray)
+    private class ShownOverlay(val name: String, val product: Product, val lines: ContourSpec? = null, val values: suspend () -> FloatArray)
     private class OverlayResult(val layer: Overlay, val shown: ShownOverlay, val info: String)
     private var shownOverlays: List<ShownOverlay> = emptyList()
     private var globeLayers: List<GlobeOverlay> = emptyList()           // the overlays as the globe draws them
@@ -994,15 +995,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         FieldLines(td, t.grid, tempStyle(), Underlay.dewpointSpec(_state.value.units.celsius), "td|${t.pick.url}|${t.grid.id}", dst)
 
     private fun tempShown(t: UnderTemp) =
-        ShownOverlay("T", Product("surface_t", "Surface temperature", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { t.values }
+        ShownOverlay("T", Product("surface_t", "Surface temperature", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid), Underlay.temperatureSpec(_state.value.units.celsius)) { t.values }
 
     private fun dewShown(t: UnderTemp, td: FloatArray) =
-        ShownOverlay("Td", Product("surface_td", "Surface dewpoint", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { td }
+        ShownOverlay("Td", Product("surface_td", "Surface dewpoint", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid), Underlay.dewpointSpec(_state.value.units.celsius)) { td }
 
     private fun humidityStyle() = Style(units = "%", digits = 0)
 
     private fun rhShown(t: UnderTemp, rh: FloatArray) =
-        ShownOverlay("RH", Product("surface_rh", "Surface relative humidity", MrmsCatalog.MODEL, humidityStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { rh }
+        ShownOverlay("RH", Product("surface_rh", "Surface relative humidity", MrmsCatalog.MODEL, humidityStyle(), hasMembers = false, timeDimension = null, grid = t.grid), Underlay.humiditySpec()) { rh }
 
     /**
      * The surface line layers that are on, drawn over [dst] (null: the globe): the temperature (the file's own field), the dewpoint, and the relative humidity worked out from
@@ -1288,11 +1289,32 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 val values = try { layer.values() } catch (e: CancellationException) { throw e } catch (_: Exception) { continue } catch (_: OutOfMemoryError) { continue }
                 val op = layer.product
                 val c = core.latLonToGrid(op.grid, lat, lon)
-                val v = shownValue(op.style, values, Math.round(c[0]).toInt(), Math.round(c[1]).toInt(), op.grid)
+                val col = Math.round(c[0]).toInt(); val row = Math.round(c[1]).toInt()
+                val v = shownValue(op.style, values, col, row, op.grid)
                 more += "   \u00B7 ${layer.name}: " + if (v.isNaN()) "none" else fixed(v, op.style.digits) + (if (op.style.units.isEmpty()) "" else " " + op.style.units)
+                // a layer drawn as lines: which line is nearest and about how far (from how fast the field changes here)
+                val note = layer.lines?.takeIf { !v.isNaN() }?.nearestNote(v, gradientPerMeter(op, values, col, row), _state.value.units.metricLength)
+                if (note != null) more += " ($note)"
                 if (_state.value.tapLatLon == lat to lon) update { it.copy(readout = more) }
             }
         }
+    }
+
+    /** How fast a field changes at a cell, in shown units per meter (the steeper of its two neighbors' slopes, from their real spacing). */
+    private fun gradientPerMeter(op: Product, values: FloatArray, col: Int, row: Int): Double {
+        val g = op.grid
+        fun at(c: Int, r: Int) = shownValue(op.style, values, c, r, g)
+        fun meters(c0: Int, r0: Int, c1: Int, r1: Int): Double {
+            val (la0, lo0) = core.gridToLatLon(g, c0.toDouble(), r0.toDouble())
+            val (la1, lo1) = core.gridToLatLon(g, c1.toDouble(), r1.toDouble())
+            val dy = Math.toRadians(la1 - la0) * 6_371_000.0
+            val dx = Math.toRadians(lo1 - lo0) * Math.cos(Math.toRadians((la0 + la1) / 2)) * 6_371_000.0
+            return Math.hypot(dx, dy)
+        }
+        val e = at(col + 1, row); val w = at(col - 1, row); val n = at(col, row + 1); val s = at(col, row - 1)
+        val gx = if (e.isNaN() || w.isNaN()) 0.0 else (e - w) / meters(col - 1, row, col + 1, row).coerceAtLeast(1.0)
+        val gy = if (n.isNaN() || s.isNaN()) 0.0 else (n - s) / meters(col, row - 1, col, row + 1).coerceAtLeast(1.0)
+        return Math.hypot(gx, gy)
     }
 
     fun onGlobeTap(px: Float, py: Float) {
