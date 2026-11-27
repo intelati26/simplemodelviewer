@@ -490,19 +490,14 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     /** Turns the globe view on or off (a sector choice turns it off). */
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on) return
-        val enterBox = if (on) handoff.boxOf(view, viewport) else null
-        if (on) handoff.cancelLeave()
-        handoff.enter = if (globeW == 0) enterBox else null
-        update { it.copy(globe = on, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
+        val cam = handoff.switching(on, view, viewport, globeW, globeH)
+        update { it.copy(globe = on, cam = cam ?: it.cam, crosshair = null, readout = null, tapLatLon = null) }
         if (values != null) viewModelScope.launch { rerender() }
     }
 
     /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
     fun showMapHere() {
-        val cam = _state.value.cam
-        if (globeW == 0) return
-        handoff.leaveFrom(cam, globeW, globeH)
-        val sector = simplemodelview.sectorForGlobe(cam, globeW, globeH)
+        val sector = handoff.leaving(_state.value.cam, globeW, globeH) ?: return
         prefs.edit().putString("sector", sector.name).apply()
         update { it.copy(sector = sector, globe = false, crosshair = null, readout = null, tapLatLon = null) }
         viewModelScope.launch { rerender() }
@@ -615,10 +610,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     fun readAt(lat: Double, lon: Double): String {
         val product = _state.value.product ?: return "Nothing is shown yet"
         val data = values ?: return "Nothing is shown yet"
-        val grid = product.grid
-        val (c, r) = core.latLonToGrid(grid, lat, lon)
-        val column = Math.round(c).toInt(); val row = Math.round(r).toInt()
-        return if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the REFS area" else readout(core, product, data, _state.value.members, column, row)
+        return readAtPlace(core, product, data, _state.value.members, lat, lon, outside = "outside the REFS area")
     }
 
 

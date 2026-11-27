@@ -499,20 +499,13 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on && _state.value.polar == null) return
         stopPlaying()
-        val enterBox = if (on && !_state.value.globe) handoff.boxOf(shown?.third, viewport) else null
-        if (on) handoff.cancelLeave()
-        handoff.enter = if (globeW == 0) enterBox else null
-        update { it.copy(globe = on, polar = null, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
+        val cam = handoff.switching(on && !_state.value.globe, shown?.third, viewport, globeW, globeH)
+        update { it.copy(globe = on, polar = null, cam = cam ?: it.cam, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
 
     /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
-    fun showMapHere() {
-        val cam = _state.value.cam
-        if (globeW == 0) return
-        handoff.leaveFrom(cam, globeW, globeH)
-        pickSector(simplemodelview.sectorForGlobe(cam, globeW, globeH, GFS_SECTORS))
-    }
+    fun showMapHere() { handoff.leaving(_state.value.cam, globeW, globeH, GFS_SECTORS)?.let { pickSector(it) } }
 
     fun focusApplied() = update { it.copy(focus = null) }
 
@@ -683,11 +676,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun readAt(lat: Double, lon: Double): String {
         val st = _state.value
         val (product, values) = (if (st.globe) globeShown else shown?.let { it.first to it.second }) ?: return "Nothing is shown yet"
-        val grid = product.grid
-        val (c, r) = core.latLonToGrid(grid, lat, lon)
-        val column = Math.round(c).toInt(); val row = Math.round(r).toInt()
-        if (column !in 0 until grid.columns || row !in 0 until grid.rows) return "${simplemodelview.placeLabel(lat, lon)}   outside the area shown"
-        return readout(core, product, values, emptyList(), column, row, trueFrameWinds = true) +
+        return readAtPlace(core, product, values, emptyList(), lat, lon, trueFrameWinds = true) +
             (outlook.readoutAt(lat, lon, st.file?.valid, st.file?.run)?.let { t -> "   \u00B7 $t" } ?: "")
     }
 

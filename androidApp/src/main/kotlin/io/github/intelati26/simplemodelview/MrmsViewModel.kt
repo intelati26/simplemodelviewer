@@ -1388,20 +1388,13 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun setGlobe(on: Boolean) {
         if (_state.value.globe == on) return
         stopPlaying()
-        val enterBox = if (on) handoff.boxOf(view, viewport) else null
-        if (on) handoff.cancelLeave()
-        handoff.enter = if (globeW == 0) enterBox else null
-        update { it.copy(globe = on, cam = if (enterBox != null && globeW > 0) handoff.fit(enterBox, globeW, globeH) else it.cam, crosshair = null, readout = null, tapLatLon = null) }
+        val cam = handoff.switching(on, view, viewport, globeW, globeH)
+        update { it.copy(globe = on, cam = cam ?: it.cam, crosshair = null, readout = null, tapLatLon = null) }
         showFrame()
     }
 
     /** Back to the flat map from the globe: the sector that holds what the globe shows, zoomed to it. */
-    fun showMapHere() {
-        val cam = _state.value.cam
-        if (globeW == 0) return
-        handoff.leaveFrom(cam, globeW, globeH)
-        pickSector(simplemodelview.sectorForGlobe(cam, globeW, globeH))
-    }
+    fun showMapHere() { handoff.leaving(_state.value.cam, globeW, globeH)?.let { pickSector(it) } }
 
     fun focusApplied() = update { it.copy(focus = null) }
 
@@ -1431,37 +1424,19 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
         val (product, values) = shown ?: return "Nothing is shown yet"
-        val grid = product.grid
-        val (c, r) = core.latLonToGrid(grid, lat, lon)
-        val column = Math.round(c).toInt(); val row = Math.round(r).toInt()
-        var text = if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the area shown" else readout(core, product, values, emptyList(), column, row)
-        outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { text += "   \u00B7 $it" }
-        return text
+        return readAtPlace(core, product, values, emptyList(), lat, lon) +
+            (outlook.readoutAt(lat, lon, _state.value.file?.validTime)?.let { "   \u00B7 $it" } ?: "")
     }
 
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
     /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
-    fun goToPlace(place: Place, follow: Boolean = false) {
-        val st = _state.value
-        if (st.globe) {
-            update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }
-            requestGlobe(coarse = false)
-            return
-        }
-        val box = st.sector
-        val inSector = place.lon in box.west..box.east && place.lat in box.south..box.north
-        if (follow && !inSector) return
-        viewModelScope.launch {
-            if (!inSector && st.sector.name != "CONUS") {
-                update { it.copy(sector = Sector.all[0]) }
-                try { showCurrent() } catch (e: CancellationException) { throw e } catch (e: Exception) { update { it.copy(busy = false, error = e.message) }; return@launch }
-            }
-            val v = view ?: return@launch
-            val (c, r) = core.latLonToGrid(v.grid, place.lat, place.lon)
-            onTap(((c + 0.5) / v.cols).toFloat(), ((v.rows - r - 0.5) / v.rows).toFloat())
-        }
-    }
+    fun goToPlace(place: Place, follow: Boolean = false) = viewModelScope.goToPlaceOnPage(
+        core, place, follow, _state.value.globe, _state.value.sector, Sector.all[0],
+        turnGlobeTo = { update { it.copy(cam = it.cam.copy(lat = place.lat, lon = place.lon), tapLatLon = place.lat to place.lon) }; requestGlobe(coarse = false) },
+        openSector = { update { it.copy(sector = Sector.all[0]) }; try { showCurrent() } catch (e: Exception) { if (e is CancellationException) throw e; update { it.copy(busy = false, error = e.message) }; throw e } },
+        view = { view }, tap = ::onTap,
+    )
 
     // ---- settings ----
     fun setSettings(settings: Settings) {
