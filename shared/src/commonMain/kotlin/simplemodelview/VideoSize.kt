@@ -6,9 +6,9 @@ package simplemodelview
  * the bits allowed per pixel (see docs/loop-video-size.md). [bitsPerPixel] is per pixel per frame at 4 frames a second.
  */
 enum class VideoSize(val label: String, val width: Int, val bitsPerPixel: Double) {
-    SMALL("Small", 800, 0.80),
-    MEDIUM("Medium", 960, 0.90),
-    LARGE("Large", 1280, 1.00);
+    SMALL("Small", 960, 0.90),
+    MEDIUM("Medium", 1280, 1.00),
+    LARGE("Large", 1600, 1.00);
 
     /** Target bitrate in bits per second for a picture of [pixelWidth] x [pixelHeight] (already scaled to this size). */
     fun bitrate(pixelWidth: Int, pixelHeight: Int, framesPerSecond: Int): Int =
@@ -22,7 +22,7 @@ enum class VideoSize(val label: String, val width: Int, val bitsPerPixel: Double
         /** The encoder (variable bitrate) spends about 90% of its target on this kind of picture (measured: 2.83 of 3.1 MB, 4.55 of 5.1 MB). */
         private const val UNDERSPEND = 0.9
 
-        fun byName(name: String?) = entries.firstOrNull { it.name == name } ?: MEDIUM
+        fun byName(name: String?) = entries.firstOrNull { it.name == name } ?: SMALL
 
         /** Estimated file size in megabytes for [frames] time steps of a [pixelWidth] x [pixelHeight] picture, 4 fps plus the held last frame. */
         fun estimateMegabytes(size: VideoSize, pixelWidth: Int, pixelHeight: Int, frames: Int, frameMillis: Int = 250, holdMillis: Int = 1200): Double {
