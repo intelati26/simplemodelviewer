@@ -32,6 +32,9 @@ object SoundingMath {
 
     private fun virtualK(tC: Double, w: Double) = (tC + 273.15) * (1.0 + w / EPS) / (1.0 + w)
 
+    /** The virtual temperature (C) of air at [pMb] with temperature [tC] and dewpoint [tdC]: what dry air would need to be, at that pressure, to have the same density. */
+    fun virtualTemperatureC(pMb: Double, tC: Double, tdC: Double) = virtualK(tC, mixingRatio(pMb, min(tdC, tC))) - 273.15
+
     /** Dewpoint (C) of air at [pMb] with mixing ratio [w]. */
     fun dewpointFromMixing(pMb: Double, w: Double): Double {
         val e = w * pMb / (EPS + w)
@@ -112,7 +115,7 @@ object SoundingMath {
     class Parcel(val name: String, val startP: Double, val trace: List<Pair<Double, Double>>, val lclZ: Double?, val lfcZ: Double?, val elZ: Double?, val cape: Double, val cin: Double, val li: Double?)
 
     /** Lifts the parcel ([p0], [t0], [td0]) through [pr]: dry to its LCL, then along the pseudo-adiabat; buoyancy against the virtual temperature of the environment. */
-    fun lift(pr: Profile, name: String, p0: Double, t0: Double, td0: Double): Parcel {
+    fun lift(pr: Profile, name: String, p0: Double, t0: Double, td0: Double, virtual: Boolean = true): Parcel {
         val tdc = min(td0, t0)
         val w0 = mixingRatio(p0, tdc)
         val tl = lclTemperatureK(t0, tdc)
@@ -140,7 +143,7 @@ object SoundingMath {
             }
             trace += pi to (tk - 273.15)
             val tEnv = pr.tAt(pi); val tdEnv = min(pr.tdAt(pi), tEnv)
-            buoy[i] = virtualK(tk - 273.15, wP) - virtualK(tEnv, mixingRatio(pi, tdEnv))
+            buoy[i] = if (virtual) virtualK(tk - 273.15, wP) - virtualK(tEnv, mixingRatio(pi, tdEnv)) else (tk - 273.15) - tEnv
         }
         // the energy between levels, J/kg, and the crossings
         val lclIndex = ps.indexOfFirst { it <= pl + 0.01 }.let { if (it < 0) ps.size - 1 else it }

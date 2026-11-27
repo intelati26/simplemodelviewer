@@ -63,6 +63,7 @@ import kotlin.math.sin
 private val TEMP_RED = Color(0xFFD32F2F)
 private val DEW_GREEN = Color(0xFF2E7D32)
 private val WET_CYAN = Color(0xFF29B6F6)
+private val VIRTUAL_BLUE = Color(0xFF3949AB)
 private val ISOTHERM_ORANGE = Color(0xFFFF9800)
 private val MIXING_GREEN = Color(0xFF43A047)
 private val HEIGHT_RED = Color(0xFFC62828)
@@ -140,6 +141,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                                     Text("\u2014 temperature", color = TEMP_RED, style = MaterialTheme.typography.labelSmall)
                                     Text("\u2014 dewpoint", color = DEW_GREEN, style = MaterialTheme.typography.labelSmall)
                                     Text("\u2014 wet bulb", color = WET_CYAN, style = MaterialTheme.typography.labelSmall)
+                                    Text("\u2014 virtual T", color = VIRTUAL_BLUE, style = MaterialTheme.typography.labelSmall)
                                     Text("- - parcel", style = MaterialTheme.typography.labelSmall)
                                 }
                             }
@@ -258,6 +260,7 @@ private fun SkewT(s: Sounding, elevationM: Double, analysis: SoundingMath.Analys
                 drawPath(path, color, style = Stroke(width, pathEffect = pathEffect))
             }
             line(WET_CYAN, 1.2.dp.toPx()) { it.wetBulbC }
+            line(VIRTUAL_BLUE, 1.2.dp.toPx()) { if (it.tempC.isNaN() || it.dewC.isNaN()) Double.NaN else SoundingMath.virtualTemperatureC(it.pressure, it.tempC, it.dewC) }
             line(DEW_GREEN, 2.5.dp.toPx()) { it.dewC }
             line(TEMP_RED, 2.5.dp.toPx()) { it.tempC }
             parcel?.let { pc ->

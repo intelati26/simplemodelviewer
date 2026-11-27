@@ -32,6 +32,15 @@ class SoundingMathTest {
         assertEquals(12.0, SoundingMath.dewpointFromMixing(900.0, w), 0.01)
     }
 
+    @Test fun virtualTemperatureIsWarmerForMoistAir() {
+        val moist = SoundingMath.virtualTemperatureC(1000.0, 20.0, 20.0) - 20.0           // saturated at 20 C: about 2.6 C warmer
+        assertTrue(moist in 2.2..3.0, "moist $moist")
+        assertEquals(0.0, SoundingMath.virtualTemperatureC(1000.0, 20.0, -40.0) - 20.0, 0.1)   // nearly dry air: the same
+        // the correction raises the buoyancy of a moist parcel: more CAPE than without it
+        val pr = SoundingMath.profile(unstable, 0.0)!!
+        assertTrue(SoundingMath.lift(pr, "x", pr.p[0], pr.t[0], pr.td[0], true).cape > SoundingMath.lift(pr, "x", pr.p[0], pr.t[0], pr.td[0], false).cape)
+    }
+
     @Test fun theLclFollowsTheDewpointSpread() {
         val a = SoundingMath.analyze(unstable, 0.0)!!
         // about 125 m for each degree of spread: 8 C -> a kilometer
