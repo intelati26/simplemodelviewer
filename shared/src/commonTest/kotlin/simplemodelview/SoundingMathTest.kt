@@ -88,9 +88,9 @@ class SoundingMathTest {
     @Test fun aStraightWesterlyHodographHasTheStormMotionSouthOfTheMeanWind() {
         val s = build(1000.0, { z -> 25.0 - 6.5 * z / 1000.0 }, { z -> 15.0 - 6.0 * z / 1000.0 }, dir = { 270.0 }, kt = { z -> minOf(z, 6000.0) / 6000.0 * 30.0 / 0.514444 })
         val k = SoundingMath.analyze(s, 0.0)!!.kinematics!!
-        assertEquals(15.0 / 0.514444, k.mean06.kt, 1.5)                          // the 0-6 km mean is half the 30 m/s
+        assertTrue(k.mean06.kt in 20.0..26.0, "mean ${k.mean06.kt}")             // pressure weighted, so under half the 30 m/s (the low, slow levels weigh more)
         assertTrue(k.rightMover.v < -5.0 && k.leftMover.v > 5.0)                 // the deviation is 7.5 m/s each way, across the shear
-        assertEquals(k.mean06.u, k.rightMover.u, 0.2)
+        assertTrue(k.rightMover.u in 12.0..15.0, "rm u ${k.rightMover.u}")       // the storm motion starts from the plain mean (on 1 mb steps, so the low levels count more)
         assertEquals(225.0, k.layers[2].srh, 15.0)                               // 7.5 m/s x 30 m/s over 0-6 km
         assertEquals(112.5, k.layers[1].srh, 10.0)
         assertEquals(30.0 / 0.514444, k.layers[2].shearKt, 1.0)
@@ -100,10 +100,10 @@ class SoundingMathTest {
 
     @Test fun theTornadoParameterNeedsEveryIngredient() {
         val warm = SoundingMath.analyze(unstable, 0.0)!!
-        assertEquals(0.0, SoundingMath.stpFixed(warm.surface, warm.mixed, 150.0, 10.0), 1e-9)    // too little shear
-        assertEquals(0.0, SoundingMath.stpFixed(warm.surface, warm.mixed, 0.0, 25.0), 1e-9)      // no helicity
-        assertTrue(SoundingMath.stpFixed(warm.surface, warm.mixed, 200.0, 25.0) > 0.0)
-        assertEquals(0.0, SoundingMath.stpFixed(SoundingMath.analyze(stable, 0.0)!!.surface, warm.mixed, 200.0, 25.0), 1e-9)   // no CAPE
+        assertEquals(0.0, SoundingMath.stpFixed(warm.surface, 150.0, 10.0), 1e-9)    // too little shear
+        assertEquals(0.0, SoundingMath.stpFixed(warm.surface, 0.0, 25.0), 1e-9)      // no helicity
+        assertTrue(SoundingMath.stpFixed(warm.surface, 200.0, 25.0) > 0.0)
+        assertEquals(0.0, SoundingMath.stpFixed(SoundingMath.analyze(stable, 0.0)!!.surface, 200.0, 25.0), 1e-9)   // no CAPE
     }
 
     @Test fun levelsWithoutADewpointHighUpAreKept() {

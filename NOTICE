@@ -7,6 +7,11 @@ Code
   (core/third_party/zstd/LICENSE.txt; also available under GPLv2).
 - gradlew, gradlew.bat and gradle/wrapper: Gradle, Apache License 2.0.
 
+Sounding calculations
+- The parcel, shear, helicity, storm motion, composite-parameter and hazard-type calculations of the sounding screen follow SHARPpy (BSD 3-clause) by way of
+  wxqt-grib's ports; the attribution and license text are in docs/sharppy-notice.md.
+- Model profiles: Iowa State University's BUFKIT feed (https://meteor.geol.iastate.edu/data/bufkit/) of NCEP's RRFS and GFS output (public domain model data).
+
 Map lines (androidApp/src/main/assets/statev2.f32, county.f32, ca.f32, mx.f32)
 - Taken from the wX project (GPLv3, https://gitlab.com/joshua.tee/wx). wX's own source for the underlying boundaries has not been
   traced; if you know it, please record it here.

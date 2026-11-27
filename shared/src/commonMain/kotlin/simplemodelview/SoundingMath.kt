@@ -22,7 +22,7 @@ object SoundingMath {
     private const val EPS = 0.622
     private const val KAPPA = RD / CP
     private const val LV = 2.5e6
-    private const val KT = 0.514444                   // m/s per knot
+    internal const val KT = 0.514444                   // m/s per knot
 
     /** Saturation vapor pressure over water (mb) at [tC] degrees C (Bolton 1980). */
     fun es(tC: Double) = 6.112 * exp(17.67 * tC / (tC + 243.5))
@@ -50,13 +50,13 @@ object SoundingMath {
         return tk * (1000.0 / pMb).pow(0.2854 * (1.0 - 0.28e-3 * w)) * exp((3.376 / tl - 0.00254) * w * (1.0 + 0.81e-3 * w))
     }
 
-    private fun lclTemperatureK(tC: Double, tdC: Double): Double {
+    internal fun lclTemperatureK(tC: Double, tdC: Double): Double {
         val t = tC + 273.15; val td = min(tdC, tC) + 273.15
         return if (t - td < 0.05) t else 1.0 / (1.0 / (td - 56.0) + ln(t / td) / 800.0) + 56.0
     }
 
     /** The slope of a saturated ascent: K per mb at [pMb] and [tK]. */
-    private fun moistLapse(pMb: Double, tK: Double): Double {
+    internal fun moistLapse(pMb: Double, tK: Double): Double {
         val rs = mixingRatio(pMb, tK - 273.15)
         return (RD * tK + LV * rs) / (pMb * (CP + LV * LV * rs * EPS / (RD * tK * tK)))
     }
@@ -199,7 +199,7 @@ object SoundingMath {
     /** A wind vector in knots from a (u, v) in m/s: where it blows from (degrees) and its speed. */
     class Wind(val dir: Double, val kt: Double, val u: Double, val v: Double)
 
-    private fun wind(u: Double, v: Double): Wind {
+    internal fun wind(u: Double, v: Double): Wind {
         val sp = hypot(u, v)
         var d = if (sp < 1e-9) 0.0 else (270.0 - atan2(v, u) * 180.0 / PI)
         d = ((d % 360.0) + 360.0) % 360.0
@@ -210,38 +210,6 @@ object SoundingMath {
     class WindLayer(val label: String, val topM: Double, val srh: Double, val shearKt: Double, val mean: Wind, val stormRelative: Wind)
 
     class Kinematics(val rightMover: Wind, val leftMover: Wind, val mean06: Wind, val layers: List<WindLayer>, val shear6Ms: Double, val srh1: Double)
-
-    /** The shear, helicity and storm motion of the winds to 8 km, the storm motion that of Bunkers' internal-dynamics method (7.5 m/s off the 0 to 6 km mean wind). */
-    fun kinematics(pr: Profile): Kinematics? {
-        val zs = (0..80).map { it * 100.0 }
-        val uv = zs.map { pr.uvAtZ(it) ?: return null }
-        fun meanOf(z0: Double, z1: Double): Pair<Double, Double> {
-            val idx = zs.indices.filter { zs[it] in z0..z1 }
-            return idx.map { uv[it].first }.average() to idx.map { uv[it].second }.average()
-        }
-        val m = meanOf(0.0, 6000.0)
-        val lo = meanOf(0.0, 500.0); val hi = meanOf(5500.0, 6000.0)
-        val sx = hi.first - lo.first; val sy = hi.second - lo.second
-        val s = hypot(sx, sy).let { if (it < 1e-6) 1e-6 else it }
-        val d = 7.5
-        val rm = (m.first + d * sy / s) to (m.second - d * sx / s)
-        val lm = (m.first - d * sy / s) to (m.second + d * sx / s)
-        fun srh(top: Double, c: Pair<Double, Double>): Double {
-            var sum = 0.0
-            for (i in 0 until zs.size - 1) {
-                if (zs[i + 1] > top) break
-                sum += (uv[i + 1].first - c.first) * (uv[i].second - c.second) - (uv[i].first - c.first) * (uv[i + 1].second - c.second)
-            }
-            return sum
-        }
-        val layers = listOf(1000.0 to "SFC - 1 km", 3000.0 to "SFC - 3 km", 6000.0 to "SFC - 6 km", 8000.0 to "SFC - 8 km").map { (top, label) ->
-            val mean = meanOf(0.0, top); val i1 = zs.indexOfFirst { it >= top }
-            val shear = hypot(uv[i1].first - uv[0].first, uv[i1].second - uv[0].second)
-            WindLayer(label, top, srh(top, rm), shear / KT, wind(mean.first, mean.second), wind(mean.first - rm.first, mean.second - rm.second))
-        }
-        val i6 = zs.indexOfFirst { it >= 6000.0 }
-        return Kinematics(wind(rm.first, rm.second), wind(lm.first, lm.second), wind(m.first, m.second), layers, hypot(uv[i6].first - uv[0].first, uv[i6].second - uv[0].second), srh(1000.0, rm))
-    }
 
     /** Precipitable water in millimeters (kg/m2). */
     fun precipitableWater(pr: Profile): Double {
@@ -283,32 +251,16 @@ object SoundingMath {
         return null
     }
 
-    /** The significant tornado parameter, fixed layer: surface CAPE and LCL, 0 to 1 km helicity, 0 to 6 km shear, mixed-layer CIN (SPC's definition). */
-    fun stpFixed(sb: Parcel, ml: Parcel, srh1: Double, shear6Ms: Double): Double {
+    /** The significant tornado parameter of the fixed layer (SPC): surface-based CAPE and LCL, 0 to 1 km helicity, 0 to 6 km shear; no inhibition term. */
+    fun stpFixed(sb: Parcel, srh1: Double, shear6Ms: Double): Double {
         val lcl = sb.lclZ ?: return 0.0
         val lclTerm = when { lcl < 1000.0 -> 1.0; lcl > 2000.0 -> 0.0; else -> (2000.0 - lcl) / 1000.0 }
         val shearTerm = when { shear6Ms < 12.5 -> 0.0; shear6Ms > 30.0 -> 1.5; else -> shear6Ms / 20.0 }
-        val cinTerm = when { ml.cin > -50.0 -> 1.0; ml.cin < -200.0 -> 0.0; else -> (200.0 + ml.cin) / 150.0 }
-        return (sb.cape / 1500.0) * lclTerm * (srh1 / 150.0) * shearTerm * cinTerm
+        return (sb.cape / 1500.0) * lclTerm * (srh1 / 150.0) * shearTerm
     }
 
     /** The effective inflow layer: the levels (heights above the ground, pressures) whose parcels have at least [minCape] and no more than [minCin] of inhibition. */
     class EffectiveLayer(val bottomZ: Double, val topZ: Double, val bottomP: Double, val topP: Double)
-
-    /**
-     * Lifts the parcel of each level from the ground up to 5 km (the first that qualifies starts the layer, the layer ends at the first level that does not, or at 8 km);
-     * null when no level qualifies (a stable or capped profile).
-     */
-    fun effectiveInflowLayer(pr: Profile, minCape: Double = 100.0, minCin: Double = -250.0): EffectiveLayer? {
-        var bottom = -1; var top = -1
-        for (i in 0 until pr.size) {
-            if (bottom < 0 && pr.z[i] > 5000.0) break
-            if (pr.z[i] > 8000.0) break
-            val pc = lift(pr, "", pr.p[i], pr.t[i], pr.td[i])
-            if (pc.cape >= minCape && pc.cin >= minCin) { if (bottom < 0) bottom = i; top = i } else if (bottom >= 0) break
-        }
-        return if (bottom < 0) null else EffectiveLayer(pr.z[bottom], pr.z[top], pr.p[bottom], pr.p[top])
-    }
 
     private fun uvOrNull(pr: Profile, z: Double) = pr.uvAtZ(z)
 
@@ -333,15 +285,6 @@ object SoundingMath {
         return hypot(b.first - a.first, b.second - a.second)
     }
 
-    /** The effective-layer bulk shear: from the base of the inflow layer to half the height of the most unstable parcel's equilibrium level (m/s); null without a layer or an EL. */
-    fun effectiveShear(pr: Profile, layer: EffectiveLayer?, mu: Parcel): Double? {
-        if (layer == null) return null
-        val el = mu.elZ ?: return null
-        val top = layer.bottomZ + 0.5 * (el - layer.bottomZ)
-        if (top <= layer.bottomZ) return 0.0
-        return bulkShear(pr, layer.bottomZ, top)
-    }
-
     /** The significant tornado parameter of the effective layer (SPC): mixed-layer CAPE, LCL and CIN, effective helicity and effective shear. Zero without an inflow layer. */
     fun stpEffective(ml: Parcel, esrh: Double, ebwdMs: Double, layer: EffectiveLayer?): Double {
         if (layer == null) return 0.0
@@ -352,51 +295,14 @@ object SoundingMath {
         return max(0.0, (ml.cape / 1500.0) * lclTerm * (esrh / 150.0) * shearTerm * cinTerm)
     }
 
-    /** The supercell composite parameter (SPC): most unstable CAPE, effective helicity, effective shear, most unstable CIN. */
+    /** The supercell composite parameter (SHARPpy): most unstable CAPE, effective helicity and effective shear. */
     fun supercellComposite(mu: Parcel, esrh: Double, ebwdMs: Double): Double {
         val shearTerm = when { ebwdMs < 10.0 -> 0.0; ebwdMs > 20.0 -> 1.0; else -> ebwdMs / 20.0 }
-        val cinTerm = if (mu.cin > -40.0) 1.0 else -40.0 / mu.cin
-        return max(0.0, (mu.cape / 1000.0) * (esrh / 50.0) * shearTerm * cinTerm)
-    }
-
-    /** The significant hail parameter (SPC), with its limits; null when a part is missing. */
-    fun ship(pr: Profile, mu: Parcel, lapse700500: Double?, shear6Ms: Double?, freezingZ: Double?): Double? {
-        if (lapse700500 == null || shear6Ms == null || pr.p[pr.size - 1] > 500.0) return null
-        val w = mixingRatio(mu.startP, pr.tdAt(mu.startP)) * 1000.0
-        val t500 = pr.tAt(500.0)
-        val sh = shear6Ms.coerceIn(7.0, 27.0); val mr = w.coerceIn(11.0, 13.6); val t5 = min(t500, -5.5)
-        var v = mu.cape * mr * lapse700500 * -t5 * sh / 42_000_000.0
-        if (mu.cape < 1300.0) v *= mu.cape / 1300.0
-        if (lapse700500 < 5.8) v *= lapse700500 / 5.8
-        if (freezingZ != null && freezingZ < 2400.0) v *= freezingZ / 2400.0
-        return v
-    }
-
-    /** Mean relative humidity (%) between two pressures, sampled every 10 mb; null when the profile does not cover them. */
-    fun meanRh(pr: Profile, pBottom: Double, pTop: Double): Double? {
-        if (pr.p[0] < pBottom || pr.p[pr.size - 1] > pTop) return null
-        var sum = 0.0; var n = 0
-        var p = pBottom
-        while (p >= pTop) { sum += 100.0 * es(pr.tdAt(p)) / es(pr.tAt(p)); n++; p -= 10.0 }
-        return if (n == 0) null else min(100.0, sum / n)
+        return (mu.cape / 1000.0) * (esrh / 50.0) * shearTerm
     }
 
     /** The Corfidi vectors (MCS motion): the upwind-propagating one is the cloud-layer mean wind (850 to 300 mb) less the low-level jet; the downwind one adds it to the mean wind. */
     class Corfidi(val upwind: Wind, val downwind: Wind)
-
-    fun corfidi(pr: Profile): Corfidi? {
-        if (pr.p[0] < 850.0 || pr.p[pr.size - 1] > 300.0) return null
-        var su = 0.0; var sv = 0.0; var n = 0
-        var p = 850.0
-        while (p >= 300.0) { val uv = uvOrNull(pr, pr.zAt(p)) ?: return null; su += uv.first; sv += uv.second; n++; p -= 10.0 }
-        val cl = (su / n) to (sv / n)
-        var best: Pair<Double, Double>? = null; var bestSp = -1.0
-        var z = 0.0
-        while (z <= 1500.0) { val uv = uvOrNull(pr, z) ?: return null; val sp = hypot(uv.first, uv.second); if (sp > bestSp) { bestSp = sp; best = uv }; z += 100.0 }
-        val llj = best ?: return null
-        val up = (cl.first - llj.first) to (cl.second - llj.second)
-        return Corfidi(wind(up.first, up.second), wind(cl.first + up.first, cl.second + up.second))
-    }
 
     /** One layer of the inferred temperature advection: between [pBottom] and [pTop] (mb), in C per hour (positive: warm advection). */
     class Advection(val pBottom: Double, val pTop: Double, val cPerHour: Double)
@@ -431,27 +337,50 @@ object SoundingMath {
     fun stormRelativeWinds(pr: Profile, c: Pair<Double, Double>): List<Pair<Double, Double>> =
         (0..48).mapNotNull { k -> val z = k * 250.0; uvOrNull(pr, z)?.let { z to hypot(it.first - c.first, it.second - c.second) / KT } }
 
+    /** The kinematics of the winds for the storm motion given (m/s): the layers to 1, 3, 6 and 8 km with pressure-weighted mean winds. */
+    fun kinematicsFor(pr: Profile, w: SharpTab.WindColumn, rm: Pair<Double, Double>, lm: Pair<Double, Double>): Kinematics? {
+        val m06 = SharpTab.meanWind(pr, w, 0.0, 6000.0) ?: return null
+        val b6 = SharpTab.bulkShear(pr, w, 0.0, 6000.0) ?: return null
+        val layers = ArrayList<WindLayer>()
+        for ((top, label) in listOf(1000.0 to "SFC - 1 km", 3000.0 to "SFC - 3 km", 6000.0 to "SFC - 6 km", 8000.0 to "SFC - 8 km")) {
+            val mean = SharpTab.meanWind(pr, w, 0.0, top) ?: return null
+            val sh = SharpTab.bulkShear(pr, w, 0.0, top) ?: return null
+            val srh = SharpTab.helicity(pr, w, 0.0, top, rm) ?: return null
+            layers += WindLayer(label, top, srh, hypot(sh.first, sh.second) / KT, wind(mean.first, mean.second), wind(mean.first - rm.first, mean.second - rm.second))
+        }
+        return Kinematics(wind(rm.first, rm.second), wind(lm.first, lm.second), wind(m06.first, m06.second), layers, hypot(b6.first, b6.second), layers[0].srh)
+    }
+
     /** Everything a sounding page prints, or null when the profile is too short. */
     class Analysis(val profile: Profile, val surface: Parcel, val mixed: Parcel, val mostUnstable: Parcel, val kinematics: Kinematics?, val pwMm: Double, val kIndex: Double?,
                    val lapse03: Double?, val lapse36: Double?, val lapse850500: Double?, val lapse700500: Double?, val freezingM: Double?, val minus20M: Double?, val wetBulbZeroM: Double?, val stp: Double,
                    val effective: EffectiveLayer?, val effectiveSrh: Double, val effectiveShearMs: Double?, val stpEffective: Double, val supercell: Double, val sigSevere: Double?, val ship: Double?,
-                   val corfidi: Corfidi?, val midRh: Double?, val lowRh: Double?, val thetaE: List<Pair<Double, Double>>, val stormRelative: List<Pair<Double, Double>>, val advection: List<Advection>)
+                   val corfidi: Corfidi?, val midRh: Double?, val lowRh: Double?, val thetaE: List<Pair<Double, Double>>, val stormRelative: List<Pair<Double, Double>>, val advection: List<Advection>,
+                   val wndg: Double?, val mmp: Double?, val dcape: Double?, val downTempC: Double?, val lapse01: Double?, val srw46Kt: Double?, val bwd08Kt: Double?,
+                   val sfcWindMph: Double?, val sfcTempC: Double, val sfcRh: Double)
 
     fun analyze(s: Sounding, elevationM: Double, latitude: Double = Double.NaN): Analysis? {
         val pr = profile(s, elevationM) ?: return null
+        val w = SharpTab.WindColumn(pr)
         val sb = surfaceParcel(pr); val ml = mixedLayerParcel(pr); val mu = mostUnstableParcel(pr)
-        val k = kinematics(pr)
-        val eil = effectiveInflowLayer(pr)
-        val rm = k?.let { it.rightMover.u to it.rightMover.v }
-        val esrh = if (eil == null || rm == null) 0.0 else srhLayer(pr, eil.bottomZ, eil.topZ, rm)
-        val ebwd = effectiveShear(pr, eil, mu)
-        val lapse75 = lapseRateP(pr, 700.0, 500.0); val frz = levelOf(pr, 0.0)
+        val eil = SharpTab.effectiveInflowLayer(pr, mu)
+        val rm = SharpTab.stormMotion(pr, w, mu, eil, right = true); val lm = SharpTab.stormMotion(pr, w, mu, eil, right = false)
+        val k = if (rm != null && lm != null) kinematicsFor(pr, w, rm, lm) else null
+        val esrh = if (eil != null && rm != null) SharpTab.helicity(pr, w, eil.bottomZ, eil.topZ, rm) ?: 0.0 else 0.0
+        val ebwd = SharpTab.effectiveBulkShear(pr, w, mu, eil)
+        val lapse03 = lapseRateZ(pr, 0.0, 3000.0); val lapse75 = lapseRateP(pr, 700.0, 500.0); val frz = levelOf(pr, 0.0)
+        val ebwdMs = ebwd ?: 0.0
+        val dc = SharpTab.dcape(pr)
+        val srw46 = rm?.let { c -> SharpTab.meanBetweenPressures(w, pr.pAt(4000.0), pr.pAt(6000.0), weighted = true)?.let { m -> hypot(m.first - c.first, m.second - c.second) / KT } }
+        val p15 = pr.pAt(1500.0); val p40 = pr.pAt(4000.0)
         return Analysis(
-            pr, sb, ml, mu, k, precipitableWater(pr), kIndex(pr), lapseRateZ(pr, 0.0, 3000.0), lapseRateZ(pr, 3000.0, 6000.0), lapseRateP(pr, 850.0, 500.0), lapse75,
-            frz, levelOf(pr, -20.0), levelOf(pr, 0.0, wetBulb = true), if (k == null) 0.0 else stpFixed(sb, ml, k.srh1, k.shear6Ms),
-            eil, esrh, ebwd, if (ebwd == null) 0.0 else stpEffective(ml, esrh, ebwd, eil), if (ebwd == null) 0.0 else supercellComposite(mu, esrh, ebwd),
-            k?.let { ml.cape * it.shear6Ms }, ship(pr, mu, lapse75, k?.shear6Ms, frz), corfidi(pr), meanRh(pr, 700.0, 500.0), meanRh(pr, pr.p[0], 850.0),
+            pr, sb, ml, mu, k, precipitableWater(pr), kIndex(pr), lapse03, lapseRateZ(pr, 3000.0, 6000.0), lapseRateP(pr, 850.0, 500.0), lapse75,
+            frz, levelOf(pr, -20.0), levelOf(pr, 0.0, wetBulb = true), if (k == null) 0.0 else stpFixed(sb, k.srh1, k.shear6Ms),
+            eil, esrh, ebwd, if (eil != null && rm != null) stpEffective(ml, esrh, ebwdMs, eil) else 0.0, if (eil != null && rm != null) supercellComposite(mu, esrh, ebwdMs) else 0.0,
+            k?.let { ml.cape * it.shear6Ms }, SharpTab.ship(pr, w, mu), SharpTab.corfidi(pr, w), SharpTab.meanRelativeHumidity(pr, p15, p40), SharpTab.meanRelativeHumidity(pr, pr.p[0], p15).takeIf { pr.p[0] > p15 },
             thetaEProfile(pr), if (rm == null) emptyList() else stormRelativeWinds(pr, rm), inferredAdvection(pr, latitude),
+            SharpTab.wndg(pr, w, ml.cape, ml.cin, lapse03), SharpTab.mmp(pr, w, mu.cape), dc?.first, dc?.second, lapseRateZ(pr, 0.0, 1000.0), srw46, k?.layers?.getOrNull(3)?.shearKt,
+            if (pr.spd[0].isNaN()) null else pr.spd[0] * 1.15078, pr.t[0], 100.0 * mixingRatio(pr.p[0], pr.td[0]) / mixingRatio(pr.p[0], pr.t[0]),
         )
     }
 }

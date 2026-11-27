@@ -48,6 +48,7 @@ import simplemodelview.BufkitFile
 import simplemodelview.BufkitModel
 import simplemodelview.BufkitStation
 import simplemodelview.Sounding
+import simplemodelview.SoundingHazard
 import simplemodelview.SoundingMath
 import simplemodelview.metersToFeet
 import simplemodelview.formatUtc
@@ -174,6 +175,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                                 Text("Model profile at the airport's grid point: ${model.label}, Iowa State's BUFKIT feed.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Column(Modifier.verticalScroll(rememberScrollState())) {
+                                if (analysis != null) HazardBanner(analysis)
                                 if (wide) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         Column(Modifier.weight(1f)) { skew() }
@@ -594,5 +596,52 @@ private fun CompositeNumbers(a: SoundingMath.Analysis) {
             Text("$label = ${v?.let { "%.1f".format(it) } ?: "M"}", color = orange, fontWeight = FontWeight.Bold, fontFamily = TABLE, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
         }
         Text("After SPC's sounding page. Composites are model guidance for one grid point, not a forecast.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+// ---- the possible hazard type (SPC's flow chart), first on the screen ----
+
+private fun hazardColor(type: String) = when (type) {
+    "PDS TOR" -> Color(0xFF6A1B9A); "TOR" -> Color(0xFFC62828); "MRGL TOR" -> Color(0xFFEF6C00); "SVR" -> Color(0xFFF9A825); "MRGL SVR" -> Color(0xFFFBC02D)
+    "FLASH FLOOD" -> Color(0xFF2E7D32); "BLIZZARD" -> Color(0xFF1565C0); "EXCESSIVE HEAT" -> Color(0xFFAD1457); else -> Color(0xFF757575)
+}
+
+/**
+ * SHARPpy's "possible hazard type", walked from the sounding's parameters: the tornado steps first, then the severe, flash flood, blizzard and heat steps. A tap shows the
+ * walk with every test and the value it was given. It is the model profile at one point, not a forecast; the flash-flood test has no climatology here, and the
+ * blizzard test no precipitation type, so those cannot hold.
+ */
+@Composable
+private fun HazardBanner(a: SoundingMath.Analysis) {
+    var open by remember { mutableStateOf(false) }
+    val result = remember(a) { SoundingHazard.classify(SoundingHazard.params(a)) }
+    val color = hazardColor(result.type)
+    val unknown = result.nodes.filter { it.reached }.flatMap { it.lines }.count { it.state == SoundingHazard.State.Unknown }
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp).background(color.copy(alpha = 0.12f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).clickable { open = !open }.padding(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Possible hazard type", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(result.type, color = color, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 30.sp)
+            }
+            Text(if (open) "Hide chart \u25B4" else "Show chart \u25BE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        val d = result.deciding
+        Text(
+            if (d != null) "Step ${d.id} holds: ${d.lines.size} test${if (d.lines.size == 1) "" else "s"} met" else "No step of the chart holds" + if (unknown > 0) "; $unknown test${if (unknown == 1) " has" else "s have"} no value here" else "",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (open) {
+            val stateMark = mapOf(SoundingHazard.State.Pass to "\u2713", SoundingHazard.State.Fail to "\u2717", SoundingHazard.State.Unknown to "?")
+            for (n in result.nodes) {
+                if (!n.reached) continue
+                Text("${n.id} \u00B7 ${n.outcome}" + if (n.passed) "  \u2190 this one" else "", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold, fontFamily = TABLE, fontSize = 12.sp, lineHeight = 14.sp, color = if (n.passed) color else MaterialTheme.colorScheme.onSurface)
+                for (c in n.lines) Text(
+                    "${stateMark[c.state]} ${c.text}  [${c.value}]", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp,
+                    color = when (c.state) { SoundingHazard.State.Pass -> Color(0xFF2E7D32); SoundingHazard.State.Fail -> Color(0xFFC62828); SoundingHazard.State.Unknown -> MaterialTheme.colorScheme.onSurfaceVariant },
+                )
+            }
+            if (result.nodes.any { !it.reached }) Text("The steps after the one that holds are not walked.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("After SHARPpy's and SPC's flow chart. Model guidance at one grid point, not a forecast. The flash-flood test needs the place's precipitable-water climatology and the blizzard test a precipitation type, neither of which is worked out here, so those steps cannot hold.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
