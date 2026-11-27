@@ -81,6 +81,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
     var overlayPicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
+    var soundingStations by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -143,7 +144,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
                     ) { Text("\u21C4", fontSize = 20.sp) }
                     ProductStepButton(next = true, enabled = at in 0 until MrmsCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("mrms", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, onRain = { pickRain = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes, canSound = s.tapLatLon != null, onSounding = { soundingStations = true })
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -239,6 +240,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
     if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(
@@ -382,7 +384,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
-internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null, compare: Boolean = false, canCompare: Boolean = false, onGlobe: Boolean = false, onCompare: ((Boolean) -> Unit)? = null, onSwap: (() -> Unit)? = null) {
+internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, onRain: (() -> Unit)? = null, compare: Boolean = false, canCompare: Boolean = false, onGlobe: Boolean = false, onCompare: ((Boolean) -> Unit)? = null, onSwap: (() -> Unit)? = null, canSound: Boolean = false, onSounding: (() -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("⋮", fontSize = 22.sp) }
@@ -390,6 +392,7 @@ internal fun MrmsMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () 
             if (onRain != null) DropdownMenuItem(text = { Text("Rainfall since a date and time\u2026") }, onClick = { open = false; onRain() })
             if (onCompare != null && !AppMode.simple) DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
             if (compare && onSwap != null && !AppMode.simple) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
+            if (onSounding != null && !AppMode.simple) DropdownMenuItem(text = { Text(if (canSound) "Sounding stations near the crosshair" else "Sounding stations (tap the map first)") }, enabled = canSound, onClick = { open = false; onSounding() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

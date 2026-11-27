@@ -69,6 +69,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     var outlookDialog by remember { mutableStateOf(false) }
     var pickSince by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
+    var soundingStations by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -137,6 +138,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                                     } catch (e: Exception) { loopProgress = null; vm.reportNotice("Could not make the video: ${e.message}") }
                                 }
                             })
+                            if (!AppMode.simple) DropdownMenuItem(text = { Text(if (s.tapLatLon != null) "Sounding stations near the crosshair" else "Sounding stations (tap the map first)") }, enabled = s.tapLatLon != null, onClick = { more = false; soundingStations = true })
                             DropdownMenuItem(text = { Text("Places") }, onClick = { more = false; places = true })
                             DropdownMenuItem(text = { Text("Settings") }, onClick = { more = false; settings = true })
                             DropdownMenuItem(text = { Text("About") }, onClick = { more = false; about = true })
@@ -255,6 +257,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
     if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
 
     if (pickSince) {

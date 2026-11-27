@@ -78,6 +78,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
     var cyclePicker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
+    var soundingStations by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -138,7 +139,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                     AssistChip(onClick = { picker = true }, label = { Text(family.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.weight(1f))
                     ProductStepButton(next = true, enabled = at in 0 until NbmCatalog.families.size - 1) { vm.stepProduct(1) }
                     PageMenu("nbm", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes, canSound = s.tapLatLon != null, onSounding = { soundingStations = true })
                 }
                 NbmVariantRow(family, activeProduct, vm::pickProduct)
                 s.notice?.let {
@@ -226,6 +227,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
     if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(

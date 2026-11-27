@@ -66,6 +66,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
     var pickDates by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
+    var soundingStations by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -112,7 +113,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                     }
                     ProductStepButton(next = true, enabled = at in 0 until AnalysisCatalog.all.size - 1) { vm.stepProduct(1) }
                     PageMenu("analysis", onOpen)
-                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
+                    MrmsMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes, canSound = s.tapLatLon != null, onSounding = { soundingStations = true })
                 }
                 s.notice?.let {
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -220,6 +221,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
     if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
     if (settings) SettingsDialog(
         s.settings, vm::setSettings,

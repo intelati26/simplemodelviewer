@@ -150,6 +150,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     var picker by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
+    var soundingStations by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var loopProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -189,7 +190,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                 ProductStepButton(next = true, enabled = at in 0 until s.products.size - 1) { vm.stepProduct(1) }
                 CycleMenu(s.cycle, s.cycles, vm::pickCycle)
                 PageMenu("spc", onOpen)
-                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes)
+                MoreMenu(onPlaces = { places = true }, onSettings = { settings = true }, onAbout = { about = true }, compare = s.compare, canCompare = s.other != null, onGlobe = s.globe, onCompare = vm::setCompare, onSwap = vm::swapPanes, canSound = s.tapLatLon != null, onSounding = { soundingStations = true })
             }
             if (vm.activeProduct(s)?.hasMembers == true && s.members.isNotEmpty()) MemberMenu(s.members, s.member, vm::pickMember)
             if (vm.activeProduct(s)?.let { simplemodelview.WindProducts.isWind(it.id) } == true) WindChooser(s.products, s.windLevel, s.windColor, vm::pickWindLevel, vm::pickWindColor)
@@ -294,6 +295,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
+    if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
     if (places) PlacesDialog(
         s.places, onDismiss = { places = false },
         onGo = { places = false; vm.goToPlace(it) },
@@ -551,13 +553,14 @@ private fun ProductRow(product: Product, selected: Boolean, favorite: Boolean, o
 }
 
 @Composable
-private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, compare: Boolean, canCompare: Boolean, onGlobe: Boolean, onCompare: (Boolean) -> Unit, onSwap: () -> Unit) {
+private fun MoreMenu(onPlaces: () -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, compare: Boolean, canCompare: Boolean, onGlobe: Boolean, onCompare: (Boolean) -> Unit, onSwap: () -> Unit, canSound: Boolean, onSounding: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) { Text("\u22EE", fontSize = 22.sp) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (!AppMode.simple) DropdownMenuItem(text = { Text(if (compare) "One picture" else if (onGlobe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = compare || canCompare, onClick = { open = false; onCompare(!compare) })
             if (compare && !AppMode.simple) DropdownMenuItem(text = { Text("Swap the two panes") }, onClick = { open = false; onSwap() })
+            if (!AppMode.simple) DropdownMenuItem(text = { Text(if (canSound) "Sounding stations near the crosshair" else "Sounding stations (tap the map first)") }, enabled = canSound, onClick = { open = false; onSounding() })
             DropdownMenuItem(text = { Text("Places") }, onClick = { open = false; onPlaces() })
             DropdownMenuItem(text = { Text("Settings") }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("About") }, onClick = { open = false; onAbout() })

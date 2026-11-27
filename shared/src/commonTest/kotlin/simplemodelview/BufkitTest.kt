@@ -100,4 +100,23 @@ STN YYMMDD/HHMM PMSL PRES SKTC STC1
         assertEquals(0.0, Bufkit.distanceKm(35.0, -97.0, 35.0, -97.0), 1e-6)
         assertEquals(111.2, Bufkit.distanceKm(35.0, -97.0, 36.0, -97.0), 0.5)
     }
+
+    @Test fun theDirectoryListingNamesTheStations() {
+        val listing = """<a href="?C=N;O=D">Name</a><a href="gfs3_kokc.buf">gfs3_kokc.buf</a> <a href="gfs3_1v4.buf">x</a><a href="gfs3_kbuf.buf">y</a><a href="rrfs_kict.buf">z</a>"""
+        assertEquals(setOf("KOKC", "1V4", "KBUF"), BufkitModel.GFS.stationsIn(listing))
+        assertEquals(setOf("KICT"), BufkitModel.RRFS.stationsIn(listing))
+        assertEquals(emptySet(), BufkitModel.GFS.stationsIn("nothing here"))
+    }
+
+    @Test fun theNearestStationsWithAFileComeNearestFirst() {
+        val stations = listOf(
+            NwsStation("KPWA", "Oklahoma City, Wiley Post", 35.53, -97.65), NwsStation("KOKC", "Oklahoma City, Will Rogers", 35.39, -97.60),
+            NwsStation("KOUN", "Norman", 35.18, -97.44), NwsStation("KTIK", "Tinker AFB", 35.42, -97.39),
+        )
+        val got = Bufkit.nearest(stations, setOf("KOKC", "KOUN", "KTIK"), 35.40, -97.60)        // KPWA has no file
+        assertEquals(listOf("KOKC", "KTIK", "KOUN"), got.map { it.id })
+        assertTrue(got[0].km < 2.0 && got[0].km < got[1].km && got[1].km < got[2].km)
+        assertEquals(1, Bufkit.nearest(stations, setOf("KOKC", "KOUN"), 35.40, -97.60, max = 1).size)
+        assertEquals(emptyList(), Bufkit.nearest(stations, emptySet(), 35.40, -97.60))
+    }
 }
