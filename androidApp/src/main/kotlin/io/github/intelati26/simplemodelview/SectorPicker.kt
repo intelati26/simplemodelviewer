@@ -5,6 +5,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -41,6 +43,19 @@ import simplemodelview.Sector
 internal fun sectorMark(name: String): String = when (name) {
     "Northwest" -> "NW"; "Northeast" -> "NE"; "Southwest" -> "SW"; "Southeast" -> "SE"; "Midwest" -> "MW"
     else -> name.split(' ').filter { it.isNotEmpty() }.joinToString("") { it.take(1) }.uppercase().take(3)
+}
+
+/** A color for each region (in the order of the list), distinct enough to tell overlapping boxes apart; the line pattern repeats solid, dashed, dotted as well. */
+private val regionColors = listOf(
+    0xFFD81B60, 0xFF1E88E5, 0xFF43A047, 0xFFF4511E, 0xFF8E24AA, 0xFF00ACC1, 0xFF6D4C41, 0xFFFB8C00, 0xFF3949AB, 0xFF00897B, 0xFF7CB342,
+).map { Color(it) }
+
+private fun colorOfRegion(regions: List<Sector>, s: Sector) = regionColors[regions.indexOf(s).coerceAtLeast(0) % regionColors.size]
+
+private fun patternOfRegion(regions: List<Sector>, s: Sector, w: Float): androidx.compose.ui.graphics.PathEffect? = when (regions.indexOf(s).coerceAtLeast(0) % 3) {
+    1 -> androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(w * 5, w * 3))
+    2 -> androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(w, w * 2.5f))
+    else -> null
 }
 
 /**
@@ -117,27 +132,37 @@ internal fun SectorPicker(
                     withTransform({ scale(scale, scale, Offset.Zero) }) {
                         drawPath(borders, edge.copy(alpha = 0.6f), style = Stroke(0.8f / scale))
                     }
-                    // the chosen region's box, under the dots
-                    regions.firstOrNull { it.name == current }?.let { s ->
-                        drawRect(accent.copy(alpha = 0.18f), Offset(x(s.west), y(s.north)), androidx.compose.ui.geometry.Size(x(s.east) - x(s.west), y(s.south) - y(s.north)))
-                        drawRect(accent, Offset(x(s.west), y(s.north)), androidx.compose.ui.geometry.Size(x(s.east) - x(s.west), y(s.south) - y(s.north)), style = Stroke(2.dp.toPx()))
+                    // every region's box in its own color and line pattern (overlaps show as darker); the chosen one is thick and solid
+                    for (r in regions) {
+                        val c = colorOfRegion(regions, r)
+                        val tl = Offset(x(r.west), y(r.north)); val sz = androidx.compose.ui.geometry.Size(x(r.east) - x(r.west), y(r.south) - y(r.north))
+                        val w = 1.4.dp.toPx()
+                        drawRect(c.copy(alpha = 0.06f), tl, sz)
+                        drawRect(c.copy(alpha = 0.85f), tl, sz, style = Stroke(w, pathEffect = patternOfRegion(regions, r, w)))
+                    }
+                    regions.firstOrNull { it.name == current }?.let { r ->
+                        val c = colorOfRegion(regions, r)
+                        val tl = Offset(x(r.west), y(r.north)); val sz = androidx.compose.ui.geometry.Size(x(r.east) - x(r.west), y(r.south) - y(r.north))
+                        drawRect(c.copy(alpha = 0.18f), tl, sz)
+                        drawRect(c, tl, sz, style = Stroke(3.dp.toPx()))
                     }
                     preview?.let { s ->
                         val tl = Offset(x(s.west), y(s.north)); val sz = androidx.compose.ui.geometry.Size(x(s.east) - x(s.west), y(s.south) - y(s.north))
-                        drawRect(tertiary.copy(alpha = 0.22f), tl, sz)
-                        drawRect(tertiary, tl, sz, style = Stroke(2.5.dp.toPx()))
-                        val tag = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 12.dp.toPx(); isFakeBoldText = true; color = tertiary.toArgb() }
+                        val pc = colorOfRegion(regions, s)
+                        drawRect(pc.copy(alpha = 0.25f), tl, sz)
+                        drawRect(pc, tl, sz, style = Stroke(3.dp.toPx()))
+                        val tag = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 12.dp.toPx(); isFakeBoldText = true; color = pc.toArgb() }
                         drawContext.canvas.nativeCanvas.drawText(s.name, 8.dp.toPx(), size.height - 8.dp.toPx(), tag)
                     }
                     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = 9.dp.toPx(); textAlign = android.graphics.Paint.Align.CENTER; isFakeBoldText = true; color = onAccent.toArgb()
+                        textSize = 9.dp.toPx(); textAlign = android.graphics.Paint.Align.CENTER; isFakeBoldText = true; color = android.graphics.Color.WHITE
                     }
                     for (s in regions) {
                         val (lo, la) = centerOf(s)
                         val c = Offset(x(lo), y(la))
                         val chosen = s.name == current
                         drawCircle(Color.White, 12.dp.toPx(), c)
-                        drawCircle(if (chosen) accent else accent.copy(alpha = 0.78f), 10.dp.toPx(), c)
+                        drawCircle(colorOfRegion(regions, s).copy(alpha = if (chosen) 1f else 0.9f), 10.dp.toPx(), c)
                         drawContext.canvas.nativeCanvas.drawText(sectorMark(s.name), c.x, c.y + 3.dp.toPx(), paint)
                     }
                 }
@@ -145,7 +170,9 @@ internal fun SectorPicker(
                     if (onMapHere != null) FilterChip(false, { onMapHere() }, { Text("Map of this view") })
                     if (onGlobe != null) FilterChip(current == "Globe", { onGlobe() }, { Text("Globe") })
                     if (sectors.any { it.name == "CONUS" }) FilterChip(current == "CONUS", { onPick(sectors.first { it.name == "CONUS" }) }, { Text("CONUS") })
-                    for (s in regions) FilterChip(current == s.name, { onPick(s) }, { Text(s.name) })
+                    for (s in regions) FilterChip(current == s.name, { onPick(s) }, { Text(s.name) }, leadingIcon = {
+                        androidx.compose.foundation.layout.Box(Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(colorOfRegion(regions, s)))
+                    })
                 }
             }
         },
