@@ -93,7 +93,7 @@ internal fun WindCard(wind: WindData?, note: String?, busy: Boolean, placeName: 
     var menu by remember { mutableStateOf(false) }
     val summary = wind?.let { WindTiming.summarize(it.hours, line) }
     ExpandCard(
-        "wind", "\uD83D\uDCA8", "Wind at ${placeName ?: "your place"}",
+        "wind", "\uD83D\uDCA8", "Wind at ${placeName ?: "your place"}" + if (day != 1) " \u00B7 next 12 hours" else "",
         summary = {
             if (wind == null || summary == null) Text(note ?: if (busy) "Reading the model…" else "No gust forecast could be read.", fontSize = 14.sp)
             else {

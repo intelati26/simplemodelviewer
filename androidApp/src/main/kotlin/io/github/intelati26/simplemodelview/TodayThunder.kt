@@ -164,12 +164,12 @@ private fun shortHeadline(s: simplemodelview.ThunderSummary): String = when {
 
 /** The thunder chance at the place: folded, a symbol, one line against the user's line and the next 12 hours as blocks; opened, the periods, the severe types and the line. */
 @Composable
-internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, placeName: String?, line: Int, onLine: (Int) -> Unit) {
+internal fun ThunderCard(data: ThunderData?, note: String?, busy: Boolean, placeName: String?, line: Int, onLine: (Int) -> Unit, next12: Boolean = false) {
     var menu by remember { mutableStateOf(false) }
     val summary = data?.let { ThunderTiming.summarize(it.hours, line) }
     val over = summary?.firstOver != null
     ExpandCard(
-        "thunder", "\u26C8\uFE0F", "Thunder at ${placeName ?: "your place"}",
+        "thunder", "\u26C8\uFE0F", "Thunder at ${placeName ?: "your place"}" + if (next12) " \u00B7 next 12 hours" else "",
         summary = {
             if (data == null || summary == null) Text(note ?: if (busy) "Reading the model…" else "No thunder chance could be read.", fontSize = 14.sp)
             else {

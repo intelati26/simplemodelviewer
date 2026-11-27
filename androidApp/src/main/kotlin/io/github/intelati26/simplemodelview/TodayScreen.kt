@@ -314,7 +314,7 @@ internal fun TodayScreen(vm: TodayViewModel, onOpen: (String) -> Unit) {
                 PointCard(s.point, s.pointNote, s.pointBusy, s.place?.name) { onOpen("point") }
 
                 // ---- thunder chance and timing
-                ThunderCard(s.thunder, s.thunderNote, s.thunderBusy, s.place?.name, s.line, vm::setLine)
+                ThunderCard(s.thunder, s.thunderNote, s.thunderBusy, s.place?.name, s.line, vm::setLine, next12 = s.day != 1)       // (the model part is always the next 12 hours, whichever day is picked)
 
                 // ---- wind
                 WindCard(s.wind, s.windNote, s.windBusy, s.place?.name, s.gustLine, vm::setGustLine, s.outlook, s.day, s.thunder)
