@@ -428,14 +428,12 @@ internal fun Legend(style: Style, members: List<String>, withMembers: Boolean = 
 @Composable
 internal fun SectorMenu(current: String, onGlobe: (() -> Unit)?, onPick: (Sector) -> Unit, onMapHere: (() -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(current) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (onMapHere != null) DropdownMenuItem(text = { Text("Map of this view") }, onClick = { open = false; onMapHere() })   // on the globe: the map of what it shows
-            if (onGlobe != null) DropdownMenuItem(text = { Text("Globe") }, onClick = { open = false; onGlobe() })
-            for (sector in Sector.all) DropdownMenuItem(text = { Text(sector.name) }, onClick = { open = false; onPick(sector) })
-        }
-    }
+    TextButton(onClick = { open = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(current) }
+    if (open) SectorPicker(
+        current, Sector.all,
+        onGlobe = onGlobe?.let { g -> { open = false; g() } }, onMapHere = onMapHere?.let { m -> { open = false; m() } },
+        onPick = { open = false; onPick(it) }, onDismiss = { open = false },
+    )
 }
 
 @Composable

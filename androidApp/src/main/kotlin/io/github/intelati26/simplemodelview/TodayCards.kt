@@ -70,7 +70,7 @@ internal fun MiniStrip(cells: List<Pair<Color, Boolean>>, height: Int = 12) {
 }
 
 /** The state borders of the contiguous states as one path in the thumbnail's units (east-west stretched by cos 38 N, north down), built once from the map's own line file. */
-private object ThumbBorders {
+internal object ThumbBorders {
     const val WEST = -125.0; const val EAST = -66.5; const val SOUTH = 24.5; const val NORTH = 49.5
     val K = Math.cos(Math.toRadians(38.0))
     @Volatile private var path: androidx.compose.ui.graphics.Path? = null
