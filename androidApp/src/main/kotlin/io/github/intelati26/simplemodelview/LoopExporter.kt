@@ -49,8 +49,11 @@ class LoopExporter(private val file: File, width: Int, height: Int, private val 
      * Adds one picture, shown for [hold] frame slots (a loop whose frames stand for different spans of time holds each for its span, without being
      * encoded again); the [last] one is posted a second time to stay on screen for [lastMillis] more.
      */
-    fun add(picture: Bitmap, last: Boolean, hold: Int = 1) {
-        post(picture, maxOf(1, hold) * frameMillis)
+    fun add(picture: Bitmap, last: Boolean, hold: Int = 1) = addFor(picture, maxOf(1, hold) * frameMillis, last)
+
+    /** Adds one picture shown for [millis] (and, when [last], [lastMillis] more). */
+    fun addFor(picture: Bitmap, millis: Int, last: Boolean) {
+        post(picture, millis)
         if (last) post(picture, lastMillis)
     }
 

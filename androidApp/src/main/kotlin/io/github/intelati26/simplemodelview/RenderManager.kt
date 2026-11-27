@@ -90,6 +90,19 @@ class RenderManager(private val app: Application) {
         notify("Making the loop video in the background. Renders (the Share dialog or the ⋮ menu) shows how far it is.")
     }
 
+    /** Puts finished videos together as a new render: two [stack]ed above one another, or all of them one after another. */
+    fun combine(ids: List<Long>, stack: Boolean) {
+        val done = ids.mapNotNull { get(it) }.filter { it.state == RenderState.Done && it.file != null }
+        if (done.size < 2 || (stack && done.size != 2)) return
+        val files = done.map { it.file!! }
+        val title = (if (stack) "Stacked: " else "Joined: ") + done.joinToString(" + ") { it.title.substringAfter(" · ", it.title) }.take(80)
+        enqueue(title) { progress ->
+            val out = File(exportDir(app), (if (stack) "stacked_" else "joined_") + "${System.currentTimeMillis() / 1000}.mp4")
+            if (stack) VideoCombiner.stack(files[0], files[1], out, AppContainer.videoSize, progress)
+            else VideoCombiner.join(files, out, AppContainer.videoSize, progress)
+        }
+    }
+
     private fun change(id: Long, f: (RenderJob) -> RenderJob) = jobs.update { l -> l.map { if (it.id == id) f(it) else it } }
 
     fun cancel(id: Long) { synchronized(running) { running[id] }?.cancel() }
