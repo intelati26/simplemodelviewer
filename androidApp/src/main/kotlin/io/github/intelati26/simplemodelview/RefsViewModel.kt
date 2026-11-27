@@ -931,7 +931,20 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         } else renderer.render(product, style, data, st.members, v, dark = false, alerts = outlookDraws(core, outlook, v, valid), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
+    /** The compare's second picture for an export: the other product at the time nearest this one, drawn in full on [area]. Null: none near. */
+    private suspend fun areaBitmapB(area: ShareArea, st: UiState, product: Product, valid: Long?): Triple<Bitmap, Product, Style>? {
+        val s = store ?: return null
+        val b = st.other ?: return null
+        if (valid == null || area == ShareArea.Globe) return null
+        val times = repo.validTimes(s, b)
+        val idx = times.indices.minByOrNull { kotlin.math.abs(times[it] - valid) }?.takeIf { kotlin.math.abs(times[it] - valid) <= 1800 } ?: return null
+        val frame = repo.readFrameTimed(s, b, idx, st.member)
+        val style = withAutoStops(b.style, frame.values)
+        val v = if (b.grid == product.grid) resolveView(area) else View.whole(b.grid)
+        return Triple(areaBitmap(area, b, style, frame.values, st, v, valid), b, style)
+    }
+
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val product = st.product ?: return@withContext null
         val data = values ?: return@withContext null
@@ -941,10 +954,12 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val map = areaBitmap(area, product, style, data, st)
         val header = "Run ${cycle.label}   Valid ${st.validLabel}" + (st.forecastHour?.let { "  (f${it.toString().padStart(2, '0')})" } ?: "") +
             "   Data: NOAA/NWS Storm Prediction Center (experimental)"
-        val image = renderer.shareImage(map, product, style, header, st.members)
+        val b = if (st.compare && st.other != null) areaBitmapB(area, st, product, st.times.getOrNull(st.timeIndex)) else null
+        val image = if (b != null) renderer.shareCompareImage(map, b.first, product.title, st.other!!.title, product, style, b.second, b.third, header, size?.width ?: 0)
+            else renderer.shareImage(map, product, style, header, st.members)
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
-        val file = File(dir, "spc_refs_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}_f${st.timeIndex}.png")
+        val file = File(dir, (if (b != null) "compare_" else "") + "spc_refs_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}_f${st.timeIndex}.png")
         file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         file
     }

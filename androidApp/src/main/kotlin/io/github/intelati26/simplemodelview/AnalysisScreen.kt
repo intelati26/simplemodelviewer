@@ -239,7 +239,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
         disclaimer = ANALYSIS_DISCLAIMER, showContours = true,
     ) { settings = false }
     if (sharing) ShareDialog(
-        canLoop = s.frames.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
+        canLoop = s.frames.size > 1, current = s.sector.name, globe = s.globe, comparing = s.compare && s.other != null, onDismiss = { sharing = false },
         initialSize = vm.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
             vm.videoSize = size
@@ -247,7 +247,7 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
             scope.launch {
                 try {
                     if (!loop) {
-                        val file = vm.buildShareFile(area) ?: return@launch
+                        val file = vm.buildShareFile(area, size) ?: return@launch
                         shareFile(context, file, "image/png", "Share map")
                     } else {
                         loopProgress = 0 to s.frames.size

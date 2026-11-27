@@ -931,9 +931,12 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val c = simplemodelview.civilFromEpoch(file.valid)
         fun p(n: Int) = n.toString().padStart(2, '0')
         val header = "Valid ${formatUtc(file.valid)} (+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}   Data: NOAA/NWS Global Forecast System (experimental viewer)"
-        val image = renderer.shareImage(map, product, product.style, header, emptyList())
+        // a compare: the second pane (as drawn on screen) under this one
+        val layers = st.paneB?.takeIf { st.compare && !st.globe && it.isNotEmpty() }
+        val image = if (layers != null) renderer.shareCompareImage(map, renderer.composeLayers(layers, 0xFFEDEFF2.toInt()), st.title, st.titleB.orEmpty(), product, product.style, product, st.styleB ?: product.style, header, videoSize.width)
+            else renderer.shareImage(map, product, product.style, header, emptyList())
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-        val out = File(dir, "gfs_${product.id}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}.png")
+        val out = File(dir, (if (layers != null) "compare_" else "") + "gfs_${product.id}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}.png")
         out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         out
     }

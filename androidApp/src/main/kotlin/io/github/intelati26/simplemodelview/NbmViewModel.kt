@@ -787,13 +787,30 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         return Triple(map, product, product.style)
     }
 
-    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
+    /** The compare's second picture for an export: the other product, in the same run at the frame nearest this time, drawn in full on [area]. Null: none near. */
+    private suspend fun areaImageB(area: ShareArea, file: NbmFile): Triple<Bitmap, Product, Style>? {
+        val st = _state.value
+        val b = st.other ?: return null
+        val cycle = st.cycle ?: return null
+        val fb = repo.listFrames(b.id, cycle).minByOrNull { kotlin.math.abs(it.valid - file.valid) }?.takeIf { kotlin.math.abs(it.valid - file.valid) <= 5400 } ?: return null
+        val fieldB = decode(fb, cache = false)
+        val syn = synthetic(b, fieldB.grid)
+        val box = areaView(area, fieldB.grid)
+        val map = withContext(Dispatchers.Default) {
+            renderer.render(syn, syn.style, fieldB.values, emptyList(), box, dark = false, alerts = outlookDraws(core, outlook, box, file.valid, file.run), contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
+        }
+        return Triple(map, syn, syn.style)
+    }
+
+    /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. In a compare both panes are on it. */
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null
         val (map, product, style) = areaImage(area, file)
-        val image = renderer.shareImage(map, product, style, header(file), emptyList())
-        val out = File(sharedDir(), fileName(st.product, file, "png"))
+        val b = if (st.compare && st.other != null && area != ShareArea.Globe) areaImageB(area, file) else null
+        val image = if (b != null) renderer.shareCompareImage(map, b.first, st.product.title, st.other!!.title, product, style, b.second, b.third, header(file), size?.width ?: 0)
+            else renderer.shareImage(map, product, style, header(file), emptyList())
+        val out = File(sharedDir(), (if (b != null) "compare_" else "") + fileName(st.product, file, "png"))
         out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         out
     }

@@ -1747,14 +1747,49 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         return "mrms_${product.directory.filter { it.isLetterOrDigit() || it == '_' }.take(44)}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}${p(c[4])}.$extension"
     }
 
+    /** One pane of a shared compare: its map picture, color key style and product. */
+    private class PanePicture(val bitmap: Bitmap, val style: Style, val product: Product)
+
+    /** The second pane when a compare is on and can be shared (not on the globe), else null. */
+    private fun compareOf(st: MrmsState, area: ShareArea): PaneSpec? = st.other?.takeIf { st.compare && area != ShareArea.Globe }
+
+    /** A picture no wider than the chosen video size (never enlarged), or as it is when none was chosen. */
+    private fun fitToSize(image: Bitmap, size: VideoSize?): Bitmap {
+        if (size == null) return image
+        val (w, h) = size.scaled(image.width, image.height)
+        return if (w == image.width) image else Bitmap.createScaledBitmap(image, w, h, true)
+    }
+
+    /** What one compare pane looks like for [area]: a scan ([file], or the one of its product nearest [validTime]), or a rainfall total. Null: nothing near. */
+    private suspend fun panePicture(area: ShareArea, spec: PaneSpec, file: MrmsFile?, st: MrmsState, validTime: Long = file?.validTime ?: 0L, filesOfSpec: List<MrmsFile>? = null): PanePicture? {
+        if (spec.isTotal) {
+            val sector = if (area is ShareArea.Meso) sectorOf(area) else st.sector
+            val f = fieldOf(spec, validTime, 600, sector) ?: return null
+            val g = f.grid
+            val box = if (area == ShareArea.Screen) {
+                val (l, t, r, b) = viewport.toList()
+                val col0 = floor(l * g.columns).toInt().coerceIn(0, g.columns - 2)
+                val row0 = floor((1f - b) * g.rows).toInt().coerceIn(0, g.rows - 2)
+                val cols = (ceil(r * g.columns).toInt() - col0).coerceIn(2, g.columns - col0)
+                val rows = (ceil((1f - t) * g.rows).toInt() - row0).coerceIn(2, g.rows - row0)
+                View("Screen area", col0, row0, cols, rows, exportScale(cols, rows), 1, g)
+            } else View("Rainfall", 0, 0, g.columns, g.rows, exportScale(g.columns, g.rows), 1, g)
+            val map = renderer.render(f.product, f.product.style, f.values, emptyList(), box, dark = false, contours = false, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
+            return PanePicture(map, f.product.style, f.product)
+        }
+        val use = file ?: nearestFile(filesOfSpec ?: repo.listFiles(spec.product, System.currentTimeMillis() / 1000), validTime, 600) ?: return null
+        val (map, style) = areaBitmap(area, spec.product, use)
+        return PanePicture(map, style, synthetic(spec.product, shownGrid ?: Grid.REFS))
+    }
+
     private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** Writes the shareable picture (header, map, color key) and returns the file, or null when there is nothing to share. */
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val file = st.file ?: return@withContext null
         // a rainfall total: the picture is the total on screen (the sector's grid), not a radar file
-        if (st.rainSince != null) {
+        if (st.rainSince != null && compareOf(st, area) == null) {
             val (p, values) = shown ?: return@withContext null
             val g = shownGrid ?: return@withContext null
             if (p.id != "rain_since") return@withContext null
@@ -1778,18 +1813,18 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             return@withContext out
         }
-        val (map, style) = areaBitmap(area, st.product, file)
-        // a compare: the second product (the scan nearest this time) under this one, on one picture
-        val cmp = st.other?.takeIf { st.compare && !it.isTotal && area != ShareArea.Globe }
-        val fileB = cmp?.let { c -> nearestFile(repo.listFiles(c.product, System.currentTimeMillis() / 1000), file.validTime, 600) }
-        if (cmp != null && fileB != null) {
-            val (mapB, styleB) = areaBitmap(area, cmp.product, fileB)
-            val grid = shownGrid ?: Grid.REFS
-            val image = renderer.shareCompareImage(map, mapB, specTitle(specOf(st)), specTitle(cmp), synthetic(st.product, grid), style, synthetic(cmp.product, grid), styleB, header(file))
+        // a compare: the second pane (a scan nearest this time, or a rainfall total) under this one, on one picture
+        val cmp = compareOf(st, area)
+        if (cmp != null) {
+            val a = panePicture(area, specOf(st), file, st) ?: return@withContext null
+            val b = panePicture(area, cmp, null, st, file.validTime) ?: return@withContext null
+            val raw = renderer.shareCompareImage(a.bitmap, b.bitmap, specTitle(specOf(st)), specTitle(cmp), a.product, a.style, b.product, b.style, header(file))
+            val image = fitToSize(raw, size)
             val out = File(sharedDir(), "compare_" + fileName(st.product, file, "png"))
             out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             return@withContext out
         }
+        val (map, style) = areaBitmap(area, st.product, file)
         val image = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
         val out = File(sharedDir(), fileName(st.product, file, "png"))
         out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -1805,11 +1840,20 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val dir = sharedDir()
         val out = File(dir, fileName(st.product, st.files.last(), "mp4"))
         var exporter: LoopExporter? = null
+        val cmp = compareOf(st, area)
+        val filesB = cmp?.takeIf { !it.isTotal }?.let { repo.listFiles(it.product, System.currentTimeMillis() / 1000) }
+        var paneB: PanePicture? = null
         try {
             for ((k, i) in window.withIndex()) {
                 val file = st.files[i]
                 val (map, style) = areaBitmap(area, st.product, file, GLOBE_LOOP_SIDE)
-                var picture = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
+                var picture: Bitmap
+                if (cmp != null) {
+                    // a compare: the second pane at this frame's time (a total stays as it is); a frame without one keeps the last
+                    paneB = (if (cmp.isTotal && paneB != null) paneB else panePicture(area, cmp, null, st, file.validTime, filesB)) ?: paneB
+                    val b = paneB ?: throw IllegalStateException("no ${specTitle(cmp)} near ${formatClock(file.validTime, 0)}")
+                    picture = renderer.shareCompareImage(map, b.bitmap, specTitle(specOf(st)), specTitle(cmp), synthetic(st.product, shownGrid ?: Grid.REFS), style, b.product, b.style, header(file))
+                } else picture = renderer.shareImage(map, synthetic(st.product, shownGrid ?: Grid.REFS), style, header(file), emptyList())
                 val (sw, sh) = size.scaled(picture.width, picture.height)
                 if (sw != picture.width) picture = Bitmap.createScaledBitmap(picture, sw, sh, true)
                 if (exporter == null) exporter = LoopExporter(out, picture.width, picture.height, size.bitrate(picture.width, picture.height, 4))
@@ -1835,6 +1879,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 g.columns * s to g.rows * s
             }
         }
-        return VideoSize.estimateMegabytes(size, w, h + w / 6, loopWindowFor(_state.value).count())   // + header and legend
+        val panes = if (compareOf(_state.value, area) != null) 2 else 1
+        return VideoSize.estimateMegabytes(size, w, h * panes + w / 6 * (panes + 1) / 2 + (if (panes == 2) w / 6 else 0), loopWindowFor(_state.value).count())   // + header and legend(s)
     }
 }

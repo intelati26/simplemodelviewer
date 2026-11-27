@@ -255,7 +255,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, units = s.units, onUnits = vm::setUnits, disclaimer = MRMS_DISCLAIMER, showContours = true,
     ) { settings = false }
     if (sharing) ShareDialog(
-        canLoop = s.files.size > 1 && s.rainSince == null, current = s.sector.name, globe = s.globe, mesoAreas = s.rainSince == null, onDismiss = { sharing = false },
+        canLoop = s.files.size > 1 && s.rainSince == null, current = s.sector.name, globe = s.globe, comparing = s.compare && s.other != null, mesoAreas = s.rainSince == null, onDismiss = { sharing = false },
         initialSize = vm.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
             vm.videoSize = size
@@ -263,7 +263,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             scope.launch {
                 try {
                     if (!loop) {
-                        val file = vm.buildShareFile(area) ?: return@launch
+                        val file = vm.buildShareFile(area, size) ?: return@launch
                         shareFile(context, file, "image/png", "Share map")
                     } else {
                         loopProgress = 0 to s.files.size

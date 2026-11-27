@@ -310,7 +310,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
     if (sharing) ShareDialog(
-        canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, onDismiss = { sharing = false },
+        canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, comparing = s.compare && s.other != null, onDismiss = { sharing = false },
         initialSize = vm.videoSize,
         estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
@@ -318,7 +318,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             sharing = false
             scope.launch {
                 if (!loop) {
-                    val file = vm.buildShareFile(area) ?: return@launch
+                    val file = vm.buildShareFile(area, size) ?: return@launch
                     shareFile(context, file, "image/png", "Share map")
                 } else {
                     loopProgress = 0 to s.times.size
@@ -830,6 +830,8 @@ internal fun ShareDialog(
     onDismiss: () -> Unit, onShare: (ShareArea, Boolean, VideoSize) -> Unit, disclaimer: String = DISCLAIMER,
     /** False for a rainfall total: it is only the sector on screen (or the part of it that shows), not another meso area. */
     mesoAreas: Boolean = true,
+    /** A compare picture is large (two maps): its size is chosen with the video size. */
+    comparing: Boolean = false,
 ) {
     var area by remember { mutableStateOf<ShareArea>(if (globe) ShareArea.Globe else ShareArea.Screen) }
     var size by remember { mutableStateOf(initialSize) }
@@ -853,13 +855,13 @@ internal fun ShareDialog(
                         }
                     }
                 }
-                if (canLoop) {
-                    Text("Loop video size", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
+                if (canLoop || comparing) {
+                    Text(if (canLoop) "Loop video size" + (if (comparing) " (and compare picture)" else "") else "Compare picture size", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
                     @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for (option in VideoSize.entries) {
                             val mb = estimate(area, option)
-                            FilterChip(size == option, { size = option }, label = { Text("${option.label} ~${if (mb < 10) fixed(mb, 1) else mb.toInt().toString()} MB") })
+                            FilterChip(size == option, { size = option }, label = { Text(if (canLoop) "${option.label} ~${if (mb < 10) fixed(mb, 1) else mb.toInt().toString()} MB" else "${option.label} ${option.width} px") })
                         }
                     }
                 }

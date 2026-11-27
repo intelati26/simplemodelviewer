@@ -361,7 +361,7 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
     }
 
     /** The picture to share from a compare: both panes one above the other, each with its name on it and its own color key. */
-    fun shareCompareImage(a: Bitmap, b: Bitmap, titleA: String, titleB: String, productA: Product, styleA: Style, productB: Product, styleB: Style, header: String): Bitmap {
+    fun shareCompareImage(a: Bitmap, b: Bitmap, titleA: String, titleB: String, productA: Product, styleA: Style, productB: Product, styleB: Style, header: String, maxWidth: Int = 0): Bitmap {
         val w = a.width
         val bScaled = if (b.width == w) b else Bitmap.createScaledBitmap(b, w, (b.height * (w.toFloat() / b.width)).toInt().coerceAtLeast(1), true)
         val pad = maxOf(12, w / 90)
@@ -389,6 +389,17 @@ class MapRenderer(private val core: Core, private val lines: MapLines) {
         val keysTop = (headerHeight + a.height + bScaled.height).toFloat()
         drawLegend(canvas, styleA, productA, emptyList(), pad.toFloat(), keysTop, w - 2f * pad, legendHeight.toFloat(), titleSize * 0.7f)
         drawLegend(canvas, styleB, productB, emptyList(), pad.toFloat(), keysTop + legendHeight, w - 2f * pad, legendHeight.toFloat(), titleSize * 0.7f)
+        if (maxWidth in 1 until out.width) return Bitmap.createScaledBitmap(out, maxWidth, (out.height.toLong() * maxWidth / out.width).toInt(), true)     // the chosen picture size
+        return out
+    }
+
+    /** A compare pane's layers (its field, then the lines over it) flattened on [background] into one picture. */
+    fun composeLayers(layers: List<Bitmap>, background: Int): Bitmap {
+        val first = layers.first()
+        val out = Bitmap.createBitmap(first.width, first.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawColor(background)
+        for (l in layers) canvas.drawBitmap(l, 0f, 0f, null)
         return out
     }
 

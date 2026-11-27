@@ -615,12 +615,27 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         return Triple(map, product, source)
     }
 
-    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole): File? = withContext(Dispatchers.Default) {
+    /** The compare's second picture for an export: the other analysis at this time, drawn in full on [area]. Null: none for this time. */
+    private suspend fun areaImageB(area: ShareArea, frame: AnalysisFrame): Pair<Bitmap, Product>? {
+        val st = _state.value
+        val b = st.other ?: return null
+        val (grid, values, _) = field(frame, b, cache = false) ?: return null
+        val syn = synthetic(b, grid)
+        val box = areaView(area, grid)
+        val map = withContext(Dispatchers.Default) {
+            renderer.render(syn, syn.style, values, emptyList(), box, dark = false, contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
+        }
+        return map to syn
+    }
+
+    suspend fun buildShareFile(area: ShareArea = ShareArea.Whole, size: VideoSize? = null): File? = withContext(Dispatchers.Default) {
         val st = _state.value
         val frame = st.frame ?: return@withContext null
         val (map, product, source) = areaImage(area, frame) ?: return@withContext null
-        val image = renderer.shareImage(map, product, product.style, header(frame, source), emptyList())
-        val out = File(sharedDir(), fileName(st.product, frame, "png"))
+        val b = if (st.compare && st.other != null && area != ShareArea.Globe) areaImageB(area, frame) else null
+        val image = if (b != null) renderer.shareCompareImage(map, b.first, st.product.title, st.other!!.title, product, product.style, b.second, b.second.style, header(frame, source), size?.width ?: 0)
+            else renderer.shareImage(map, product, product.style, header(frame, source), emptyList())
+        val out = File(sharedDir(), (if (b != null) "compare_" else "") + fileName(st.product, frame, "png"))
         out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         out
     }
