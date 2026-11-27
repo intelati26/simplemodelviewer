@@ -73,11 +73,10 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
     var outlookDialog by remember { mutableStateOf(false) }
     var pickSince by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(false) }
+    var rendersOpen by remember { mutableStateOf(false) }
     var soundingStations by remember { mutableStateOf(false) }
     var savingPlace by remember { mutableStateOf(false) }
     var pickDates by remember { mutableStateOf(false) }
-    var loopJob by remember { mutableStateOf<Long?>(null) }
-    val renderJobs by AppContainer.renders.jobs.collectAsStateWithLifecycle()
     var restartAsk by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch { vm.exportSettings(context.contentResolver, uri) }
@@ -137,9 +136,12 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                             DropdownMenuItem(text = { Text(if (s.compare) "One picture" else if (s.globe) "Compare (on the nearest region)" else "Compare with the previous product") }, enabled = s.compare || s.other != null, onClick = { more = false; vm.setCompare(!s.compare) })
                             if (s.frames.size > 1) DropdownMenuItem(text = { Text(if (s.history) "Save the history loop (video)" else "Save the loop (video)") }, onClick = {
                                 more = false
-                                // made by the render manager (a notification shows how far it is); the loop steps this page through its frames, so the page waits for it
-                                loopJob = AppContainer.renders.enqueue("GFS loop · ${s.title}") { progress -> vm.buildLoopFile(progress) }
+                                // made in the background from what is shown now (the page can be used meanwhile): the share sheet opens when it is done
+                                AppContainer.renders.enqueue("GFS loop · ${s.title}") { progress -> vm.buildLoopFile(progress) }
+                                vm.reportNotice("Making the loop video in the background. The ⋮ menu has Renders.")
                             })
+                            val renderCount = AppContainer.renders.jobs.value.size
+                            if (renderCount > 0) DropdownMenuItem(text = { Text("Renders ($renderCount)") }, onClick = { more = false; rendersOpen = true })
                             if (!AppMode.simple) DropdownMenuItem(text = { Text(if (s.tapLatLon != null) "Sounding stations near the crosshair" else "Sounding stations (tap the map first)") }, enabled = s.tapLatLon != null, onClick = { more = false; soundingStations = true })
                             DropdownMenuItem(text = { Text("Places") }, onClick = { more = false; places = true })
                             DropdownMenuItem(text = { Text("Settings") }, onClick = { more = false; settings = true })
@@ -322,14 +324,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
         }
     }
 
-    // the page is being stepped through the loop's frames: it waits, and can stop it
-    renderJobs.firstOrNull { it.id == loopJob }?.takeIf { it.active }?.let { job ->
-        AlertDialog(
-            onDismissRequest = {}, confirmButton = { TextButton(onClick = { AppContainer.renders.cancel(job.id) }) { Text("Stop") } }, title = { Text("Making the loop video") },
-            text = { Column { Text(if (job.total > 0) "Frame ${job.done} of ${job.total}" else "Starting"); LinearProgressIndicator(progress = { if (job.total > 0) job.done / job.total.toFloat() else 0f }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) } },
-        )
-    }
-
+    if (rendersOpen) RendersDialog { rendersOpen = false }
     if (s.contactPrompt) ContactDialog(
         onSave = { vm.setSettings(s.settings.copy(contactEmail = it)); vm.dismissContactPrompt() }, onNotNow = vm::dismissContactPrompt,
         provider = "NOAA", server = "NOAA's servers",
