@@ -101,7 +101,8 @@ object SoundingMath {
 
     /** The usable levels of [s] (temperature, dewpoint and height present, pressure falling), or null when fewer than five. */
     fun profile(s: Sounding, elevationM: Double): Profile? {
-        val ls = s.levels.filter { !it.pressure.isNaN() && !it.tempC.isNaN() && !it.dewC.isNaN() && !it.heightM.isNaN() }
+        // a level needs pressure, temperature and height; the models give no dewpoint high up (it is of no weight there), so those levels are taken as very dry
+        val ls = s.levels.filter { !it.pressure.isNaN() && !it.tempC.isNaN() && !it.heightM.isNaN() }.map { if (it.dewC.isNaN()) it.copy(dewC = it.tempC - 40.0) else it }
         val kept = ArrayList<SoundingLevel>()
         for (l in ls) if (kept.isEmpty() || (l.pressure < kept.last().pressure && l.heightM > kept.last().heightM)) kept += l
         if (kept.size < 5) return null

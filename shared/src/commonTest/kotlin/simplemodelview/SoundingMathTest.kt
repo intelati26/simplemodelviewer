@@ -106,6 +106,14 @@ class SoundingMathTest {
         assertEquals(0.0, SoundingMath.stpFixed(SoundingMath.analyze(stable, 0.0)!!.surface, warm.mixed, 200.0, 25.0), 1e-9)   // no CAPE
     }
 
+    @Test fun levelsWithoutADewpointHighUpAreKept() {
+        val cut = Sounding(0, 0, unstable.levels.map { if (it.pressure < 300.0) it.copy(dewC = Double.NaN) else it }, emptyMap())
+        val full = SoundingMath.profile(unstable, 0.0)!!; val kept = SoundingMath.profile(cut, 0.0)!!
+        assertEquals(full.size, kept.size)                                                   // the cold, dry top is still there
+        assertEquals(SoundingMath.analyze(unstable, 0.0)!!.surface.cape, SoundingMath.analyze(cut, 0.0)!!.surface.cape, 150.0)
+        assertTrue(kept.z.last() > 12000.0)
+    }
+
     @Test fun aShortProfileGivesNothing() {
         assertNull(SoundingMath.analyze(Sounding(0, 0, unstable.levels.take(3), emptyMap()), 0.0))
         assertTrue(hypot(3.0, 4.0) == 5.0)

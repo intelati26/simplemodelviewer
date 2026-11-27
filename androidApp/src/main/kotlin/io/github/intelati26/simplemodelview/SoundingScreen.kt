@@ -119,7 +119,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                         val s = file.soundings[at]
                         val analysis = remember(s, file) { SoundingMath.analyze(s, file.elevationM) }
                         val slider: @Composable (Modifier) -> Unit = { m ->
-                            if (file.soundings.size > 1) Slider(value = at.toFloat(), onValueChange = { index = it.roundToInt() }, valueRange = 0f..(file.soundings.size - 1).toFloat(), modifier = m)
+                            if (file.soundings.size > 1) CompactSlider(value = at.toFloat(), onValueChange = { index = it.roundToInt() }, valueRange = 0f..(file.soundings.size - 1).toFloat(), modifier = m)   // the value is rounded to an hour of the file, so the thumb sits on a forecast hour
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(enabled = at > 0, onClick = { index = at - 1 }) { Text("\u2039") }
@@ -289,7 +289,7 @@ private fun SkewT(s: Sounding, elevationM: Double, analysis: SoundingMath.Analys
             val red = tag(HEIGHT_RED)
             for (km in listOf(1, 3, 6, 9, 12, 15)) {
                 val p = analysis.profile.pAt(km * 1000.0)
-                if (p < P_TOP || p > P_BOTTOM || p >= analysis.profile.p[0] - 0.5) continue
+                if (p < P_TOP || p > P_BOTTOM || p >= analysis.profile.p[0] - 0.5 || km * 1000.0 > analysis.profile.z.last()) continue
                 drawContext.canvas.nativeCanvas.drawText("$km km", left + 3.dp.toPx(), y(p) - 2.dp.toPx(), red)
             }
             val marks = listOfNotNull(
