@@ -224,12 +224,12 @@ internal fun hazardColor(type: String) = when (type) {
 
 /**
  * SHARPpy's "possible hazard type", walked from the sounding's parameters: the tornado steps first, then the severe, flash flood, blizzard and heat steps. A tap shows the
- * walk with every test and the value it was given. It is the model profile at one point, not a forecast; the flash-flood test has no climatology here, so it cannot hold.
+ * walk with every test and the value it was given. It is the model profile at one point, not a forecast; the flash-flood test uses the reanalysis climatology of the place and day, and cannot hold outside the data (the contiguous U.S. and its edges).
  */
 @Composable
-internal fun HazardBanner(a: SharpAnalysis) {
+internal fun HazardBanner(a: SharpAnalysis, pw: simplemodelview.PwClimate.Normal?) {
     var open by remember { mutableStateOf(false) }
-    val result = remember(a) { SoundingHazard.classify(SoundingHazard.params(a)) }
+    val result = remember(a, pw) { SoundingHazard.classify(SoundingHazard.params(a), pw?.meanIn ?: Double.NaN, pw?.sigmaIn ?: Double.NaN) }
     val color = hazardColor(result.type)
     val unknown = result.nodes.filter { it.reached }.flatMap { it.lines }.count { it.state == SoundingHazard.State.Unknown }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp).background(color.copy(alpha = 0.12f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).clickable { open = !open }.padding(10.dp)) {
@@ -256,7 +256,7 @@ internal fun HazardBanner(a: SharpAnalysis) {
                 )
             }
             if (result.nodes.any { !it.reached }) Text("The steps after the one that holds are not walked.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("After SHARPpy's and SPC's flow chart. Model guidance at one grid point, not a forecast. The flash-flood test needs the place's precipitable-water climatology, which is not worked out here, so that step cannot hold.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("After SHARPpy's and SPC's flow chart. Model guidance at one grid point, not a forecast. The flash-flood step compares the precipitable water with NCEP/NCAR reanalysis 1991-2020 (mean plus two standard deviations at the place and day); outside the data it cannot hold.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

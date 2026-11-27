@@ -39,4 +39,4 @@ SHARPpy is distributed under the BSD 3-clause license:
     POSSIBILITY OF SUCH DAMAGE.
 
 
-The SARS databases (`SharpSarsData.kt`) are SHARPpy's: sars_supercell.txt (Rich Thompson, NOAA SPC) and sars_hail.txt (Ryan Jewell, NOAA SPC). The Kotlin engine is compared with wxqt-grib's C++ one on real profiles by `SharpParityTest` (see scripts/sharp-parity/).
+The SARS databases (`SharpSarsData.kt`; the precipitable-water climatology of the flash-flood step, `PwClimateData.kt`, is NCEP/NCAR Reanalysis 1 from NOAA PSL, public domain) are SHARPpy's: sars_supercell.txt (Rich Thompson, NOAA SPC) and sars_hail.txt (Ryan Jewell, NOAA SPC). The Kotlin engine is compared with wxqt-grib's C++ one on real profiles by `SharpParityTest` (see scripts/sharp-parity/).

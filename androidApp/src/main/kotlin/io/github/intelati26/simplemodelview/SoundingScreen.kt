@@ -128,6 +128,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {
                             // SPC's page is wide: the skew-T at the left, the hodograph beside it, the tables under them. A narrow screen stacks the same pieces.
                             val wide = maxWidth >= 700.dp
+                            val pwNormal = remember(file, s) { simplemodelview.PwClimate.at(file.lat, file.lon, simplemodelview.PwClimate.dayIndexOf(s.valid)) }
                             val shownParcel = analysis?.let { listOf(it.sb, it.ml, it.mu, it.fcst).getOrNull(parcelAt.coerceIn(0, 3)) }?.takeIf { it.valid }
                             val skew: @Composable () -> Unit = {
                                 if (analysis != null) {
@@ -183,7 +184,7 @@ internal fun SoundingScreen(station: BufkitStation, startModel: BufkitModel, onD
                                 Text("Model profile at the airport's grid point: ${model.label}, Iowa State's BUFKIT feed. Calculations after SHARPpy, by way of wxqt-grib.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Column(Modifier.verticalScroll(rememberScrollState())) {
-                                if (analysis != null) HazardBanner(analysis) else Text("This profile is too short to analyze.", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.error)
+                                if (analysis != null) HazardBanner(analysis, pwNormal) else Text("This profile is too short to analyze.", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.error)
                                 if (wide) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         Column(Modifier.weight(1f)) { skew() }
