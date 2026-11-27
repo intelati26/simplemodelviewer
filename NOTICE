@@ -9,7 +9,7 @@ Code
 
 Sounding calculations
 - The parcel, shear, helicity, storm motion, composite-parameter and hazard-type calculations of the sounding screen follow SHARPpy (BSD 3-clause) by way of
-  wxqt-grib's ports; the attribution and license text are in docs/sharppy-notice.md.
+  wxqt-grib's Kotlin-ported engine (SharpProfile, SharpParcel, SharpIndices, SharpAnalysis, SharpPrecip, SharpSars with its SPC analogue databases, SharpTornadoProb); the attribution and license text are in docs/sharppy-notice.md.
 - Model profiles: Iowa State University's BUFKIT feed (https://meteor.geol.iastate.edu/data/bufkit/) of NCEP's RRFS and GFS output (public domain model data).
 
 Map lines (androidApp/src/main/assets/statev2.f32, county.f32, ca.f32, mx.f32)

@@ -31,17 +31,23 @@ object SoundingHazard {
         val precipType: String? = null,
     )
 
-    private fun nan(v: Double?) = v ?: Double.NaN
+    /** wxqt's -9999 for a missing number is NaN here. */
+    private fun nn(v: Double) = if (gone(v)) Double.NaN else v
 
-    /** The chart's parameters of an [analysis]. */
-    fun params(a: SoundingMath.Analysis, precipType: String? = a.precip.type): Params {
+    /** The chart's parameters of an [analysis], read as wxqt's SoundingHazard::classify reads them. */
+    fun params(a: SharpAnalysis, precipType: String? = a.precip.type): Params {
+        val p = a.profile
         val low = a.lowRh; val mid = a.midRh
+        val sfcWind = p.wspd[p.sfc]
+        val sfcT = p.tmpc[p.sfc]
         return Params(
-            stpE = a.stpEffective, stpF = a.stp, srh01 = a.kinematics?.srh1 ?: Double.NaN, esrh = if (a.effective == null) Double.NaN else a.effectiveSrh, srw46 = nan(a.srw46Kt),
-            bwd08 = nan(a.bwd08Kt), sbLcl = nan(a.surface.lclZ), mlLcl = nan(a.mixed.lclZ), lr01 = nan(a.lapse01), mlCin = a.mixed.cin, muCin = a.mostUnstable.cin,
-            hasInflowLayer = a.effective != null, inflowBase = a.effective?.bottomZ ?: Double.NaN, rhMean = if (low != null && mid != null) (low + mid) / 2.0 else Double.NaN,
-            scp = a.supercell, ship = nan(a.ship), wndg = nan(a.wndg), dcape = nan(a.dcape), sigSvr = nan(a.sigSevere), mmp = nan(a.mmp), upshear = nan(a.corfidi?.upwind?.kt),
-            sfcWindMph = nan(a.sfcWindMph), sfcTempC = a.sfcTempC, heatIndexF = SharpTab.heatIndex(a.sfcTempC * 1.8 + 32.0, a.sfcRh), pwIn = a.pwMm / 25.4, precipType = precipType,
+            stpE = nn(a.stpEffective), stpF = nn(a.stpFixed), srh01 = nn(a.srh01), esrh = nn(a.effectiveSrh), srw46 = nn(a.kin46.stormRelative.speed()), bwd08 = nn(a.kin8.shear.speed()),
+            sbLcl = if (a.sb.valid) nn(a.sb.lclHght) else Double.NaN, mlLcl = if (a.ml.valid) nn(a.ml.lclHght) else Double.NaN, lr01 = nn(SharpIndices.lapseRateAgl(p, 0.0, 1000.0)),
+            mlCin = if (a.ml.valid) a.ml.cin else Double.NaN, muCin = if (a.mu.valid) a.mu.cin else Double.NaN,
+            hasInflowLayer = a.effective.valid, inflowBase = if (a.effective.valid) a.effective.botAgl else Double.NaN,
+            rhMean = if (!gone(low) && !gone(mid)) (low + mid) / 2.0 else Double.NaN, scp = nn(a.supercell), ship = nn(a.hail), wndg = nn(a.wndg), dcape = nn(a.dcape), sigSvr = nn(a.sigSevere), mmp = nn(a.mmp),
+            upshear = if (a.corfidi.valid) a.corfidi.upshear.speed() else Double.NaN, sfcWindMph = if (gone(sfcWind)) Double.NaN else sfcWind * 1.15078, sfcTempC = nn(sfcT),
+            heatIndexF = if (gone(sfcT) || gone(a.surfaceRh)) Double.NaN else SharpIndices.heatIndex(sfcT * 1.8 + 32.0, a.surfaceRh), pwIn = nn(a.precipitableWaterIn), precipType = precipType,
         )
     }
 

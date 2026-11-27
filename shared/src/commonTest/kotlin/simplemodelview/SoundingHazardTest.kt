@@ -87,20 +87,15 @@ class SoundingHazardTest {
     }
 
     @Test fun theHeatIndexFollowsTheNwsTable() {
-        assertEquals(90.0, SharpTab.heatIndex(85.0, 60.0), 1.0)                                     // the NWS table: 85 F at 60 % is 90 F
-        assertEquals(106.0, SharpTab.heatIndex(90.0, 70.0), 1.0)
-        assertEquals(109.0, SharpTab.heatIndex(100.0, 40.0), 1.0)
-        assertEquals(121.0, SharpTab.heatIndex(96.0, 65.0), 1.0)
-        assertTrue(SharpTab.heatIndex(68.0, 40.0) < 70.0)                                           // cool air: close to the temperature
+        assertEquals(90.0, SharpIndices.heatIndex(85.0, 60.0), 1.0)                                     // the NWS table: 85 F at 60 % is 90 F
+        assertEquals(106.0, SharpIndices.heatIndex(90.0, 70.0), 1.0)
+        assertEquals(109.0, SharpIndices.heatIndex(100.0, 40.0), 1.0)
+        assertEquals(121.0, SharpIndices.heatIndex(96.0, 65.0), 1.0)
+        assertTrue(SharpIndices.heatIndex(68.0, 40.0) < 70.0)                                           // cool air: close to the temperature
     }
 
     @Test fun theParametersOfASupercellEnvironmentFillTheChart() {
-        val s = Sounding(0, 0, (0..64).map { k ->
-            val z = k * 250.0
-            val t = maxOf(30.0 - 7.0 * z / 1000.0, -70.0)
-            SoundingLevel(1000.0 * kotlin.math.exp(-9.80665 * z / (287.04 * 275.0)), t, Double.NaN, minOf(23.0 - 7.8 * z / 1000.0, t), 140.0 + 130.0 * minOf(z, 6000.0) / 6000.0, 12.0 + 50.0 * minOf(z, 8000.0) / 8000.0, z)
-        }, emptyMap())
-        val a = assertNotNull(SoundingMath.analyze(s, 0.0, 35.0))
+        val a = SoundingFixtures.analysis(SoundingFixtures.supercell)
         val params = SoundingHazard.params(a)
         assertTrue(params.hasInflowLayer && params.inflowBase >= 0.0)
         assertTrue(listOf(params.stpE, params.stpF, params.srh01, params.esrh, params.srw46, params.bwd08, params.sbLcl, params.mlLcl, params.lr01, params.mlCin, params.rhMean,
@@ -108,5 +103,13 @@ class SoundingHazardTest {
         val r = SoundingHazard.classify(params)
         assertTrue(r.type != "NONE", "type ${r.type}")                                              // a warm, moist, sheared, unstable profile has a hazard
         assertEquals(13, r.nodes.size)
+    }
+
+    @Test fun aWindySnowySurfaceGivesTheBlizzardStep() {
+        val windy = SoundingFixtures.analysis(SoundingFixtures.build(1000.0, { z -> -6.0 - 6.0 * z / 1000.0 }, { z -> -6.5 - 6.0 * z / 1000.0 }, kt = { 35.0 }))
+        assertEquals("Snow", windy.precip.type)
+        assertEquals("BLIZZARD", SoundingHazard.classify(SoundingHazard.params(windy)).type)          // 35 kt = 40 mph at -6 C in snow
+        val calm = SoundingFixtures.analysis(SoundingFixtures.build(1000.0, { z -> -6.0 - 6.0 * z / 1000.0 }, { z -> -6.5 - 6.0 * z / 1000.0 }, kt = { 10.0 }))
+        assertEquals("NONE", SoundingHazard.classify(SoundingHazard.params(calm)).type)
     }
 }

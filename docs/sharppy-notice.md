@@ -1,6 +1,6 @@
 # SHARPpy attribution
 
-The sounding calculations of this app (`shared/src/commonMain/kotlin/simplemodelview/SoundingMath.kt`, `SoundingSharp.kt` and `SoundingHazard.kt`) reimplement algorithms
+The sounding calculations of this app (`shared/src/commonMain/kotlin/simplemodelview/Sharp*.kt` and `SoundingHazard.kt`) reimplement algorithms
 from **SHARPpy** (https://github.com/sharppy/SHARPpy), the open-source port of the Storm Prediction Center's SHARP/NSHARP sounding software, by way of the checked ports in
 wxqt-grib (https://github.com/intelati26/wxqt-grib, GPLv3: `src/sounding/`). They follow the structure and formulas of SHARPpy's `sharptab/params.py` (`parcelx`,
 `effective_inflow_layer`, `bunkers_storm_motion`, `dcape`, `stp_fixed`, `stp_cin`, `scp`, `ship`, the WNDG and MMP indices, `inferred_temp_adv`),
@@ -37,3 +37,6 @@ SHARPpy is distributed under the BSD 3-clause license:
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
+
+
+The SARS databases (`SharpSarsData.kt`) are SHARPpy's: sars_supercell.txt (Rich Thompson, NOAA SPC) and sars_hail.txt (Ryan Jewell, NOAA SPC). The Kotlin engine is compared with wxqt-grib's C++ one on real profiles by `SharpParityTest` (see scripts/sharp-parity/).
