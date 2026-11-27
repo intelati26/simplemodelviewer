@@ -608,8 +608,7 @@ private fun hazardColor(type: String) = when (type) {
 
 /**
  * SHARPpy's "possible hazard type", walked from the sounding's parameters: the tornado steps first, then the severe, flash flood, blizzard and heat steps. A tap shows the
- * walk with every test and the value it was given. It is the model profile at one point, not a forecast; the flash-flood test has no climatology here, and the
- * blizzard test no precipitation type, so those cannot hold.
+ * walk with every test and the value it was given. It is the model profile at one point, not a forecast; the flash-flood test has no climatology here, so it cannot hold.
  */
 @Composable
 private fun HazardBanner(a: SoundingMath.Analysis) {
@@ -641,7 +640,7 @@ private fun HazardBanner(a: SoundingMath.Analysis) {
                 )
             }
             if (result.nodes.any { !it.reached }) Text("The steps after the one that holds are not walked.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("After SHARPpy's and SPC's flow chart. Model guidance at one grid point, not a forecast. The flash-flood test needs the place's precipitable-water climatology and the blizzard test a precipitation type, neither of which is worked out here, so those steps cannot hold.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("After SHARPpy's and SPC's flow chart. Model guidance at one grid point, not a forecast. The flash-flood test needs the place's precipitable-water climatology, which is not worked out here, so that step cannot hold.", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

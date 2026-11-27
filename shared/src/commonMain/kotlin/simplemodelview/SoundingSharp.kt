@@ -311,4 +311,61 @@ object SharpTab {
         }
         return out
     }
+
+    // ---- the best-guess precipitation type (SHARPpy watch_type.py: init_phase, posneg_temperature, best_guess_precip; adapted there from SHARP code of Rich Thompson, SPC)
+
+    /** The precipitation type SPC prints and what led to it: the source layer's phase and temperature, and the warm and cold areas (J/kg) of the temperature profile below it. */
+    class PrecipGuess(val type: String, val phase: Int, val sourcePressure: Double, val sourceTempC: Double, val positiveArea: Double, val negativeArea: Double)
+
+    private fun rh(pr: SoundingMath.Profile, p: Double, t: Double, td: Double) = 100.0 * SoundingMath.mixingRatio(p, td) / SoundingMath.mixingRatio(p, t)
+
+    private fun rhAt(pr: SoundingMath.Profile, p: Double) = rh(pr, p, pr.tAt(p), pr.tdAt(p))
+
+    fun precipType(pr: SoundingMath.Profile): PrecipGuess {
+        if (pr.size < 3) return PrecipGuess("Unknown", -1, Double.NaN, Double.NaN, 0.0, 0.0)
+        // init_phase: the source is the highest 50 mb layer below 5 km AGL that is over 80 % RH at its top and its bottom; its phase follows its middle temperature
+        val tops = (0 until pr.size).filter { pr.z[it] in 0.0..5000.0 && rh(pr, pr.p[it], pr.t[it], pr.td[it]) > 80.0 }.map { pr.p[it] }
+        var highest = -1
+        for ((j, top) in tops.withIndex()) {
+            val bottom = top + 50.0
+            if (bottom <= pr.p[0] && rhAt(pr, bottom) > 80.0) highest = maxOf(highest, j)
+        }
+        var phase = -1; var srcP = Double.NaN; var srcT = Double.NaN
+        if (highest >= 0) {
+            srcP = tops[highest] + 50.0 - 25.0
+            srcT = pr.tAt(srcP)
+            phase = if (srcT > 0.0) 0 else if (srcT > -5.0) 1 else if (srcT > -9.0) 1 else 3
+        }
+        // posneg_temperature: from the source level down to the surface, the energy of the warm and the cold parts once a warm layer has been found
+        var tpos = 0.0; var tneg = 0.0
+        if (pr.p[pr.size - 1] <= 500.0 || pr.p[pr.size - 1] <= 850.0) {
+            val upper = if (phase >= 0 && srcP > 0.0) srcP else 500.0
+            var upperIndex = 0
+            for (i in 0 until pr.size) if (pr.p[i] > upper) upperIndex = i
+            var h1 = pr.zAt(upper); var t1 = pr.tAt(upper)
+            var warm = false; var cold = false; var totPos = 0.0; var totNeg = 0.0
+            for (i in upperIndex downTo 0) {
+                val t2 = pr.tAt(pr.p[i]); val h2 = pr.z[i]
+                val d1 = (0.0 - t1) / (t1 + 273.15); val d2 = (0.0 - t2) / (t2 + 273.15)
+                val energy = 9.8 * (d1 + d2) / 2.0 * (h2 - h1)
+                if (t2 > 0.0 && !warm) warm = true
+                if (t2 < 0.0 && warm && !cold) cold = true
+                if (warm) { if (energy > 0.0) totPos += energy else totNeg += energy }
+                t1 = t2; h1 = h2
+            }
+            if (warm && cold) { tpos = totPos; tneg = totNeg }
+        }
+        val sfc = pr.t[0]
+        val type = when {
+            phase < 0 -> "None"
+            phase == 0 && tneg >= 0.0 && sfc > 0.0 -> "Rain"
+            phase == 3 && tpos <= 0.0 && sfc <= 0.0 -> "Snow"
+            phase == 1 && tpos <= 0.0 && sfc > 0.0 -> "Rain"
+            phase == 1 && tpos <= 0.0 && sfc <= 0.0 -> if (pr.zAt(srcP) >= 3000.0) (if (srcT <= -4.0) "Sleet and Snow" else "Sleet") else "Freezing Rain/Drizzle"
+            phase == 3 && tpos <= 0.0 && sfc > 0.0 -> if (sfc > 4.0) "Rain" else "Snow"
+            tpos > 0.0 -> if (-tneg > 0.62 * tpos + 60.0) "Sleet" else if (sfc <= 0.0) "Freezing Rain" else "Rain"
+            else -> "Unknown"
+        }
+        return PrecipGuess(type, phase, srcP, srcT, tpos, tneg)
+    }
 }

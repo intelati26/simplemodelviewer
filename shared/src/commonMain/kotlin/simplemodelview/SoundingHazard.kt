@@ -34,7 +34,7 @@ object SoundingHazard {
     private fun nan(v: Double?) = v ?: Double.NaN
 
     /** The chart's parameters of an [analysis]. */
-    fun params(a: SoundingMath.Analysis, precipType: String? = null): Params {
+    fun params(a: SoundingMath.Analysis, precipType: String? = a.precip.type): Params {
         val low = a.lowRh; val mid = a.midRh
         return Params(
             stpE = a.stpEffective, stpF = a.stp, srh01 = a.kinematics?.srh1 ?: Double.NaN, esrh = if (a.effective == null) Double.NaN else a.effectiveSrh, srw46 = nan(a.srw46Kt),

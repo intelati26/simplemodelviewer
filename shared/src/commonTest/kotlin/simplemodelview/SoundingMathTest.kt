@@ -206,4 +206,30 @@ class SoundingMathTest {
         val high = SoundingMath.analyze(s, 0.0, 70.0)!!.advection.first().cPerHour
         assertEquals(kotlin.math.sin(70.0 * Math.PI / 180.0) / kotlin.math.sin(35.0 * Math.PI / 180.0), high / first.cPerHour, 0.01)
     }
+
+    private fun types(temp: (Double) -> Double, dew: (Double) -> Double, kt: (Double) -> Double = { 10.0 }) =
+        SoundingMath.analyze(build(1000.0, temp, dew, kt = kt), 0.0, 40.0)!!.precip
+
+    @Test fun precipitationTypeFollowsTheSourceLayerAndTheWarmAndColdAreas() {
+        // a saturated column all below freezing: snow
+        val snow = types({ z -> -6.0 - 6.0 * z / 1000.0 }, { z -> -6.5 - 6.0 * z / 1000.0 })
+        assertEquals("Snow", snow.type); assertEquals(3, snow.phase)
+        // saturated and warm at the ground: rain
+        assertEquals("Rain", types({ z -> 12.0 - 6.0 * z / 1000.0 }, { z -> 11.5 - 6.0 * z / 1000.0 }).type)
+        // a dry column: no source layer
+        assertEquals("None", types({ z -> -6.0 - 6.0 * z / 1000.0 }, { z -> -30.0 - 6.0 * z / 1000.0 }).type)
+        // warm nose at 1.5 to 2.5 km over a shallow cold layer at the ground: freezing rain (the cold area is under 60 J/kg more than the warm one allows)
+        val nose = types({ z -> if (z < 1000.0) -3.0 + 0.5 * z / 1000.0 else if (z < 3000.0) 2.0 else 2.0 - 7.0 * (z - 3000.0) / 1000.0 }, { z -> (if (z < 3000.0) 1.5 else -5.0) - 0.5 * z / 1000.0 })
+        assertTrue(nose.positiveArea > 0.0 && nose.negativeArea < 0.0, "areas ${nose.positiveArea} ${nose.negativeArea}")
+        assertTrue(nose.type in setOf("Freezing Rain", "Sleet", "Rain"), "type ${nose.type}")
+        assertTrue(snow.positiveArea == 0.0 && snow.negativeArea == 0.0)
+    }
+
+    @Test fun aWindySnowySurfaceGivesTheBlizzardStep() {
+        val a = SoundingMath.analyze(build(1000.0, { z -> -6.0 - 6.0 * z / 1000.0 }, { z -> -6.5 - 6.0 * z / 1000.0 }, kt = { 35.0 }), 0.0, 40.0)!!
+        assertEquals("Snow", a.precip.type)
+        assertEquals("BLIZZARD", SoundingHazard.classify(SoundingHazard.params(a)).type)           // 35 kt = 40 mph at -6 C in snow
+        val calm = SoundingMath.analyze(build(1000.0, { z -> -6.0 - 6.0 * z / 1000.0 }, { z -> -6.5 - 6.0 * z / 1000.0 }, kt = { 10.0 }), 0.0, 40.0)!!
+        assertEquals("NONE", SoundingHazard.classify(SoundingHazard.params(calm)).type)
+    }
 }

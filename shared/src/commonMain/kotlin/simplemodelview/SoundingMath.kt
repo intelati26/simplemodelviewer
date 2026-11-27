@@ -335,7 +335,7 @@ object SoundingMath {
                    val effective: EffectiveLayer?, val effectiveSrh: Double, val effectiveShearMs: Double?, val stpEffective: Double, val supercell: Double, val sigSevere: Double?, val ship: Double?,
                    val corfidi: Corfidi?, val midRh: Double?, val lowRh: Double?, val thetaE: List<Pair<Double, Double>>, val stormRelative: List<Pair<Double, Double>>, val advection: List<Advection>,
                    val wndg: Double?, val mmp: Double?, val dcape: Double?, val downTempC: Double?, val lapse01: Double?, val srw46Kt: Double?, val bwd08Kt: Double?,
-                   val sfcWindMph: Double?, val sfcTempC: Double, val sfcRh: Double)
+                   val sfcWindMph: Double?, val sfcTempC: Double, val sfcRh: Double, val precip: SharpTab.PrecipGuess)
 
     fun analyze(s: Sounding, elevationM: Double, latitude: Double = Double.NaN): Analysis? {
         val pr = profile(s, elevationM) ?: return null
@@ -358,7 +358,7 @@ object SoundingMath {
             k?.let { ml.cape * it.shear6Ms }, SharpTab.ship(pr, w, mu), SharpTab.corfidi(pr, w), SharpTab.meanRelativeHumidity(pr, p15, p40), SharpTab.meanRelativeHumidity(pr, pr.p[0], p15).takeIf { pr.p[0] > p15 },
             thetaEProfile(pr), if (rm == null) emptyList() else stormRelativeWinds(pr, rm), SharpTab.inferredAdvection(pr, w, latitude),
             SharpTab.wndg(pr, w, ml.cape, ml.cin, lapse03), SharpTab.mmp(pr, w, mu.cape), dc?.first, dc?.second, lapseRateZ(pr, 0.0, 1000.0), srw46, k?.layers?.getOrNull(3)?.shearKt,
-            if (pr.spd[0].isNaN()) null else pr.spd[0] * 1.15078, pr.t[0], 100.0 * mixingRatio(pr.p[0], pr.td[0]) / mixingRatio(pr.p[0], pr.t[0]),
+            if (pr.spd[0].isNaN()) null else pr.spd[0] * 1.15078, pr.t[0], 100.0 * mixingRatio(pr.p[0], pr.td[0]) / mixingRatio(pr.p[0], pr.t[0]), SharpTab.precipType(pr),
         )
     }
 }
