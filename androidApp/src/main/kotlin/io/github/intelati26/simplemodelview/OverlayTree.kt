@@ -86,7 +86,7 @@ internal fun OverlayTreeDialog(
     probSevere: ProbSevereState = ProbSevereState(), onProbSevere: (Boolean) -> Unit = {}, onProbSevereLink: () -> Unit = {},
     contours: Boolean, contoursAvailable: Boolean, onContours: (Boolean) -> Unit,
     /** The surface layers under the radar (MRMS page only; null: not offered): the temperature fill and the dewpoint lines. */
-    underTemp: Boolean? = null, onUnderTemp: (Boolean) -> Unit = {}, underDew: Boolean = false, onUnderDew: (Boolean) -> Unit = {},
+    underTemp: Boolean? = null, onUnderTemp: (Boolean) -> Unit = {}, underDew: Boolean = false, onUnderDew: (Boolean) -> Unit = {}, underTLines: Boolean = false, onUnderTLines: (Boolean) -> Unit = {}, underRh: Boolean = false, onUnderRh: (Boolean) -> Unit = {},
     /** METAR station plots (MRMS page only; null: not offered). */
     stations: Boolean? = null, onStations: (Boolean) -> Unit = {}, stationDensity: Int = 2, onStationDensity: (Int) -> Unit = {},
     onDismiss: () -> Unit,
@@ -234,7 +234,7 @@ internal fun OverlayTreeDialog(
                     }
                     // the surface under the radar
                     if (underTemp != null) {
-                        val summary = listOfNotNull("T".takeIf { underTemp }, "Td".takeIf { underDew }).joinToString(" + ").ifEmpty { "off" }
+                        val summary = listOfNotNull("T".takeIf { underTemp }, "Td lines".takeIf { underDew }, "T lines".takeIf { underTLines }, "RH lines".takeIf { underRh }).joinToString(" + ").ifEmpty { "off" }
                         TreeNode("Surface", summary, "surface" in open, { toggle("surface") }) {
                             Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
@@ -249,6 +249,20 @@ internal fun OverlayTreeDialog(
                                     Text("The analysis' 2 m dewpoint: every 10 F, the 60 F line heavier", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Switch(checked = underDew, onCheckedChange = onUnderDew)
+                            }
+                            Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Temperature lines", fontWeight = FontWeight.Bold)
+                                    Text("The analysis' 2 m temperature: every 10 F, the freezing line heavier, in red", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(checked = underTLines, onCheckedChange = onUnderTLines)
+                            }
+                            Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Relative humidity lines", fontWeight = FontWeight.Bold)
+                                    Text("Worked out from the temperature and dewpoint: every 10 %, the 50 % line heavier, in blue", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(checked = underRh, onCheckedChange = onUnderRh)
                             }
                             Note("Drawn after the radar and its overlays: they show first, the surface follows as it arrives. Each scan takes the newest analysis at or before it (about 6 MB per field, one per 15 minutes); when there is none, the National Blend of Models' forecast for that hour.")
                         }

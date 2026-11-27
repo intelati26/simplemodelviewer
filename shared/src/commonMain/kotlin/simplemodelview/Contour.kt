@@ -19,6 +19,8 @@ data class ContourSpec(
     val labelDivisor: Double = 1.0,
     val labelSuffix: String = "",
     val color: Int = 0x202020,
+    /** How many times the field is smoothed before it is traced: a rough field (humidity) needs more than a smooth one (heights). */
+    val smoothing: Int = Contours.SMOOTHING_PASSES,
 ) {
     /** The levels (shown units) between [lo] and [hi], at most [limit] of them (a sanity cap for fields with a wild range). */
     fun levels(lo: Double, hi: Double, limit: Int = 60): List<Double> {
@@ -60,6 +62,7 @@ object Contours {
             if (units == "F") ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0) else ContourSpec(5.0, boldEvery = 1000.0)
         id.startsWith("nbm_") && units == "F" && id.removePrefix("nbm_").let { it.startsWith("temp") || it.startsWith("appttemp") || it.startsWith("dewpoint") || it == "maxt" || it == "mint" } ->
             ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0)                                       // the National Blend of Models page's temperatures
+        id == "rh_anl" || id.startsWith("rh2m") -> Underlay.humiditySpec()                           // the humidity analysis, in percent
         id.startsWith("Model_0degC_Height") -> if (units == "km") ContourSpec(0.5, boldEvery = 2.0) else ContourSpec(2.0, boldEvery = 10.0)   // the MRMS model fields
         id.startsWith("Model_SurfaceTemp") || id.startsWith("Model_WetBulbTemp") ->
             if (units == "F") ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0) else ContourSpec(5.0, boldEvery = 1000.0)
@@ -70,7 +73,7 @@ object Contours {
      * The contour lines of [values] (a [grid] field, row 0 = south, stored units) inside [view], in picture pixels. [style] converts the
      * stored values to the shown ones the [spec] is written in. NaN cells break the lines.
      */
-    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = SMOOTHING_PASSES, levelsOverride: List<Double>? = null): List<ContourLine> {
+    fun lines(values: FloatArray, grid: Grid, view: View, style: Style, spec: ContourSpec, smoothing: Int = spec.smoothing, levelsOverride: List<Double>? = null): List<ContourLine> {
         val cols = grid.columns
         val rows = grid.rows
         if (values.size < cols * rows) return emptyList()

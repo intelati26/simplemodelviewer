@@ -22,7 +22,24 @@ object Underlay {
 
     /** The dewpoint lines: every 10 F (5 C), the 60 F (15 C) line heavier (the moisture that matters for storms), in green. */
     fun dewpointSpec(celsius: Boolean) =
-        if (celsius) ContourSpec(5.0, boldEvery = 1000.0, boldBase = 15.0, color = 0x0E6B2A) else ContourSpec(10.0, boldEvery = 1000.0, boldBase = 60.0, color = 0x0E6B2A)
+        if (celsius) ContourSpec(5.0, boldEvery = 1000.0, boldBase = 15.0, color = 0x0E6B2A, smoothing = 4) else ContourSpec(10.0, boldEvery = 1000.0, boldBase = 60.0, color = 0x0E6B2A, smoothing = 4)
+
+    /** The temperature lines: every 10 F (5 C), the freezing line heavier, in red. */
+    fun temperatureSpec(celsius: Boolean) =
+        if (celsius) ContourSpec(5.0, boldEvery = 1000.0, boldBase = 0.0, color = 0xB3261E, smoothing = 4) else ContourSpec(10.0, boldEvery = 1000.0, boldBase = 32.0, color = 0xB3261E, smoothing = 4)
+
+    /** The relative humidity lines: every 10 %, the 50 % and 100 % lines heavier, in blue. */
+    fun humiditySpec() = ContourSpec(10.0, boldEvery = 50.0, boldBase = 0.0, color = 0x1F5FBF, smoothing = 6)   // humidity is rough: smoothed more, so the lines read as areas
+
+    /** Relative humidity (%, 0 to 100) from the temperature and dewpoint in degrees C (the Magnus formula); NaN where either is missing. */
+    fun relativeHumidity(tempC: Float, dewC: Float): Float {
+        if (tempC.isNaN() || dewC.isNaN()) return Float.NaN
+        val rh = 100.0 * kotlin.math.exp(17.625 * dewC / (243.04 + dewC) - 17.625 * tempC / (243.04 + tempC))
+        return rh.coerceIn(0.0, 100.0).toFloat()
+    }
+
+    /** [relativeHumidity] over two fields of the same size. */
+    fun relativeHumidity(tempC: FloatArray, dewC: FloatArray): FloatArray = FloatArray(minOf(tempC.size, dewC.size)) { relativeHumidity(tempC[it], dewC[it]) }
 }
 
 /** NOAA's Real-Time Mesoscale Analysis, rapid update, on AWS: one file every 15 minutes with an `.idx`. */

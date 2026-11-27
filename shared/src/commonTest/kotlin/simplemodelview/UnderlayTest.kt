@@ -8,6 +8,24 @@ import kotlin.test.assertTrue
 
 class UnderlayTest {
     @Test
+    fun relativeHumidityFromTemperatureAndDewpoint() {
+        assertEquals(100f, Underlay.relativeHumidity(20f, 20f), 0.01f)                     // saturated
+        assertEquals(50f, Underlay.relativeHumidity(20f, 9.3f), 1.0f)                      // about half
+        assertEquals(100f, Underlay.relativeHumidity(10f, 12f), 0.01f)                     // a dewpoint above the temperature is capped
+        assertTrue(Underlay.relativeHumidity(Float.NaN, 5f).isNaN())
+        assertEquals(2, Underlay.relativeHumidity(floatArrayOf(10f, 20f, 30f), floatArrayOf(5f, 10f)).size)
+    }
+
+    @Test
+    fun theSurfaceLinesHaveTheirOwnColorsAndIntervals() {
+        assertEquals(0xB3261E, Underlay.temperatureSpec(false).color); assertEquals(10.0, Underlay.temperatureSpec(false).interval)
+        assertTrue(Underlay.temperatureSpec(false).isBold(32.0)); assertTrue(Underlay.temperatureSpec(true).isBold(0.0))
+        assertTrue(Underlay.humiditySpec().isBold(50.0)); assertTrue(!Underlay.humiditySpec().isBold(60.0))
+        assertEquals(Underlay.humiditySpec(), Contours.specFor("rh_anl", "%"))                  // the analysis page's humidity gets its lines too
+        assertEquals(0x1F5FBF, Underlay.humiditySpec().color)
+    }
+
+    @Test
     fun rtmaFileNames() {
         val t = epochOf(2026, 11, 17, 12, 7, 0)
         assertEquals("https://noaa-rtma-pds.s3.amazonaws.com/rtma2p5_ru.20261117/rtma2p5_ru.t1200z.2dvaranl_ndfd.grb2", RtmaBucket.analysisUrl(t))

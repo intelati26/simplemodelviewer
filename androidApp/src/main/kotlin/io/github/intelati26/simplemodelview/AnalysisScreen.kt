@@ -141,6 +141,12 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
                     SectorMenu(if (s.globe) "Globe" else s.sector.name, onGlobe = { vm.setGlobe(true) }, onPick = vm::pickSector, onMapHere = if (s.globe) vm::showMapHere else null)
                     TextButton(onClick = { sharing = true }, enabled = s.map != null, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Share") }
                 }
+                if (!s.globe) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Lines", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    for ((key, label) in listOf("t" to "T", "td" to "Td", "rh" to "RH")) androidx.compose.material3.FilterChip(
+                        selected = key in s.lines, onClick = { vm.setLine(key, key !in s.lines) }, label = { Text(label) }, modifier = Modifier.height(30.dp),
+                    )
+                }
                 s.loadStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }

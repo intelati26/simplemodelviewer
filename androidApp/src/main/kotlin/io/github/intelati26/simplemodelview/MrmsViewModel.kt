@@ -123,6 +123,8 @@ data class MrmsState(
     val overlayInfo: String? = null,                  // which overlay files are on the picture, or why one is missing
     val underTemp: Boolean = false,                   // the surface temperature drawn under the radar (a translucent fill)
     val underDew: Boolean = false,                    // surface dewpoint lines over the picture
+    val underTLines: Boolean = false,                 // surface temperature lines over the picture
+    val underRh: Boolean = false,                     // surface relative humidity lines (worked out from the temperature and dewpoint)
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
     val stationDensity: Int = 2,                      // 1 as before, 2 and 3 closer up and down
     val station: StationDetail? = null,               // the station tapped: its reports and chart
@@ -142,6 +144,10 @@ data class MrmsState(
     val alertImage: android.graphics.Bitmap? = null,   // the graphic of the discussion being read
     val alertDetail: Pair<String, String?>? = null,   // title and text of the alert being read (text null: loading)
 ) {
+    /** Any surface line layer (dewpoint, temperature, humidity) is on. */
+    val underLines: Boolean get() = underDew || underTLines || underRh
+    /** Any surface layer at all is on: the fill or a line. */
+    val underAny: Boolean get() = underTemp || underLines
     val overlayName: String get() = overlayName(overlays)
     val file: MrmsFile? get() = files.getOrNull(index)
 }
@@ -193,6 +199,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             loopLength = prefs.getInt("mrms_loop_frames", 0),
             underTemp = prefs.getBoolean("mrms_under_t", false),
             underDew = prefs.getBoolean("mrms_under_td", false),
+            underTLines = prefs.getBoolean("mrms_under_tl", false),
+            underRh = prefs.getBoolean("mrms_under_rh", false),
             stations = prefs.getBoolean("mrms_stations", false),
             stationDensity = prefs.getInt("mrms_station_density", 2).coerceIn(1, 3),
         )
@@ -906,12 +914,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         _state.value.crosshair?.let { (fx, fy) -> onTap(fx, fy) }
     }
 
-    fun setUnderTemp(on: Boolean) = setUnder(on, _state.value.underDew)
-    fun setUnderDew(on: Boolean) = setUnder(_state.value.underTemp, on)
+    fun setUnderTemp(on: Boolean) = setUnder { it.copy(underTemp = on) }
+    fun setUnderDew(on: Boolean) = setUnder { it.copy(underDew = on) }
+    fun setUnderTLines(on: Boolean) = setUnder { it.copy(underTLines = on) }
+    fun setUnderRh(on: Boolean) = setUnder { it.copy(underRh = on) }
 
-    private fun setUnder(temp: Boolean, dew: Boolean) {
-        prefs.edit().putBoolean("mrms_under_t", temp).putBoolean("mrms_under_td", dew).apply()
-        update { it.copy(underTemp = temp, underDew = dew) }
+    private fun setUnder(change: (MrmsState) -> MrmsState) {
+        update(change)
+        val st = _state.value
+        prefs.edit().putBoolean("mrms_under_t", st.underTemp).putBoolean("mrms_under_td", st.underDew).putBoolean("mrms_under_tl", st.underTLines).putBoolean("mrms_under_rh", st.underRh).apply()
         if (shown != null && !_state.value.playing) showFrame()
     }
 
@@ -988,17 +999,46 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun dewShown(t: UnderTemp, td: FloatArray) =
         ShownOverlay("Td", Product("surface_td", "Surface dewpoint", MrmsCatalog.MODEL, tempStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { td }
 
+    private fun humidityStyle() = Style(units = "%", digits = 0)
+
+    private fun rhShown(t: UnderTemp, rh: FloatArray) =
+        ShownOverlay("RH", Product("surface_rh", "Surface relative humidity", MrmsCatalog.MODEL, humidityStyle(), hasMembers = false, timeDimension = null, grid = t.grid)) { rh }
+
+    /**
+     * The surface line layers that are on, drawn over [dst] (null: the globe): the temperature (the file's own field), the dewpoint, and the relative humidity worked out from
+     * both. Their read-out entries come with them. A field that cannot be had is left out and named in [missing].
+     */
+    private class UnderLineSet(val lines: List<FieldLines>, val shown: List<ShownOverlay>, val missing: List<String>)
+
+    private suspend fun underLineSet(st: MrmsState, t: UnderTemp, dst: android.graphics.RectF?): UnderLineSet {
+        val lines = ArrayList<FieldLines>(); val shown = ArrayList<ShownOverlay>(); val missing = ArrayList<String>()
+        val td = if (st.underDew || st.underRh) underDew(t) else null
+        if (st.underTLines) {
+            lines += FieldLines(t.values, t.grid, tempStyle(), Underlay.temperatureSpec(st.units.celsius), "tl|${t.pick.url}|${t.grid.id}", dst)
+            shown += tempShown(t)
+        }
+        if (st.underDew) { if (td == null) missing += "dewpoint" else { lines += dewLines(t, td, dst); shown += dewShown(t, td) } }
+        if (st.underRh) {
+            if (td == null) missing += "humidity"
+            else {
+                val rh = withContext(Dispatchers.Default) { Underlay.relativeHumidity(t.values, td) }
+                lines += FieldLines(rh, t.grid, humidityStyle(), Underlay.humiditySpec(), "rh|${t.pick.url}|${t.grid.id}", dst)
+                shown += rhShown(t, rh)
+            }
+        }
+        return UnderLineSet(lines, shown, missing)
+    }
+
     /** The surface layers of one flat picture, all at once (a zoomed-in detail, an export). */
     private class UnderParts(val fill: Overlay?, val lines: List<FieldLines>)
 
     private suspend fun underParts(base: MrmsFile, v: View): UnderParts {
         val st = _state.value
-        if (!st.underTemp && !st.underDew) return UnderParts(null, emptyList())
+        if (!st.underAny) return UnderParts(null, emptyList())
         val t = underTemp(base, underGridFor(v.grid)) ?: return UnderParts(null, emptyList())
         val dst = rectOn(t.grid, v)
         val fill = if (st.underTemp) underFill(t, dst) else null
-        val td = if (st.underDew) underDew(t) else null
-        return UnderParts(fill, listOfNotNull(td?.let { dewLines(t, it, dst) }))
+        return UnderParts(fill, underLineSet(st, t, dst).lines)
     }
 
     private fun joinInfo(overlays: String?, under: List<String>): String? =
@@ -1106,13 +1146,13 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             suspend fun <T> stage(load: suspend () -> T): T = staged(progressive, { paint(final = false) }, load)
             val layers = stage { globeOverlays(file, grid) }
             if (layers.isNotEmpty()) { globeLayers = layers.map { it.first }; overlayShown = layers.map { it.second }; dirty = true }
-            if (st.underTemp || st.underDew) {
+            if (st.underAny) {
                 val t = stage { underTemp(file, grid) }
                 if (t != null) {
                     under += tempShown(t)
                     if (st.underTemp) { globeUnder = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY)); dirty = true }
-                    if (st.underDew) stage { underDew(t) }?.let { td ->
-                        globeLines = listOf(dewLines(t, td, null)); under += dewShown(t, td); dirty = true
+                    if (st.underLines) stage { underLineSet(st, t, null) }.let { set ->
+                        globeLines = set.lines; under += set.shown.filter { s -> under.none { it.name == s.name } }; dirty = true
                     }
                 }
             }
@@ -1154,8 +1194,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         ov = stage { overlayLayers(file, sector.name, sectorBox(sector), v, cache = true) { p -> stepFor(p, sector) } }
         if (ov.isNotEmpty()) dirty = true
         // priority: the surface temperature, then the station reports, then the dewpoint lines (drawn in their own places: the plots stay on top)
-        val t = if (st.underTemp || st.underDew) stage { underTemp(file, underGridFor(grid)) } else null
-        if (st.underTemp || st.underDew) {
+        val t = if (st.underAny) stage { underTemp(file, underGridFor(grid)) } else null
+        if (st.underAny) {
             if (t == null) underInfo += "No surface temperature near this time"
             else {
                 under += tempShown(t)
@@ -1168,10 +1208,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             plots = stage { plotsFor(file, v, sectorBox(sector, 0.5)) }
             if (plots.isNotEmpty()) dirty = true
         } else shownPlots = emptyList()
-        if (st.underDew && t != null) {
-            val td = stage { underDew(t) }
-            if (td == null) underInfo += "no dewpoint"
-            else { lines = listOf(dewLines(t, td, rectOn(t.grid, v))); under += dewShown(t, td); dirty = true }
+        if (st.underLines && t != null) {
+            val set = stage { underLineSet(st, t, rectOn(t.grid, v)) }
+            for (m in set.missing) underInfo += "no $m"
+            lines = set.lines; under += set.shown.filter { s -> under.none { it.name == s.name } }; dirty = true
         }
         paint(final = true)
         if (cmp != null) {
@@ -1572,7 +1612,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 launch {
                     val gate = Semaphore(3)
                     var done = 0
-                    val underOn = st.underTemp || st.underDew
+                    val underOn = st.underAny
                     val underFetched = java.util.Collections.synchronizedSet(HashSet<String>())
                     coroutineScope {
                         launch { prefetchArchivedAlerts(window.map { st.files[it] }) }          // the warnings and watches that were in force at each frame
@@ -1647,10 +1687,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val layers = globeOverlays(file, frame.window.grid).map { it.first }
             var underlay: GlobeOverlay? = null
             var fieldLines: List<FieldLines> = emptyList()
-            if (st.underTemp || st.underDew) {
+            if (st.underAny) {
                 underTemp(file, frame.window.grid)?.let { t ->
                     if (st.underTemp) underlay = GlobeOverlay(t.grid, t.values, tempStyle().copy(opacity = Underlay.FILL_OPACITY))
-                    if (st.underDew) underDew(t)?.let { td -> fieldLines = listOf(dewLines(t, td, null)) }
+                    if (st.underLines) fieldLines = underLineSet(st, t, null).lines
                 }
             }
             val shapes = alertShapesFor(file)

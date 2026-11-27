@@ -47,6 +47,7 @@ data class AnalysisState(
     val product: AnalysisProduct = AnalysisCatalog.default,
     val other: AnalysisProduct? = null,             // the product shown before this one (the compare shows it under this one)
     val compare: Boolean = false,
+    val lines: Set<String> = emptySet(),            // the surface lines drawn over any product: "t", "td", "rh"
     val activePane: Int = 0,                        // the compare pane the product controls change: 0 above, 1 below (a tap on a pane selects it)
     val paneB: List<Bitmap>? = null,                // that product's own field and, over it, the shared lines
     val titleB: String? = null,
@@ -101,6 +102,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             product = AnalysisCatalog.byId(prefs.getString("analysis_product", null)) ?: AnalysisCatalog.default,
             sector = Sector.all.firstOrNull { it.name == prefs.getString("analysis_sector", null) } ?: Sector.all[0],
             places = decodePlaces(prefs.getString("places", "").orEmpty()),
+            lines = prefs.getString("analysis_lines", "").orEmpty().split(',').filter { it in LINE_KINDS.map { k -> k.key } }.toSet(),
             settings = readSettings(),
         )
     )
@@ -260,6 +262,26 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         if (on) showFrame()
     }
 
+    /** Draws or stops drawing one surface line kind ("t", "td", "rh") over whatever product is shown. */
+    fun setLine(key: String, on: Boolean) {
+        val next = _state.value.lines.let { if (on) it + key else it - key }
+        prefs.edit().putString("analysis_lines", next.joinToString(",")).apply()
+        update { it.copy(lines = next) }
+        showFrame()
+    }
+
+    /** The line layers that are on, from the same frame's other products (the lines of the shown product itself are its own contours), when they share its grid. */
+    private suspend fun lineLayersFor(frame: AnalysisFrame, shownId: String, grid: Grid): List<FieldLines> {
+        val keys = _state.value.lines
+        return LINE_KINDS.filter { it.key in keys && it.productId != shownId }.mapNotNull { k ->
+            val p = AnalysisCatalog.all.firstOrNull { it.id == k.productId } ?: return@mapNotNull null
+            val f = try { field(frame, p) } catch (e: CancellationException) { throw e } catch (_: Exception) { null } ?: return@mapNotNull null
+            if (f.first != grid) null else FieldLines(f.second, grid, p.style, k.spec, "an|${frame.valid}|${k.productId}|${grid.id}")
+        }
+    }
+
+    private var shownLines: List<FieldLines> = emptyList()
+
     /** The compare's second picture: the other product of the same frame, as its own field only, with the lines over it once. */
     private suspend fun computePaneB(product: Product, values: FloatArray, v: View, frame: AnalysisFrame) {
         val st = _state.value
@@ -273,7 +295,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             val settings = st.settings
             val (over, fld) = withContext(Dispatchers.Default) {
                 val bv = if (gridB == product.grid) v else viewFor(st.sector, gridB)
-                renderer.render(product, product.style, values, emptyList(), v, dark, counties = settings.counties, part = RenderPart.Over) to
+                renderer.render(product, product.style, values, emptyList(), v, dark, counties = settings.counties, fieldLines = shownLines, part = RenderPart.Over) to
                     renderer.render(syn, syn.style, valuesB, emptyList(), bv, dark, contours = settings.contours, barbDensity = settings.barbDensity, part = RenderPart.Field)
             }
             update { it.copy(paneB = listOf(fld, over), titleB = b.title, styleB = syn.style) }
@@ -300,8 +322,10 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val v = viewFor(st.sector, grid)
+        val lineLayers = lineLayersFor(frame, st.product.id, grid)
+        shownLines = lineLayers
         val bitmap = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), v, dark, contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity)
+            renderer.render(product, product.style, values, emptyList(), v, dark, contours = _state.value.settings.contours, counties = _state.value.settings.counties, barbDensity = _state.value.settings.barbDensity, fieldLines = lineLayers)
         }
         view = v
         update { it.copy(map = bitmap, busy = false, detail = null, focus = handoff.takeFocus(v)) }
@@ -417,7 +441,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val settings = _state.value.settings
                 val bitmap = withContext(Dispatchers.Default) {
-                    renderer.render(product, product.style, values, emptyList(), window.view, dark, contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity)
+                    renderer.render(product, product.style, values, emptyList(), window.view, dark, contours = settings.contours, counties = settings.counties, barbDensity = settings.barbDensity, fieldLines = shownLines)
                 }
                 if (view === base && shown?.second === values) update { it.copy(detail = DetailLayer(bitmap, window.left, window.top, window.right, window.bottom, 2.5)) }
             } catch (e: CancellationException) { throw e } catch (_: Exception) { }
@@ -584,8 +608,9 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             return Triple(bitmap, product, source)
         }
         val box = areaView(area, grid)
+        val exportLines = lineLayersFor(frame, st.product.id, grid)
         val map = withContext(Dispatchers.Default) {
-            renderer.render(product, product.style, values, emptyList(), box, dark = false, contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity)
+            renderer.render(product, product.style, values, emptyList(), box, dark = false, contours = st.settings.contours, counties = st.settings.forExport().counties, barbDensity = st.settings.forExport().barbDensity, fieldLines = exportLines)
         }
         return Triple(map, product, source)
     }
@@ -643,3 +668,11 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         const val LOOP_MILLIS = 250L
     }
 }
+
+private class LineKind(val key: String, val productId: String, val spec: simplemodelview.ContourSpec)
+
+private val LINE_KINDS = listOf(
+    LineKind("t", "t2m_anl", simplemodelview.Underlay.temperatureSpec(false)),
+    LineKind("td", "td2m_anl", simplemodelview.Underlay.dewpointSpec(false)),
+    LineKind("rh", "rh_anl", simplemodelview.Underlay.humiditySpec()),
+)
