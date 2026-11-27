@@ -44,3 +44,10 @@ internal fun CoroutineScope.goToPlaceOnPage(
         tap(((c + 0.5 - v.col0) / v.cols).toFloat(), ((v.row0 + v.rows - r - 0.5) / v.rows).toFloat())
     }
 }
+
+/** The favorites with [id] added or removed, saved (every page shares the one list). */
+fun toggleFavorite(prefs: android.content.SharedPreferences, current: Set<String>, id: String): Set<String> {
+    val favorites = if (id in current) current - id else current + id
+    prefs.edit().putStringSet("favorites", favorites).apply()
+    return favorites
+}

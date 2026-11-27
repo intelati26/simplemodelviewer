@@ -23,7 +23,7 @@ import simplemodelview.globeInverse
 import simplemodelview.BackupPlace
 import simplemodelview.Place
 import simplemodelview.loopWindowAnchored
-import simplemodelview.nextPlayable
+import simplemodelview.playWhileLoading
 import simplemodelview.VideoSize
 import simplemodelview.SettingsBackup
 import simplemodelview.isValidEmail
@@ -438,8 +438,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleFavorite(product: Product) {
-        val favorites = _state.value.favorites.let { if (product.id in it) it - product.id else it + product.id }
-        prefs.edit().putStringSet("favorites", favorites).apply()
+        val favorites = toggleFavorite(prefs, _state.value.favorites, product.id)
         update { it.copy(favorites = favorites) }
     }
 
@@ -720,43 +719,14 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
             update { it.copy(playing = true, prefetch = 0f) }
             val window = loopWindowFor(st)
             outlook.wantAll(window.map { st.times[it] })      // the outlook of every day the loop reaches, ready when the loop gets there
-            val count = window.count()
-            val ready = BooleanArray(st.times.size)
-            var finished = false
             try {
-                // download the loop in order, a few frames at a time (politely), while the slideshow is already running on the frames that
-                // have arrived: 1-5, then 1-10, then 1-20 as the rest load. The HTTP cache then serves each pass.
-                val loader = launch {
-                    val gate = Semaphore(3)
-                    var done = 0
-                    coroutineScope {
-                        for (t in window) launch {
-                            gate.withPermit {
-                                try { repo.prefetchFrame(s, product, t, st.member); ready[t] = true } catch (e: CancellationException) { throw e } catch (_: Exception) { }
-                            }
-                            done += 1
-                            update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
-                        }
-                    }
-                    finished = true
-                }
-                if (_state.value.timeIndex in window) ready[_state.value.timeIndex] = true      // the frame on screen is loaded
-                while (true) {
-                    val at = _state.value.timeIndex
-                    val next = nextPlayable(at, ready)
-                    if (next == null || next == at) {
-                        if (finished && ready.none { it }) throw RefsException("The loop's frames could not be downloaded.")
-                        delay(150)
-                        continue
-                    }
-                    update { it.copy(timeIndex = next) }
-                    loadFrame()
-                    // a short rest at the end of the cycle (longer once everything has loaded), then back to frame 1
-                    delay(if (next < at) (if (finished) 1200L else 500L) else 250L)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+                // downloaded in order, a few at a time (politely), while the slideshow runs on the frames that have arrived (the HTTP cache then serves each pass)
+                playWhileLoading(window, st.times.size, { _state.value.timeIndex },
+                    fetch = { t -> repo.prefetchFrame(s, product, t, st.member); true },
+                    onProgress = { p -> update { it.copy(prefetch = p) } },
+                    show = { next -> update { it.copy(timeIndex = next) }; loadFrame() },
+                    dwell = { 250L })
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }
         }

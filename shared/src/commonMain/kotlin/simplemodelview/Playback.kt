@@ -1,5 +1,13 @@
 package simplemodelview
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+
 /**
  * The frame a slideshow shows after [current] when it plays only the frames that have arrived ([ready]): the next ready one, wrapping round to the
  * first ready one (normally frame 1). Playing starts at once with the first few frames and each new frame joins the cycle as it downloads
@@ -50,3 +58,55 @@ fun loopWindowFromShown(total: Int, length: Int, shown: Int): IntRange {
 /** The window of a frame-counted loop: from the frame shown when [fromShown], else the page's usual one ([loopWindow]). */
 fun loopWindowAnchored(total: Int, length: Int, shown: Int, fromShown: Boolean, fromEnd: Boolean = false): IntRange =
     if (fromShown) loopWindowFromShown(total, length, shown) else loopWindow(total, length, fromEnd)
+
+/**
+ * A loop that plays while it downloads, the same on every page: the frames of [window] are fetched in order, [parallel] at a time, and the slideshow
+ * runs at once on the frames that have arrived (1-5, then 1-10, then 1-20, ...). [fetch] gets one frame ready and says whether it is (it may also
+ * fetch what the frame needs besides); [alongside] runs next to the downloads. [current] is the frame on screen (it counts as ready); [show] puts
+ * the next one on screen; [dwell] is how long it stays (going back to the first frame rests at least a little longer, more once everything has
+ * loaded). [onProgress] gets the fraction downloaded, then null. Runs until cancelled; fails when no frame could be downloaded.
+ */
+suspend fun playWhileLoading(
+    window: IntRange,
+    size: Int,
+    current: () -> Int,
+    fetch: suspend (Int) -> Boolean,
+    onProgress: (Float?) -> Unit,
+    show: suspend (Int) -> Unit,
+    dwell: (Int) -> Long,
+    parallel: Int = 3,
+    alongside: suspend CoroutineScope.() -> Unit = {},
+): Unit = coroutineScope {
+    val count = window.count()
+    val ready = BooleanArray(size)
+    var finished = false
+    launch {
+        val gate = Semaphore(parallel)
+        var done = 0
+        coroutineScope {
+            launch { alongside() }
+            for (i in window) launch {
+                gate.withPermit {
+                    val ok = try { fetch(i) } catch (e: CancellationException) { throw e } catch (_: Exception) { false }
+                    if (ok) ready[i] = true
+                }
+                done += 1
+                onProgress(if (done == count) null else done / count.toFloat())
+            }
+        }
+        finished = true
+    }
+    if (current() in window) ready[current()] = true          // the frame on screen is loaded
+    while (true) {
+        val at = current()
+        val next = nextPlayable(at, ready)
+        if (next == null || next == at) {
+            if (finished && ready.none { it }) throw IllegalStateException("The loop's frames could not be downloaded.")
+            delay(150)
+            continue
+        }
+        show(next)
+        val wrap = if (next < at) (if (finished) 1200L else 500L) else 0L
+        delay(maxOf(dwell(next), wrap))
+    }
+}

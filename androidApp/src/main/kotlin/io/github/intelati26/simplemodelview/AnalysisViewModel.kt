@@ -31,7 +31,7 @@ import simplemodelview.View
 import simplemodelview.decodePlaces
 import simplemodelview.formatUtc
 import simplemodelview.globeInverse
-import simplemodelview.nextPlayable
+import simplemodelview.playWhileLoading
 import simplemodelview.placeLabel
 import simplemodelview.readout
 import java.io.File
@@ -458,38 +458,16 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
             update { it.copy(playing = true, prefetch = 0f) }
             val frames = st.frames
             val window = if (AppContainer.loopFromShown.value) st.index until frames.size else frames.indices
-            val count = window.count()
-            val ready = BooleanArray(frames.size)
-            var finished = false
             try {
-                launch {
-                    val gate = Semaphore(3)
-                    var done = 0
-                    coroutineScope {
-                        for (i in window) launch {
-                            gate.withPermit {
-                                val ok = try { repo.prefetch(frames[i], st.product.needs, now()) } catch (e: CancellationException) { throw e } catch (_: Exception) { false }
-                                if (ok) ready[i] = true else update { it.copy(missing = it.missing + frames[i].valid) }
-                            }
-                            done += 1
-                            update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
-                        }
-                    }
-                    finished = true
-                }
-                if (_state.value.index in window) ready[_state.value.index] = true
-                while (true) {
-                    val at = _state.value.index
-                    val next = nextPlayable(at, ready)
-                    if (next == null || next == at) {
-                        if (finished && ready.none { it }) throw IllegalStateException("The loop's frames could not be downloaded.")
-                        delay(150)
-                        continue
-                    }
-                    update { it.copy(index = next) }
-                    showCurrent()
-                    delay(if (next < at) (if (finished) 1200L else 500L) else LOOP_MILLIS)
-                }
+                playWhileLoading(window, frames.size, { _state.value.index },
+                    fetch = { i ->
+                        val ok = repo.prefetch(frames[i], st.product.needs, now())
+                        if (!ok) update { it.copy(missing = it.missing + frames[i].valid) }
+                        ok
+                    },
+                    onProgress = { p -> update { it.copy(prefetch = p) } },
+                    show = { next -> update { it.copy(index = next) }; showCurrent() },
+                    dwell = { LOOP_MILLIS })
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }

@@ -63,7 +63,7 @@ import simplemodelview.overlayToleranceSeconds
 import simplemodelview.defaultOverlayThresholdIndex
 import simplemodelview.shownValue
 import simplemodelview.fixed
-import simplemodelview.nextPlayable
+import simplemodelview.playWhileLoading
 import simplemodelview.globeForward
 import simplemodelview.globeInverse
 import simplemodelview.isValidEmail
@@ -1066,8 +1066,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
     fun toggleFavorite(product: Product) {
-        val favorites = _state.value.favorites.let { if (product.id in it) it - product.id else it + product.id }
-        prefs.edit().putStringSet("favorites", favorites).apply()
+        val favorites = toggleFavorite(prefs, _state.value.favorites, product.id)
         update { it.copy(favorites = favorites) }
     }
 
@@ -1528,50 +1527,22 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
             val window = loopWindowFor(st)
-            val count = window.count()
-            val ready = BooleanArray(st.files.size)
-            var finished = false
             try {
-                // download in order, a few at a time (politely), while the slideshow already runs on the frames that have arrived:
-                // 1-5, then 1-10, then 1-20 as the rest load; the HTTP cache then serves each pass
-                launch {
-                    val gate = Semaphore(3)
-                    var done = 0
-                    val underOn = st.underAny
-                    val underFetched = java.util.Collections.synchronizedSet(HashSet<String>())
-                    coroutineScope {
-                        launch { prefetchArchivedAlerts(window.map { st.files[it] }) }          // the warnings and watches that were in force at each frame
-                        for (i in window) launch {
-                            gate.withPermit {
-                                try {
-                                    repo.prefetch(st.files[i]); ready[i] = true
-                                    for (layer in st.overlays) overlayFileFor(layer, st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
-                                    // the surface analysis last: one file (two messages) serves the scans of a quarter hour
-                                    if (underOn) underPick(st.files[i])?.takeIf { underFetched.add(it.url) }?.let { pick -> try { surface.prefetch(pick) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
-                                } catch (e: CancellationException) { throw e } catch (_: Exception) { }
-                            }
-                            done += 1
-                            update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
-                        }
-                    }
-                    finished = true
-                }
-                if (_state.value.index in window) ready[_state.value.index] = true          // the frame on screen is loaded
-                while (true) {
-                    val at = _state.value.index
-                    val next = nextPlayable(at, ready)
-                    if (next == null || next == at) {
-                        if (finished && ready.none { it }) throw IllegalStateException("The loop's frames could not be downloaded.")
-                        delay(150)
-                        continue
-                    }
-                    update { it.copy(index = next) }
-                    showCurrent()
-                    delay(if (next < at) (if (finished) 1200L else 500L) else 150L)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+                val underOn = st.underAny
+                val underFetched = java.util.Collections.synchronizedSet(HashSet<String>())
+                playWhileLoading(window, st.files.size, { _state.value.index },
+                    alongside = { prefetchArchivedAlerts(window.map { st.files[it] }) },          // the warnings and watches that were in force at each frame
+                    fetch = { i ->
+                        repo.prefetch(st.files[i])
+                        for (layer in st.overlays) overlayFileFor(layer, st.files[i])?.let { f -> try { repo.prefetch(f) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
+                        // the surface analysis last: one file (two messages) serves the scans of a quarter hour
+                        if (underOn) underPick(st.files[i])?.takeIf { underFetched.add(it.url) }?.let { pick -> try { surface.prefetch(pick) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
+                        true
+                    },
+                    onProgress = { p -> update { it.copy(prefetch = p) } },
+                    show = { next -> update { it.copy(index = next) }; showCurrent() },
+                    dwell = { 150L })
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }
         }

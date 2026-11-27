@@ -41,7 +41,7 @@ import simplemodelview.isValidEmail
 import simplemodelview.nbmDwellMillis
 import simplemodelview.nbmLoopWindow
 import simplemodelview.nbmStepHours
-import simplemodelview.nextPlayable
+import simplemodelview.playWhileLoading
 import simplemodelview.placeLabel
 import simplemodelview.readout
 import java.io.File
@@ -303,8 +303,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
     fun toggleFavorite(product: Product) {
-        val favorites = _state.value.favorites.let { if (product.id in it) it - product.id else it + product.id }
-        prefs.edit().putStringSet("favorites", favorites).apply()
+        val favorites = toggleFavorite(prefs, _state.value.favorites, product.id)
         update { it.copy(favorites = favorites) }
     }
 
@@ -602,44 +601,15 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
             val frames = st.frames
             val window = loopWindowFor(st)
             outlook.wantAllAs(window.map { frames[it].valid to frames[it].run })      // the outlook of every day the loop reaches, ready when the loop gets there
-            val count = window.count()
-            val ready = BooleanArray(frames.size)
-            var finished = false
             try {
-                // download in order, a few at a time (politely), while the slideshow already runs on the frames that have arrived
-                launch {
-                    val gate = Semaphore(3)
-                    var done = 0
-                    coroutineScope {
-                        for (i in window) launch {
-                            gate.withPermit {
-                                try { repo.prefetch(frames[i]); ready[i] = true } catch (e: CancellationException) { throw e } catch (_: Exception) { }
-                            }
-                            done += 1
-                            update { it.copy(prefetch = if (done == count) null else done / count.toFloat()) }
-                        }
-                    }
-                    finished = true
-                }
-                if (_state.value.index in window) ready[_state.value.index] = true          // the frame on screen is loaded
-                while (true) {
-                    val at = _state.value.index
-                    val next = nextPlayable(at, ready)
-                    if (next == null || next == at) {
-                        if (finished && ready.none { it }) throw IllegalStateException("The loop's frames could not be downloaded.")
-                        delay(150)
-                        continue
-                    }
-                    update { it.copy(index = next) }
-                    showCurrent()
-                    // each frame is held for as long as the forecast hours it stands for (1 x for hourly frames, 3 x for 3-hourly, 6 x for 6-hourly),
-                    // so a day of forecast takes the same time to play at every spacing; going back to the first frame rests a little longer
-                    val wrap = if (next < at) (if (finished) 1200L else 500L) else 0L
-                    delay(maxOf(nbmDwellMillis(frames, next, LOOP_BASE_MILLIS), wrap))
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+                // each frame is held for as long as the forecast hours it stands for (1 x for hourly frames, 3 x for 3-hourly, 6 x for 6-hourly),
+                // so a day of forecast takes the same time to play at every spacing
+                playWhileLoading(window, frames.size, { _state.value.index },
+                    fetch = { i -> repo.prefetch(frames[i]); true },
+                    onProgress = { p -> update { it.copy(prefetch = p) } },
+                    show = { next -> update { it.copy(index = next) }; showCurrent() },
+                    dwell = { next -> nbmDwellMillis(frames, next, LOOP_BASE_MILLIS) })
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }
         }
