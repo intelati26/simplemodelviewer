@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -155,7 +156,7 @@ internal fun ZoomableMap(
     }
 }
 
-/** Two products of the same area and time one above the other: A is the page's full picture; B is its own field on the shared lines. Zoom, pan and the crosshair are shared. */
+/** Two products of the same area and time one above the other (side by side when that shows the maps larger): A is the page's full picture; B is its own field on the shared lines. Zoom, pan and the crosshair are shared. */
 @Composable
 internal fun ComparePanes(
     modifier: Modifier, a: android.graphics.Bitmap, b: List<android.graphics.Bitmap>, titleA: String, titleB: String, background: Color, crosshair: Pair<Float, Float>?,
@@ -165,22 +166,28 @@ internal fun ComparePanes(
     active: Int = 0, onSelect: (Int) -> Unit = {},
 ) {
     val zoom = remember(a.width, a.height) { ZoomState() }
-    androidx.compose.foundation.layout.Column(modifier.fillMaxSize()) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize()) {
+        // whichever arrangement shows the (fitted) maps larger: a wide map stacks, a tall one sits side by side
+        val fitStacked = minOf(maxWidth.value / a.width, maxHeight.value / 2 / a.height)
+        val fitSide = minOf(maxWidth.value / 2 / a.width, maxHeight.value / a.height)
+        val side = fitSide > fitStacked
         // the selected pane's label is in the accent color, with a thin line along its top edge
         @Composable fun label(text: String, selected: Boolean) = androidx.compose.material3.Text(
             text, Modifier.padding(4.dp).background(if (selected) Color(0xE02F5DA8) else Color(0xB0000000)).padding(horizontal = 6.dp, vertical = 1.dp),
             color = Color.White, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1,
         )
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        val paneA: @Composable (Modifier) -> Unit = { m -> Box(m) {
             ZoomableMap(a, crosshair, "First product", detail = detail, onViewport = onViewport, onTap = { x, y -> onSelect(0); onTap(x, y) }, onScrub = onScrub, focus = focus, onFocusApplied = onFocusApplied, zoom = zoom)
             label(titleA, active == 0)
             if (active == 0) Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF2F5DA8)))
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        } }
+        val paneB: @Composable (Modifier) -> Unit = { m -> Box(m) {
             ZoomableMap(b.first(), crosshair, "Second product", onViewport = { _, _, _, _ -> }, onTap = { x, y -> onSelect(1); onTap(x, y) }, onScrub = onScrub, layers = b, layersBackground = background, zoom = zoom, reportViewport = false)
             label(titleB, active == 1)
             if (active == 1) Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF2F5DA8)))
-        }
+        } }
+        if (side) androidx.compose.foundation.layout.Row(Modifier.fillMaxSize()) { paneA(Modifier.weight(1f).fillMaxHeight()); paneB(Modifier.weight(1f).fillMaxHeight()) }
+        else androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) { paneA(Modifier.weight(1f).fillMaxWidth()); paneB(Modifier.weight(1f).fillMaxWidth()) }
     }
 }
 
