@@ -438,14 +438,14 @@ private fun windText(w: SoundingMath.Wind) = "%03.0f/%.0f".format(w.dir, w.kt)
 @Composable
 private fun ParcelTable(a: SoundingMath.Analysis, selected: Int, onSelect: (Int) -> Unit) {
     val rows = listOf(a.surface, a.mixed, a.mostUnstable)
-    Column(Modifier.padding(top = 10.dp)) {
-        Text("PARCEL".padEnd(13) + pad("CAPE", 5) + pad("CINH", 5) + pad("LCL", 7) + pad("LI", 4) + pad("LFC", 7) + pad("EL", 7), fontFamily = TABLE, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("PARCEL".padEnd(13) + pad("CAPE", 5) + pad("CINH", 5) + pad("LCL", 7) + pad("LI", 4) + pad("LFC", 7) + pad("EL", 7), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Bold)
         for ((i, p) in rows.withIndex()) {
             val name = if (i == 2) "MU (${p.startP.roundToInt()} mb)" else p.name
             Text(
                 name.padEnd(13) + pad("%.0f".format(p.cape), 5) + pad("%.0f".format(p.cin), 5) + pad(metersOrM(p.lclZ), 7) + pad(p.li?.let { "%.0f".format(it) } ?: "M", 4) + pad(metersOrM(p.lfcZ), 7) + pad(metersOrM(p.elZ), 7),
-                Modifier.fillMaxWidth().clickable { onSelect(i) }.background(if (i == selected) Color(0x33FF9800) else Color.Transparent).padding(vertical = 3.dp),
-                fontFamily = TABLE, fontSize = 11.sp, color = if (i == selected) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurface,
+                Modifier.fillMaxWidth().clickable { onSelect(i) }.background(if (i == selected) Color(0x33FF9800) else Color.Transparent).padding(vertical = 1.dp),
+                fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp, color = if (i == selected) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurface,
             )
         }
     }
@@ -454,12 +454,12 @@ private fun ParcelTable(a: SoundingMath.Analysis, selected: Int, onSelect: (Int)
 /** SPC's shear table: helicity, bulk shear, mean wind and storm-relative wind for the layers to 1, 3, 6 and 8 km, and the Bunkers storm motions. */
 @Composable
 private fun WindTable(k: SoundingMath.Kinematics) {
-    Column(Modifier.padding(top = 10.dp)) {
-        Text("LAYER".padEnd(12) + pad("SRH", 5) + pad("SHEAR", 6) + pad("MNWIND", 9) + pad("SRW", 9), fontFamily = TABLE, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Text("SRH m2/s2, shear kt, winds dir/kt", fontFamily = TABLE, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        for (l in k.layers) Text(l.label.padEnd(12) + pad("%.0f".format(l.srh), 5) + pad("%.0f".format(l.shearKt), 6) + pad(windText(l.mean), 9) + pad(windText(l.stormRelative), 9), fontFamily = TABLE, fontSize = 11.sp)
-        Text("Bunkers right = ${windText(k.rightMover)} kt   left = ${windText(k.leftMover)} kt", Modifier.padding(top = 4.dp), fontFamily = TABLE, fontSize = 11.sp)
-        Text("0-6 km mean wind = ${windText(k.mean06)} kt", fontFamily = TABLE, fontSize = 11.sp)
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("LAYER".padEnd(12) + pad("SRH", 5) + pad("SHEAR", 6) + pad("MNWIND", 9) + pad("SRW", 9), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Bold)
+        Text("SRH m2/s2, shear kt, winds dir/kt", fontFamily = TABLE, fontSize = 10.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        for (l in k.layers) Text(l.label.padEnd(12) + pad("%.0f".format(l.srh), 5) + pad("%.0f".format(l.shearKt), 6) + pad(windText(l.mean), 9) + pad(windText(l.stormRelative), 9), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        Text("Bunkers right = ${windText(k.rightMover)} kt   left = ${windText(k.leftMover)} kt", Modifier.padding(top = 4.dp), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        Text("0-6 km mean wind = ${windText(k.mean06)} kt", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
     }
 }
 
@@ -467,9 +467,9 @@ private fun WindTable(k: SoundingMath.Kinematics) {
 @Composable
 private fun IndexTable(a: SoundingMath.Analysis) {
     fun lapse(v: Double?) = v?.let { "%.1f".format(it) } ?: "M"
-    Column(Modifier.padding(top = 10.dp)) {
-        Text("PW = ${"%.2f".format(a.pwMm / 25.4)} in    K = ${a.kIndex?.let { "%.0f".format(it) } ?: "M"}    STP (fixed) = ${"%.1f".format(a.stp)}", fontFamily = TABLE, fontSize = 11.sp)
-        Text("Lapse rates (C/km): sfc-3km agl ${lapse(a.lapse03)}   3-6km ${lapse(a.lapse36)}", Modifier.padding(top = 2.dp), fontFamily = TABLE, fontSize = 11.sp)
-        Text("                   850-500mb ${lapse(a.lapse850500)}   700-500mb ${lapse(a.lapse700500)}", fontFamily = TABLE, fontSize = 11.sp)
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("PW = ${"%.2f".format(a.pwMm / 25.4)} in    K = ${a.kIndex?.let { "%.0f".format(it) } ?: "M"}    STP (fixed) = ${"%.1f".format(a.stp)}", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        Text("Lapse rates (C/km): sfc-3km agl ${lapse(a.lapse03)}   3-6km ${lapse(a.lapse36)}", Modifier.padding(top = 2.dp), fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
+        Text("                   850-500mb ${lapse(a.lapse850500)}   700-500mb ${lapse(a.lapse700500)}", fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp)
     }
 }
