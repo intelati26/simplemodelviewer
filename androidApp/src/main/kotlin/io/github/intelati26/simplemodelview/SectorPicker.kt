@@ -3,6 +3,7 @@ package io.github.intelati26.simplemodelview
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,6 +19,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -55,6 +59,8 @@ internal fun SectorPicker(
     val accent = MaterialTheme.colorScheme.primary
     val land = MaterialTheme.colorScheme.surfaceVariant
     val onAccent = MaterialTheme.colorScheme.onPrimary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    var preview by remember { mutableStateOf<Sector?>(null) }       // the region under the finger: its box is outlined until the finger lifts (lifting picks it)
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
@@ -71,17 +77,35 @@ internal fun SectorPicker(
                     Modifier.fillMaxWidth().aspectRatio(aspect).clip(RoundedCornerShape(6.dp))
                         .semantics { contentDescription = "Map of the regions: tap a dot to choose it" }
                         .pointerInput(regions) {
-                            detectTapGestures { p ->
+                            val reach = 40.dp.toPx()
+                            fun nearest(p: Offset): Sector? {
                                 val scale = size.width / (east - west).toFloat()
-                                val hit = regions.minByOrNull { s ->
-                                    val (lo, la) = centerOf(s)
+                                val hit = regions.minByOrNull { r ->
+                                    val (lo, la) = centerOf(r)
                                     val dx = ((lo * k - west).toFloat()) * scale - p.x; val dy = ((north - la).toFloat()) * scale - p.y
                                     dx * dx + dy * dy
-                                }
-                                if (hit != null) {
-                                    val (lo, la) = centerOf(hit)
-                                    val dx = ((lo * k - west).toFloat()) * scale - p.x; val dy = ((north - la).toFloat()) * scale - p.y
-                                    if (kotlin.math.sqrt(dx * dx + dy * dy) <= 40.dp.toPx()) onPick(hit)
+                                } ?: return null
+                                val (lo, la) = centerOf(hit)
+                                val dx = ((lo * k - west).toFloat()) * scale - p.x; val dy = ((north - la).toFloat()) * scale - p.y
+                                return hit.takeIf { kotlin.math.sqrt(dx * dx + dy * dy) <= reach }
+                            }
+                            // touch and slide over the dots to see each box; lift on one to choose it (a plain tap does the same)
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val down = awaitFirstDown()
+                                    preview = nearest(down.position)
+                                    var last = preview
+                                    while (true) {
+                                        val e = awaitPointerEvent()
+                                        val ch = e.changes.firstOrNull() ?: break
+                                        if (!ch.pressed) break
+                                        last = nearest(ch.position)
+                                        preview = last
+                                        ch.consume()
+                                    }
+                                    val pick = preview
+                                    preview = null
+                                    if (pick != null) onPick(pick)
                                 }
                             }
                         },
@@ -97,6 +121,13 @@ internal fun SectorPicker(
                     regions.firstOrNull { it.name == current }?.let { s ->
                         drawRect(accent.copy(alpha = 0.18f), Offset(x(s.west), y(s.north)), androidx.compose.ui.geometry.Size(x(s.east) - x(s.west), y(s.south) - y(s.north)))
                         drawRect(accent, Offset(x(s.west), y(s.north)), androidx.compose.ui.geometry.Size(x(s.east) - x(s.west), y(s.south) - y(s.north)), style = Stroke(2.dp.toPx()))
+                    }
+                    preview?.let { s ->
+                        val tl = Offset(x(s.west), y(s.north)); val sz = androidx.compose.ui.geometry.Size(x(s.east) - x(s.west), y(s.south) - y(s.north))
+                        drawRect(tertiary.copy(alpha = 0.22f), tl, sz)
+                        drawRect(tertiary, tl, sz, style = Stroke(2.5.dp.toPx()))
+                        val tag = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 12.dp.toPx(); isFakeBoldText = true; color = tertiary.toArgb() }
+                        drawContext.canvas.nativeCanvas.drawText(s.name, 8.dp.toPx(), size.height - 8.dp.toPx(), tag)
                     }
                     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         textSize = 9.dp.toPx(); textAlign = android.graphics.Paint.Align.CENTER; isFakeBoldText = true; color = onAccent.toArgb()
