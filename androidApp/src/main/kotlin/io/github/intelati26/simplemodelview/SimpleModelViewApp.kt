@@ -47,6 +47,24 @@ object AppContainer {
     val loopFromShown by lazy { kotlinx.coroutines.flow.MutableStateFlow(prefs.getBoolean("loop_from_shown", false)) }
     fun setLoopFromShown(on: Boolean) { prefs.edit().putBoolean("loop_from_shown", on).apply(); loopFromShown.value = on }
     val core by lazy { NativeCore() }
+
+    /** The size chosen for videos and compare pictures: one choice for every page. */
+    var videoSize: simplemodelview.VideoSize
+        get() = simplemodelview.VideoSize.byName(prefs.getString("video_size", null))
+        set(value) { prefs.edit().putString("video_size", value.name).apply() }
+
+    /** Whether the page should ask for a contact e-mail now: not when one is set, and at most once in 30 minutes. */
+    private var lastContactPrompt = 0L
+    fun contactPromptDue(email: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (simplemodelview.isValidEmail(email) || now - lastContactPrompt < 30 * 60 * 1000 && lastContactPrompt != 0L) return false
+        lastContactPrompt = now
+        return true
+    }
+
+    /** True when the connection is metered (loops set to Wi-Fi only do not download then). */
+    fun isMetered(): Boolean = (app.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered
+
     /** The loop videos being made in the background (see [RenderManager]). */
     val renders by lazy { RenderManager(app) }
     val lines by lazy { MapLines(app, core) }

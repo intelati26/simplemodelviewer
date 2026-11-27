@@ -448,11 +448,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- places ----
-    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
 
-    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    fun editPlace(old: Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
 
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
@@ -463,7 +459,6 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         return if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the area shown" else readout(core, product, values, emptyList(), column, row)
     }
 
-    fun deletePlace(place: Place) = AppContainer.places.delete(place)
 
     fun goToPlace(place: Place, follow: Boolean = false) {
         val st = _state.value
@@ -507,7 +502,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     private fun startPlaying() {
         val st = _state.value
         if (st.frames.size < 2) return
-        if (wifiOnlyLoop && isMetered()) { update { it.copy(notice = "Loops are set to download on Wi-Fi only. Connect to Wi-Fi or change this in Settings.") }; return }
+        if (wifiOnlyLoop && AppContainer.isMetered()) { update { it.copy(notice = "Loops are set to download on Wi-Fi only. Connect to Wi-Fi or change this in Settings.") }; return }
         playJob = viewModelScope.launch {
             update { it.copy(playing = true, prefetch = 0f) }
             val frames = st.frames
@@ -550,16 +545,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun isMetered(): Boolean {
-        val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        return cm.isActiveNetworkMetered
-    }
-
     // ---- share / export ----
-    var videoSize: VideoSize
-        get() = VideoSize.byName(prefs.getString("video_size", null))
-        set(value) { prefs.edit().putString("video_size", value.name).apply() }
-
     private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH)
 
     private fun areaView(area: ShareArea, grid: Grid, x: ExportCtx<AnalysisState> = exportCtx()): View =

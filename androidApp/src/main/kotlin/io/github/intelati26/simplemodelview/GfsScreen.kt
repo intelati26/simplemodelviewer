@@ -261,13 +261,13 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
             onDismissRequest = { savingPlace = false },
             title = { Text("Save place") },
             text = { androidx.compose.material3.OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
-            confirmButton = { TextButton(onClick = { vm.savePlace(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
+            confirmButton = { TextButton(onClick = { AppContainer.places.save(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
     if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
-    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = AppContainer.places::delete, live = live, onEdit = AppContainer.places::edit, read = vm::readAt, marked = s.tapLatLon)
 
     if (pickSince) {
         val now = System.currentTimeMillis()

@@ -224,13 +224,13 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
             onDismissRequest = { savingPlace = false },
             title = { Text("Save place") },
             text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
-            confirmButton = { TextButton(onClick = { vm.savePlace(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
+            confirmButton = { TextButton(onClick = { AppContainer.places.save(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
         )
     }
     val live = rememberLiveControl { vm.goToPlace(it, follow = true) }
     if (soundingStations) s.tapLatLon?.let { (la, lo) -> SoundingStationsDialog(la, lo) { soundingStations = false } }
-    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon)
+    if (places) PlacesDialog(s.places, onDismiss = { places = false }, onGo = { places = false; vm.goToPlace(it) }, onDelete = AppContainer.places::delete, live = live, onEdit = AppContainer.places::edit, read = vm::readAt, marked = s.tapLatLon)
     if (settings) SettingsDialog(
         s.settings, vm::setSettings,
         onExport = { vm.reportNotice("Settings files are exported and imported from the other pages' settings.") },
@@ -239,9 +239,9 @@ internal fun AnalysisScreen(vm: AnalysisViewModel, onOpen: (String) -> Unit) {
     ) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.frames.size > 1, current = s.sector.name, globe = s.globe, comparing = s.compare && s.other != null, onDismiss = { sharing = false },
-        initialSize = vm.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
+        initialSize = AppContainer.videoSize, estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
-            vm.videoSize = size
+            AppContainer.videoSize = size
             sharing = false
             scope.launch {
                 try {

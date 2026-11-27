@@ -647,11 +647,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- places ----
-    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
 
-    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    fun editPlace(old: Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
 
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
@@ -663,7 +659,6 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         return if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the REFS area" else readout(core, product, data, _state.value.members, column, row)
     }
 
-    fun deletePlace(place: Place) = AppContainer.places.delete(place)
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
     /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
@@ -705,18 +700,12 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         pickCycle(newer)
     }
 
-    private var lastContactPrompt = 0L
 
     /**
      * The contact address is optional but wanted (it goes into the User-Agent): without one, ask again at every launch and when the
      * app comes back after more than 30 minutes. Never blocks; "Not now" simply closes it.
      */
-    fun promptForContact() {
-        val now = System.currentTimeMillis()
-        if (isValidEmail(_state.value.settings.contactEmail) || now - lastContactPrompt < 30 * 60 * 1000 && lastContactPrompt != 0L) return
-        lastContactPrompt = now
-        update { it.copy(contactPrompt = true) }
-    }
+    fun promptForContact() { if (AppContainer.contactPromptDue(_state.value.settings.contactEmail)) update { it.copy(contactPrompt = true) } }
 
     fun dismissContactPrompt() = update { it.copy(contactPrompt = false) }
 
@@ -727,10 +716,6 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val pictureH = if (area == ShareArea.Globe && globeW > 0) GLOBE_LOOP_SIDE else v.pixelHeight
         return VideoSize.estimateMegabytes(size, pictureW, pictureH + pictureW / 6, loopWindowFor(_state.value).count())   // + header and legend
     }
-
-    var videoSize: VideoSize
-        get() = VideoSize.byName(prefs.getString("video_size", null))
-        set(value) { prefs.edit().putString("video_size", value.name).apply() }
 
     fun reportNotice(text: String) = update { it.copy(notice = text) }
 
@@ -773,7 +758,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val st = _state.value
         val product = st.product ?: return
         if (st.times.size < 2) return
-        if (st.settings.wifiOnlyLoop && isMetered()) {
+        if (st.settings.wifiOnlyLoop && AppContainer.isMetered()) {
             update { it.copy(notice = "Loops are set to download on Wi-Fi only. Connect to Wi-Fi or change this in Settings.") }
             return
         }
@@ -821,11 +806,6 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
                 update { it.copy(playing = false, prefetch = null, busy = false, error = e.message) }
             }
         }
-    }
-
-    private fun isMetered(): Boolean {
-        val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        return cm.isActiveNetworkMetered
     }
 
     /** The UI reports which part of the picture is on screen (after pinch-zoom / pan): a finer picture of it is drawn once the zoom settles. */

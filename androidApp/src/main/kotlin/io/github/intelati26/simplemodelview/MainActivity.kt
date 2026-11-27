@@ -325,7 +325,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
             onDismissRequest = { savingPlace = false },
             title = { Text("Save place") },
             text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
-            confirmButton = { TextButton(onClick = { vm.savePlace(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
+            confirmButton = { TextButton(onClick = { AppContainer.places.save(name.trim(), lat, lon); savingPlace = false }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { savingPlace = false }) { Text("Cancel") } },
         )
     }
@@ -334,16 +334,16 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
     if (places) PlacesDialog(
         s.places, onDismiss = { places = false },
         onGo = { places = false; vm.goToPlace(it) },
-        onDelete = vm::deletePlace, live = live, onEdit = vm::editPlace, read = vm::readAt, marked = s.tapLatLon,
+        onDelete = AppContainer.places::delete, live = live, onEdit = AppContainer.places::edit, read = vm::readAt, marked = s.tapLatLon,
     )
     if (restartAsk) RestartDialog(onLater = { restartAsk = false })
     if (settings) SettingsDialog(s.settings, vm::setSettings, onExport = { exportLauncher.launch("simplemodelview-settings.json") }, onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, showContours = true, showBarbs = true) { settings = false }
     if (sharing) ShareDialog(
         canLoop = s.times.size > 1, current = s.sector.name, globe = s.globe, comparing = s.compare && s.other != null, onDismiss = { sharing = false },
-        initialSize = vm.videoSize,
+        initialSize = AppContainer.videoSize,
         estimate = { area, size -> vm.estimateLoopMegabytes(area, size) },
         onShare = { area, loop, size ->
-            vm.videoSize = size
+            AppContainer.videoSize = size
             sharing = false
             scope.launch {
                 if (!loop) {

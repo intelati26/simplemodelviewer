@@ -533,11 +533,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- places (bookmarks) ----
-    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
 
-    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    /** The place [old] with a new name and / or position (names are the keys; its place in the list stays). */
-    fun editPlace(old: Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
 
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
@@ -548,7 +544,6 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         return if (column !in 0 until grid.columns || row !in 0 until grid.rows) "${placeLabel(lat, lon)}   outside the area shown" else readout(core, product, values, emptyList(), column, row)
     }
 
-    fun deletePlace(place: Place) = AppContainer.places.delete(place)
 
     /** Puts the crosshair on a saved place (switching to CONUS when the current sector does not contain it). */
     /** [follow]: a live fix; it only moves the crosshair, and never reloads another sector to reach it. */
@@ -619,15 +614,9 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         return extras > 0
     }
 
-    private var lastContactPrompt = 0L
 
     /** Optional but wanted: ask again at every launch and after 30 minutes away, until an address is saved. "Not now" just closes it. */
-    fun promptForContact() {
-        val now = System.currentTimeMillis()
-        if (isValidEmail(_state.value.settings.contactEmail) || now - lastContactPrompt < 30 * 60 * 1000 && lastContactPrompt != 0L) return
-        lastContactPrompt = now
-        update { it.copy(contactPrompt = true) }
-    }
+    fun promptForContact() { if (AppContainer.contactPromptDue(_state.value.settings.contactEmail)) update { it.copy(contactPrompt = true) } }
 
     fun dismissContactPrompt() = update { it.copy(contactPrompt = false) }
 
@@ -665,7 +654,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
     private fun startPlaying() {
         val st = _state.value
         if (st.frames.size < 2) return
-        if (wifiOnlyLoop && isMetered()) {
+        if (wifiOnlyLoop && AppContainer.isMetered()) {
             update { it.copy(notice = "Loops are set to download on Wi-Fi only. Connect to Wi-Fi or change this in Settings.") }
             return
         }
@@ -717,16 +706,7 @@ class NbmViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun isMetered(): Boolean {
-        val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        return cm.isActiveNetworkMetered
-    }
-
     // ---- share / export ----
-    var videoSize: VideoSize
-        get() = VideoSize.byName(prefs.getString("video_size", null))
-        set(value) { prefs.edit().putString("video_size", value.name).apply() }
-
     /** The window of the grid an export of [area] covers: the visible part of the picture, the sector on screen, or a meso sector; at the export scale. */
     private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH)
 

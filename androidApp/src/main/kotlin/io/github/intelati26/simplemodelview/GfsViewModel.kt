@@ -711,9 +711,6 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
     fun clearTap() = update { it.copy(crosshair = null, readout = null, tapLatLon = null) }
 
     // ---- places (bookmarks): the list is shared by every page ----
-    fun savePlace(name: String, lat: Double, lon: Double) = AppContainer.places.save(name, lat, lon)
-    fun deletePlace(place: simplemodelview.Place) = AppContainer.places.delete(place)
-    fun editPlace(old: simplemodelview.Place, name: String, lat: Double, lon: Double) = AppContainer.places.edit(old, name, lat, lon)
 
     /** The shown field's value at a place, as a line of text, without moving the map or the crosshair. */
     fun readAt(lat: Double, lon: Double): String {
@@ -788,14 +785,8 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         return extras > 0
     }
 
-    private var lastContactPrompt = 0L
 
-    fun promptForContact() {
-        val now = System.currentTimeMillis()
-        if (isValidEmail(_state.value.settings.contactEmail) || now - lastContactPrompt < 30 * 60 * 1000 && lastContactPrompt != 0L) return
-        lastContactPrompt = now
-        update { it.copy(contactPrompt = true) }
-    }
+    fun promptForContact() { if (AppContainer.contactPromptDue(_state.value.settings.contactEmail)) update { it.copy(contactPrompt = true) } }
 
     fun dismissContactPrompt() = update { it.copy(contactPrompt = false) }
 
@@ -865,10 +856,6 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         st.loopTimes?.let { (a, b) -> simplemodelview.loopIndices(st.frames.map { it.valid }, a, b) }
             ?: if (st.history) st.frames.indices else nbmLoopWindow(st.frames, st.loopSpanHours, if (AppContainer.loopFromShown.value) st.index else 0)
 
-    var videoSize: simplemodelview.VideoSize
-        get() = simplemodelview.VideoSize.byName(prefs.getString("video_size", null))
-        set(value) { prefs.edit().putString("video_size", value.name).apply() }
-
     /**
      * One frame of an export, drawn from [st] alone (the page is not touched, so it can be used, or left, while the loop is made): the globe or
      * polar map at [side] pixels square (turned as [st] had it; [globeW] x [globeH] is the screen's globe size then), or the flat map of the sector.
@@ -916,7 +903,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         val out = File(dir, "gfs_loop_${st.product}_${st.frames[window.last].valid}.mp4")
         var exporter: LoopExporter? = null
-        val size = videoSize
+        val size = AppContainer.videoSize
         val other = st.other?.takeIf { st.compare && !st.globe }
         try {
             for ((k, i) in window.withIndex()) {
@@ -977,7 +964,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
         val header = "Valid ${formatUtc(file.valid)} (+${file.leadHours} h)   Run ${st.cycle?.label ?: ""}   Data: NOAA/NWS Global Forecast System (experimental viewer)"
         // a compare: the second pane (as drawn on screen) under this one
         val layers = st.paneB?.takeIf { st.compare && !st.globe && it.isNotEmpty() }
-        val image = if (layers != null) renderer.shareCompareImage(map, renderer.composeLayers(layers, 0xFFEDEFF2.toInt()), st.title, st.titleB.orEmpty(), product, product.style, product, st.styleB ?: product.style, header, videoSize.width)
+        val image = if (layers != null) renderer.shareCompareImage(map, renderer.composeLayers(layers, 0xFFEDEFF2.toInt()), st.title, st.titleB.orEmpty(), product, product.style, product, st.styleB ?: product.style, header, AppContainer.videoSize.width)
             else renderer.shareImage(map, product, product.style, header, emptyList())
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         val out = File(dir, (if (layers != null) "compare_" else "") + "gfs_${product.id}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}.png")
