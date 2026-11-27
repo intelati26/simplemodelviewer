@@ -444,8 +444,8 @@ private fun ParcelTable(a: SoundingMath.Analysis, selected: Int, onSelect: (Int)
             val name = if (i == 2) "MU (${p.startP.roundToInt()} mb)" else p.name
             Text(
                 name.padEnd(13) + pad("%.0f".format(p.cape), 5) + pad("%.0f".format(p.cin), 5) + pad(metersOrM(p.lclZ), 7) + pad(p.li?.let { "%.0f".format(it) } ?: "M", 4) + pad(metersOrM(p.lfcZ), 7) + pad(metersOrM(p.elZ), 7),
-                Modifier.fillMaxWidth().clickable { onSelect(i) }.background(if (i == selected) Color(0x33FF9800) else Color.Transparent).padding(vertical = 1.dp),
-                fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp, color = if (i == selected) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurface,
+                Modifier.fillMaxWidth().clickable { onSelect(i) }.background(if (i == selected) Color(0x4DFF9800) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(3.dp)).padding(vertical = 3.dp, horizontal = 2.dp),
+                fontFamily = TABLE, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = if (i == selected) FontWeight.Bold else FontWeight.Normal, color = if (i == selected) Color(0xFFBF360C) else MaterialTheme.colorScheme.onSurface,
             )
         }
     }
