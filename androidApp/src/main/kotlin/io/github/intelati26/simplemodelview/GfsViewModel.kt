@@ -981,7 +981,7 @@ class GfsViewModel(app: Application) : AndroidViewModel(app) {
             else renderer.shareImage(map, product, product.style, header, emptyList())
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
         val out = File(dir, (if (layers != null) "compare_" else "") + "gfs_${product.id}_${c[0]}${p(c[1])}${p(c[2])}${p(c[3])}.png")
-        out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        image.savePng(out)
         out
     }
 }

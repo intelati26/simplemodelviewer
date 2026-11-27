@@ -351,8 +351,7 @@ private fun RefsScreen(vm: RefsViewModel, onOpen: (String) -> Unit) {
                     shareFile(context, file, "image/png", "Share map")
                 } else {
                     // made in the background (the Renders list and a notification show how far it is): the share sheet opens when it is done
-                    AppContainer.renders.enqueue("REFS loop · ${s.product?.title.orEmpty()}") { progress -> vm.buildLoopFile(area, size, progress) }
-                    vm.reportNotice("Making the loop video in the background. Renders (in Share) shows how far it is.")
+                    AppContainer.renders.enqueueLoop("REFS loop · ${s.product?.title.orEmpty()}", vm::reportNotice) { progress -> vm.buildLoopFile(area, size, progress) }
                 }
             }
         },

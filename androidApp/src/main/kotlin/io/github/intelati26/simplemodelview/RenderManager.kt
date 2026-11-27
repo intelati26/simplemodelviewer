@@ -84,6 +84,12 @@ class RenderManager(private val app: Application) {
         return id
     }
 
+    /** A loop video from a page: queued, with the same word to the viewer everywhere ([notify] shows it on the page). */
+    fun enqueueLoop(title: String, notify: (String) -> Unit, work: suspend ((Int, Int) -> Unit) -> File?) {
+        enqueue(title, work = work)
+        notify("Making the loop video in the background. Renders (the Share dialog or the ⋮ menu) shows how far it is.")
+    }
+
     private fun change(id: Long, f: (RenderJob) -> RenderJob) = jobs.update { l -> l.map { if (it.id == id) f(it) else it } }
 
     fun cancel(id: Long) { synchronized(running) { running[id] }?.cancel() }

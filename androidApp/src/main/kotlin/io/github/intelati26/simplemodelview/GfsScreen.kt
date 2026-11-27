@@ -137,8 +137,7 @@ internal fun GfsScreen(vm: GfsViewModel, onOpen: (String) -> Unit) {
                             if (s.frames.size > 1) DropdownMenuItem(text = { Text(if (s.history) "Save the history loop (video)" else "Save the loop (video)") }, onClick = {
                                 more = false
                                 // made in the background from what is shown now (the page can be used meanwhile): the share sheet opens when it is done
-                                AppContainer.renders.enqueue("GFS loop · ${s.title}") { progress -> vm.buildLoopFile(progress) }
-                                vm.reportNotice("Making the loop video in the background. The ⋮ menu has Renders.")
+                                AppContainer.renders.enqueueLoop("GFS loop · ${s.title}", vm::reportNotice) { progress -> vm.buildLoopFile(progress) }
                             })
                             val renderCount = AppContainer.renders.jobs.value.size
                             if (renderCount > 0) DropdownMenuItem(text = { Text("Renders ($renderCount)") }, onClick = { more = false; rendersOpen = true })

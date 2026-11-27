@@ -960,7 +960,7 @@ class RefsViewModel(app: Application) : AndroidViewModel(app) {
         val dir = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val file = File(dir, (if (b != null) "compare_" else "") + "spc_refs_${product.id.filter { it.isLetterOrDigit() || it == '_' }.take(40)}_${cycle.label.filter { it.isDigit() }}_f${st.timeIndex}.png")
-        file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        image.savePng(file)
         file
     }
 }

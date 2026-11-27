@@ -255,8 +255,7 @@ internal fun NbmScreen(vm: NbmViewModel, onOpen: (String) -> Unit) {
                         shareFile(context, file, "image/png", "Share map")
                     } else {
                     // made in the background (the Renders list and a notification show how far it is): the share sheet opens when it is done
-                    AppContainer.renders.enqueue("NBM loop · ${s.product.title}") { progress -> vm.buildLoopFile(area, size, progress) }
-                    vm.reportNotice("Making the loop video in the background. Renders (in Share) shows how far it is.")
+                    AppContainer.renders.enqueueLoop("NBM loop · ${s.product.title}", vm::reportNotice) { progress -> vm.buildLoopFile(area, size, progress) }
                 }
                 } catch (e: Exception) {
                     vm.reportNotice("Could not make the ${if (loop) "video" else "picture"}: ${e.message}")

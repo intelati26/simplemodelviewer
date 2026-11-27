@@ -560,32 +560,10 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         get() = VideoSize.byName(prefs.getString("video_size", null))
         set(value) { prefs.edit().putString("video_size", value.name).apply() }
 
-    private fun exportScale(cols: Int, rows: Int): Int {
-        var s = ceil(1800.0 / cols).toInt().coerceIn(1, 6)
-        while (s > 1 && cols.toLong() * s * rows * s > 8_000_000L) s -= 1
-        return s
-    }
-
-    /** What an export reads of the page, taken once when it is asked for: a loop follows this, not what the page is changed to meanwhile. */
-    private class ExportCtx(val st: AnalysisState, val view: View?, val viewport: FloatArray, val globeW: Int, val globeH: Int)
     private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH)
 
-    private fun areaView(area: ShareArea, grid: Grid, x: ExportCtx = exportCtx()): View {
-        val base = x.view ?: viewFor(x.st.sector, grid)
-        val window = when (area) {
-            is ShareArea.Meso -> area.sector.view(core, grid, 1)
-            ShareArea.Screen -> {
-                val (l, t, r, b) = x.viewport.toList()
-                val col0 = (base.col0 + floor(l * base.cols).toInt()).coerceIn(0, grid.columns - 2)
-                val row0 = (base.row0 + floor((1f - b) * base.rows).toInt()).coerceIn(0, grid.rows - 2)
-                val col1 = (base.col0 + ceil(r * base.cols).toInt() - 1).coerceIn(col0 + 1, grid.columns - 1)
-                val row1 = (base.row0 + ceil((1f - t) * base.rows).toInt() - 1).coerceIn(row0 + 1, grid.rows - 1)
-                View("Screen area", col0, row0, col1 - col0 + 1, row1 - row0 + 1, 1, 1, grid)
-            }
-            else -> base.copy(scale = 1, step = 1)
-        }
-        return window.copy(scale = exportScale(window.cols, window.rows), step = 1)
-    }
+    private fun areaView(area: ShareArea, grid: Grid, x: ExportCtx<AnalysisState> = exportCtx()): View =
+        exportWindow(core, area, grid, x.view ?: viewFor(x.st.sector, grid), x.viewport)
 
     private fun header(frame: AnalysisFrame, source: String): String =
         "Valid ${formatUtc(frame.valid)}   $source   Data: NOAA/NWS ${if (source == "URMA") "URMA" else "RTMA"} surface analysis (experimental viewer)"
@@ -599,7 +577,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     private fun sharedDir() = File(getApplication<Application>().cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** The picture of [frame] for an export of [area], or null when the frame has no file. */
-    private suspend fun areaImage(area: ShareArea, frame: AnalysisFrame, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx = exportCtx()): Triple<Bitmap, Product, String>? {
+    private suspend fun areaImage(area: ShareArea, frame: AnalysisFrame, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx<AnalysisState> = exportCtx()): Triple<Bitmap, Product, String>? {
         val st = x.st
         val (grid, values, source) = field(frame, st.product, cache = false) ?: return null
         val product = synthetic(st.product, grid)
@@ -639,7 +617,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
         val image = if (b != null) renderer.shareCompareImage(map, b.first, st.product.title, st.other!!.title, product, product.style, b.second, b.second.style, header(frame, source), size?.width ?: 0)
             else renderer.shareImage(map, product, product.style, header(frame, source), emptyList())
         val out = File(sharedDir(), (if (b != null) "compare_" else "") + fileName(st.product, frame, "png"))
-        out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        image.savePng(out)
         out
     }
 

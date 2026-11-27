@@ -1664,21 +1664,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun sectorOf(area: ShareArea) = (area as? ShareArea.Meso)?.sector ?: _state.value.sector
 
     /** Whole pixels per cell for an export: about 1800 px wide, at most 8 per cell, under about 8 million pixels. */
-    private fun exportScale(cols: Int, rows: Int): Int {
-        var s = ceil(1800.0 / cols).toInt().coerceIn(1, 8)
-        while (s > 1 && cols.toLong() * s * rows * s > 8_000_000L) s -= 1
-        return s
-    }
+    private fun exportScale(cols: Int, rows: Int) = exportScale(cols, rows, 8)
 
     /**
      * The map picture of an export for one file. The screen area is decoded afresh at the finest step that suits its size, so a zoomed-in
      * export has 1 km (rotation 500 m) detail, not the cells of the screen's overview.
      */
-    /** What an export reads of the page, taken once when it is asked for: the state, the view and the visible part, the globe's size. The export does not follow later changes. */
-    private class ExportCtx(val st: MrmsState, val view: View?, val viewport: FloatArray, val grid: Grid?, val globeW: Int, val globeH: Int)
-    private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), shownGrid, globeW, globeH)
+    private fun exportCtx() = ExportCtx(_state.value, view, viewport.copyOf(), globeW, globeH, shownGrid)
 
-    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx = exportCtx()): Pair<Bitmap, Style> {
+    private suspend fun areaBitmap(area: ShareArea, product: MrmsProduct, file: MrmsFile, side: Int = GLOBE_EXPORT_SIDE, x: ExportCtx<MrmsState> = exportCtx()): Pair<Bitmap, Style> {
         val st = x.st
         val style = styleOf(product)
         if (area == ShareArea.Globe && x.globeW > 0) {
@@ -1755,15 +1749,8 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     /** The second pane when a compare is on and can be shared (not on the globe), else null. */
     private fun compareOf(st: MrmsState, area: ShareArea): PaneSpec? = st.other?.takeIf { st.compare && area != ShareArea.Globe }
 
-    /** A picture no wider than the chosen video size (never enlarged), or as it is when none was chosen. */
-    private fun fitToSize(image: Bitmap, size: VideoSize?): Bitmap {
-        if (size == null) return image
-        val (w, h) = size.scaled(image.width, image.height)
-        return if (w == image.width) image else Bitmap.createScaledBitmap(image, w, h, true)
-    }
-
     /** What one compare pane looks like for [area]: a scan ([file], or the one of its product nearest [validTime]), or a rainfall total. Null: nothing near. */
-    private suspend fun panePicture(area: ShareArea, spec: PaneSpec, file: MrmsFile?, x: ExportCtx, validTime: Long = file?.validTime ?: 0L, filesOfSpec: List<MrmsFile>? = null): PanePicture? {
+    private suspend fun panePicture(area: ShareArea, spec: PaneSpec, file: MrmsFile?, x: ExportCtx<MrmsState>, validTime: Long = file?.validTime ?: 0L, filesOfSpec: List<MrmsFile>? = null): PanePicture? {
         val st = x.st
         if (spec.isTotal) {
             val sector = if (area is ShareArea.Meso) sectorOf(area) else st.sector
@@ -1814,7 +1801,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             val line = (listOfNotNull("through $through".takeIf { through.isNotEmpty() }) + parts.drop(1) + "NOAA/NSSL MRMS").joinToString("  \u00B7  ")
             val image = renderer.shareImage(map, p, p.style, line, emptyList())
             val out = File(sharedDir(), "mrms_rainfall_${simplemodelview.civilFromEpoch(st.rainSince).let { c -> "%04d%02d%02d%02d".format(c[0], c[1], c[2], c[3]) }}_to_${simplemodelview.civilFromEpoch(file.validTime).let { c -> "%04d%02d%02d%02d%02d".format(c[0], c[1], c[2], c[3], c[4]) }}.png")
-            out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            image.savePng(out)
             return@withContext out
         }
         // a compare: the second pane (a scan nearest this time, or a rainfall total) under this one, on one picture
@@ -1822,16 +1809,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (cmp != null) {
             val a = panePicture(area, specOf(st), file, x) ?: return@withContext null
             val b = panePicture(area, cmp, null, x, file.validTime) ?: return@withContext null
-            val raw = renderer.shareCompareImage(a.bitmap, b.bitmap, specTitle(specOf(st)), specTitle(cmp), a.product, a.style, b.product, b.style, header(file, st))
-            val image = fitToSize(raw, size)
+            val image = renderer.shareCompareImage(a.bitmap, b.bitmap, specTitle(specOf(st)), specTitle(cmp), a.product, a.style, b.product, b.style, header(file, st), size?.width ?: 0)
             val out = File(sharedDir(), "compare_" + fileName(st.product, file, "png"))
-            out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            image.savePng(out)
             return@withContext out
         }
         val (map, style) = areaBitmap(area, st.product, file, x = x)
         val image = renderer.shareImage(map, synthetic(st.product, x.grid ?: Grid.REFS), style, header(file, st), emptyList())
         val out = File(sharedDir(), fileName(st.product, file, "png"))
-        out.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        image.savePng(out)
         out
     }
 
