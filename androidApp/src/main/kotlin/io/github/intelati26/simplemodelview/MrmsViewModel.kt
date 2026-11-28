@@ -1045,14 +1045,17 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val heights = SynopticHeights(AppContainer.repo)
-    private val heightCache = LinkedHashMap<Long, SynopticHeight?>()
+    private val heightCache = LinkedHashMap<String, SynopticHeight?>()
 
-    /** The REFS 500 mb height for the hour of [t]'s analysis (on the run's own grid: the lines are drawn from it directly). */
+    /** The REFS 500 mb height for the hour of [t]'s analysis, put on [t]'s grid (the lines are drawn from a field on the picture's own grid). */
     private suspend fun underHeight(t: UnderTemp): SynopticHeight? {
-        val hour = t.pick.valid / 3600
-        synchronized(heightCache) { if (heightCache.containsKey(hour)) return heightCache[hour] }
-        val z = heights.at(t.pick.valid, System.currentTimeMillis() / 1000)
-        if (z != null) synchronized(heightCache) { heightCache[hour] = z; while (heightCache.size > 6) heightCache.remove(heightCache.keys.first()) }
+        val key = "${t.pick.valid / 3600}|${t.grid.id}"
+        synchronized(heightCache) { if (heightCache.containsKey(key)) return heightCache[key] }
+        val z = heights.at(t.pick.valid, System.currentTimeMillis() / 1000)?.let { raw ->
+            try { SynopticHeight(withContext(Dispatchers.Default) { core.reproject(raw.values, raw.grid, t.grid) }, t.grid, raw.run, raw.lead, raw.valid) }
+            catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        }
+        if (z != null) synchronized(heightCache) { heightCache[key] = z; while (heightCache.size > 6) heightCache.remove(heightCache.keys.first()) }
         return z
     }
 
