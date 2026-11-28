@@ -114,9 +114,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
 
     private inline fun update(f: (AnalysisState) -> AnalysisState) { _state.value = f(_state.value) }
 
-    private fun readSettings() = Settings(
-        prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false),
-    ).withDisplayPrefs(prefs)
+    private fun readSettings() = PageSettings.read(prefs)
 
     private val dataSaver get() = prefs.getBoolean("data_saver", false)
     private val wifiOnlyLoop get() = prefs.getBoolean("wifi_only", false)
@@ -434,8 +432,7 @@ class AnalysisViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     fun setSettings(settings: Settings) {
-        prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).putDisplay(settings).apply()
+        PageSettings.save(prefs, settings)
         val redraw = settings.dataSaver != _state.value.settings.dataSaver || settings.contours != _state.value.settings.contours || settings.displayDiffers(_state.value.settings)
         update { it.copy(settings = settings) }
         if (redraw && shown != null) showFrame()

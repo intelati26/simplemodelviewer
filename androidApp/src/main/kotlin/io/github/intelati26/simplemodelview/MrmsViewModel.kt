@@ -216,9 +216,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     private fun withSavedLevel(product: MrmsProduct) =
         if (product.levels.isEmpty()) product else product.copy(level = prefs.getInt("mrms_level_${product.id}", product.level).coerceIn(0, product.levels.size - 1))
 
-    private fun readSettings() = Settings(
-        prefs.getBoolean("wifi_only", false), prefs.getBoolean("data_saver", false), prefs.getInt("cache_mb", 150), prefs.getString("contact_email", "").orEmpty(), prefs.getBoolean("contours", true), prefs.getBoolean("minimal_ui", false),
-    ).withDisplayPrefs(prefs)
+    private fun readSettings() = PageSettings.read(prefs)
 
     private fun readUnits() = Units(prefs.getBoolean("u_metric_length", false), prefs.getBoolean("u_celsius", false), prefs.getBoolean("u_km", false))
 
@@ -1439,44 +1437,30 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- settings ----
     fun setSettings(settings: Settings) {
-        prefs.edit().putBoolean("wifi_only", settings.wifiOnlyLoop).putBoolean("data_saver", settings.dataSaver)
-            .putInt("cache_mb", settings.cacheMegabytes).putString("contact_email", settings.contactEmail.trim()).putBoolean("contours", settings.contours).putBoolean("minimal_ui", settings.minimalUi).putDisplay(settings).apply()
+        PageSettings.save(prefs, settings)
         val redraw = settings.dataSaver != _state.value.settings.dataSaver
         val linesChanged = settings.contours != _state.value.settings.contours || settings.displayDiffers(_state.value.settings)
         update { it.copy(settings = settings) }
         if (redraw) { decoded.clear(); if (shown != null) showFrame() } else if (linesChanged && shown != null) showFrame()
     }
 
-    private fun backup(): SettingsBackup {
-        val st = _state.value
-        return SettingsTransfer.withPrefs(SettingsBackup(
-            wifiOnlyLoop = st.settings.wifiOnlyLoop, dataSaver = st.settings.dataSaver, cacheMegabytes = st.settings.cacheMegabytes,
-            contactEmail = st.settings.contactEmail, favorites = st.favorites.sorted(),
-            places = st.places.map { BackupPlace(it.name, it.lat, it.lon) },
-            product = prefs.getString("product", null), sector = prefs.getString("sector", null),
-        ), prefs)
-    }
 
+    /** Writes the settings as JSON to a file the user chose (the system "save as" picker). */
     suspend fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) {
-        val ok = writeSettingsFile(resolver, uri, backup())
-        update { it.copy(notice = if (ok) "Settings exported: ${backup().favorites.size} favorites, ${backup().places.size} places." else "Could not write the settings file.") }
+        val st = _state.value
+        val note = PageSettings.export(resolver, uri, PageSettings.backup(prefs, st.settings, st.favorites, st.places))
+        update { it.copy(notice = note) }
     }
 
     /** True when display or source choices were imported: the app restarts to take them up. */
     suspend fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean {
-        RainHistory.importIfArchive(resolver, uri)?.let { note -> update { it.copy(notice = note) }; return false }      // (a rain history file from the export: no restart)
-        val b = readSettingsFile(resolver, uri)
-        if (b == null) { update { it.copy(notice = "That file is not a simplemodelview settings file.") }; return false }
-        val current = _state.value.settings
-        setSettings(current.copy(wifiOnlyLoop = b.wifiOnlyLoop, dataSaver = b.dataSaver, cacheMegabytes = b.cacheMegabytes, contactEmail = b.contactEmail.ifEmpty { current.contactEmail }))
-        prefs.edit().putStringSet("favorites", b.favorites.toSet()).apply()
-        AppContainer.places.replaceAll(b.places.map { Place(it.name, it.lat, it.lon) })
+        val b = PageSettings.import(resolver, uri, prefs, _state.value.settings, { n -> update { it.copy(notice = n) } }, ::setSettings) ?: return false
         b.product?.let { prefs.edit().putString("product", it).apply() }       // (the SPC page's own choices)
         b.sector?.let { prefs.edit().putString("sector", it).apply() }
         update { it.copy(favorites = b.favorites.toSet(), places = b.places.map { p -> Place(p.name, p.lat, p.lon) }) }
         if (isValidEmail(_state.value.settings.contactEmail)) dismissContactPrompt()
         val extras = SettingsTransfer.apply(prefs, b)
-        update { it.copy(notice = "Settings imported: ${b.favorites.size} favorites, ${b.places.size} places" + (if (extras > 0) ", $extras display and source choices" else "") + ".") }
+        update { it.copy(notice = PageSettings.importedNotice(b, extras)) }
         return extras > 0
     }
 
