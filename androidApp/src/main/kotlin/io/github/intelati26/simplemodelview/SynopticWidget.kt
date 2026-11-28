@@ -59,7 +59,7 @@ class SynopticWidgetWorker(context: Context, params: WorkerParameters) : Corouti
         val ids = WidgetUpdater.ids(applicationContext, SynopticWidgetProvider::class.java)
         if (ids.isEmpty()) return Result.success()
         return try {
-            WidgetUpdater.show(applicationContext, manager, ids, render(), null, "mrms")
+            WidgetUpdater.show(applicationContext, manager, ids, render(aspectOf(manager, ids)), null, "mrms")
             Result.success()
         } catch (e: Exception) {
             WidgetUpdater.show(applicationContext, manager, ids, null, "Could not load the radar: ${e.message}", "mrms")
@@ -67,7 +67,7 @@ class SynopticWidgetWorker(context: Context, params: WorkerParameters) : Corouti
         }
     }
 
-    private suspend fun render(): Bitmap {
+    private suspend fun render(aspect: Float?): Bitmap {
         val core = AppContainer.core
         val now = System.currentTimeMillis() / 1000
         val product = MrmsCatalog.byId("MergedReflectivityQCComposite_00.50") ?: MrmsCatalog.default
@@ -93,7 +93,7 @@ class SynopticWidgetWorker(context: Context, params: WorkerParameters) : Corouti
             core.render(temp, View("under", 0, 0, grid.columns, grid.rows, 1, 1, grid), tempStyle, IntArray(10), argb)
             fill = Overlay(Bitmap.createBitmap(argb, grid.columns, grid.rows, Bitmap.Config.ARGB_8888), whole, bold = false)
             val lo = temp.filter { !it.isNaN() }.minOrNull(); val hi = temp.filter { !it.isNaN() }.maxOrNull()
-            if (lo != null && hi != null) range = " · T ${Math.round(lo * 9f / 5f + 32f)} to ${Math.round(hi * 9f / 5f + 32f)} F"
+            if (lo != null && hi != null) range = " · ${Math.round(lo * 9f / 5f + 32f)}–${Math.round(hi * 9f / 5f + 32f)} F"
             surface = pick.label
         }
         // the 500 mb height of the hour of that analysis, on the same grid
@@ -103,24 +103,38 @@ class SynopticWidgetWorker(context: Context, params: WorkerParameters) : Corouti
         if (z != null) {
             val onGrid = core.reproject(z.values, z.grid, grid)
             lines = listOf(FieldLines(onGrid, grid, Style(), Contours.specFor("z500", "m")!!, "z5|${z.run}|${z.valid}|${grid.id}"))
-            upper = "500 mb REFS ${z.run.takeLast(3)} +${z.lead} h"
+            upper = "500 mb +${z.lead} h"
         }
         val map = MapRenderer(core, AppContainer.lines).render(picture, picture.style, frame.window.values, emptyList(), view, dark = true, contours = false, halo = mrmsHasHalo(product), underlay = fill, fieldLines = lines)
-        return caption(map, "MRMS ${formatClock(file.validTime)}" + (if (surface.isNotEmpty()) " · $surface" else "") + range + (if (upper.isNotEmpty()) " · $upper" else ""))
+        return caption(cropTo(map, aspect), "${formatClock(file.validTime)}" + (if (surface.isNotEmpty()) " · ${surface.replace("RTMA ", "RTMA\u00A0")}" else "") + range + (if (upper.isNotEmpty()) " · $upper" else ""))
     }
 
-    /** [map] with a dark strip under it carrying [text], scaled to at most 900 pixels wide. */
+    /** Width over height of the first widget (from its size in dp), or null when the launcher does not say. */
+    private fun aspectOf(manager: AppWidgetManager, ids: IntArray): Float? {
+        val o = manager.getAppWidgetOptions(ids[0])
+        val w = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0); val h = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
+        return if (w > 0 && h > 0) w.toFloat() / h else null
+    }
+
+    /** [map] cut from its middle to width over height [aspect], so it fills the widget with no bands. */
+    private fun cropTo(map: Bitmap, aspect: Float?): Bitmap {
+        if (aspect == null) return map
+        val have = map.width.toFloat() / map.height
+        return if (have > aspect) { val w = (map.height * aspect).toInt(); Bitmap.createBitmap(map, (map.width - w) / 2, 0, w, map.height) }
+        else { val h = (map.width / aspect).toInt(); Bitmap.createBitmap(map, 0, (map.height - h) / 2, map.width, h) }
+    }
+
+    /** [map] scaled to at most 900 pixels wide, with [text] over its bottom edge on a translucent dark band (the picture keeps all the room). */
     private fun caption(map: Bitmap, text: String): Bitmap {
         val width = minOf(map.width, 900)
-        val scaled = if (map.width > width) Bitmap.createScaledBitmap(map, width, map.height * width / map.width, true) else map
-        val strip = (width / 28f).coerceAtLeast(14f)
-        val out = Bitmap.createBitmap(width, scaled.height + (strip * 1.8f).toInt(), Bitmap.Config.ARGB_8888)
+        val out = (if (map.width > width) Bitmap.createScaledBitmap(map, width, map.height * width / map.width, true) else map).copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(out)
-        canvas.drawColor(Color.parseColor("#202428"))
-        canvas.drawBitmap(scaled, 0f, 0f, null)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = strip }
-        while (paint.measureText(text) > width - 16f && paint.textSize > 8f) paint.textSize -= 1f
-        canvas.drawText(text, 8f, scaled.height + strip * 1.2f, paint)
+        val size = (width / 34f).coerceAtLeast(12f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = size }
+        while (paint.measureText(text) > width - 12f && paint.textSize > 8f) paint.textSize -= 1f
+        val band = paint.textSize * 1.5f
+        canvas.drawRect(0f, out.height - band, width.toFloat(), out.height.toFloat(), Paint().apply { color = Color.argb(150, 0, 0, 0) })
+        canvas.drawText(text, 6f, out.height - band + paint.textSize * 1.12f, paint)
         return out
     }
 }

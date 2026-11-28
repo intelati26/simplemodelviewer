@@ -1037,7 +1037,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             else {
                 val spec = Contours.specFor("z500", "m")!!
                 lines += FieldLines(z.values, z.grid, Style(), spec, "z5|${z.run}|${t.pick.valid / 3600}|${z.grid.id}", dst)
-                info += "500 mb: REFS ${z.run} +${z.lead} h, valid ${formatClock(z.valid)}"
+                info += "500 mb REFS ${z.run.takeLast(3)} +${z.lead} h"
                 shown += ShownOverlay("500 mb", Product("surface_z500", "500 mb height (REFS ${z.run}, +${z.lead} h)", MrmsCatalog.MODEL, Style(units = "m", digits = 0), hasMembers = false, timeDimension = null, grid = z.grid)) { z.values }
             }
         }
@@ -1077,7 +1077,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (lo > hi) return ""
         val c = _state.value.units.celsius
         fun f(x: Float) = Math.round(if (c) x else x * 9f / 5f + 32f)
-        return " \u00B7 T ${f(lo)} to ${f(hi)} ${if (c) "C" else "F"}"
+        return " \u00B7 ${f(lo)}\u2013${f(hi)} ${if (c) "C" else "F"}"
     }
 
     private fun joinInfo(overlays: String?, under: List<String>): String? =
