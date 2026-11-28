@@ -8,7 +8,7 @@ import simplemodelview.RefsRepository
 import simplemodelview.epochSeconds
 
 /** The 500 mb height of one REFS time step: its values (m) on the run's own grid, and the run it came from ("2026-11-28 00Z"). */
-class SynopticHeight(val values: FloatArray, val grid: Grid, val run: String, val lead: Int)
+class SynopticHeight(val values: FloatArray, val grid: Grid, val run: String, val lead: Int, val valid: Long)
 
 /**
  * The 500 mb height under the MRMS radar: SPC's REFS (the RRFS ensemble) mean for the hour nearest a surface analysis, from the newest run that has it. A run that has
@@ -35,7 +35,7 @@ class SynopticHeights(private val repo: RefsRepository) {
             if (Math.abs(times[step] - valid) > 1800) continue
             val frame = try { repo.readFrameTimed(store, product, step, 0) } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
             if (frame.fileTime == null) continue
-            return SynopticHeight(frame.values, product.grid, c.label, ((times[step] - c.epochSeconds) / 3600).toInt())
+            return SynopticHeight(frame.values, product.grid, c.label, ((times[step] - c.epochSeconds) / 3600).toInt(), times[step])
         }
         return null
     }

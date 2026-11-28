@@ -193,12 +193,12 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
             val contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null
             // every overlay lives in one tree popup, so the strip under the map is a single line
             TextButton(onClick = { overlayTree = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 12.dp)) {
-                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable, probSevereState, listOfNotNull("T".takeIf { s.underTemp }, "Td".takeIf { s.underDew }, "T lines".takeIf { s.underTLines }, "RH".takeIf { s.underRh }, "METAR".takeIf { s.stations }).joinToString(" + ").ifEmpty { null }), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(overlaySummary(s.overlays, s.alertKinds, outlookState, s.file?.validTime, lightningState, s.settings.contours && contoursAvailable, probSevereState, listOfNotNull("T".takeIf { s.underTemp }, "Td".takeIf { s.underDew }, "T lines".takeIf { s.underTLines }, "RH".takeIf { s.underRh }, "500 mb".takeIf { s.underHeight }, "METAR".takeIf { s.stations }).joinToString(" + ").ifEmpty { null }), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             s.overlayStyles.lastOrNull()?.let { st -> if (s.overlays.isNotEmpty()) {
                 Legend(st.copy(stops = st.stops.filter { it.value >= st.hideBelow }), emptyList())       // (the legend is of the top layer, at full strength)
-                s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             } }
+            s.overlayInfo?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, maxLines = 3, overflow = TextOverflow.Ellipsis) }
             TimingsLine(s.settings.showTimings)
             s.style?.let { Legend(it, emptyList()) }
             if (s.compare && s.paneB != null) s.styleB?.let { Legend(it, emptyList()) }

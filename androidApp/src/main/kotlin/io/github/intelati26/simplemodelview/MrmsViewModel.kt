@@ -1013,10 +1013,10 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
      * The surface line layers that are on, drawn over [dst] (null: the globe): the temperature (the file's own field), the dewpoint, and the relative humidity worked out from
      * both. Their read-out entries come with them. A field that cannot be had is left out and named in [missing].
      */
-    private class UnderLineSet(val lines: List<FieldLines>, val shown: List<ShownOverlay>, val missing: List<String>)
+    private class UnderLineSet(val lines: List<FieldLines>, val shown: List<ShownOverlay>, val missing: List<String>, val info: List<String> = emptyList())
 
     private suspend fun underLineSet(st: MrmsState, t: UnderTemp, dst: android.graphics.RectF?): UnderLineSet {
-        val lines = ArrayList<FieldLines>(); val shown = ArrayList<ShownOverlay>(); val missing = ArrayList<String>()
+        val lines = ArrayList<FieldLines>(); val shown = ArrayList<ShownOverlay>(); val missing = ArrayList<String>(); val info = ArrayList<String>()
         val td = if (st.underDew || st.underRh) underDew(t) else null
         if (st.underTLines) {
             lines += FieldLines(t.values, t.grid, tempStyle(), Underlay.temperatureSpec(st.units.celsius), "tl|${t.pick.url}|${t.grid.id}", dst)
@@ -1037,10 +1037,11 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             else {
                 val spec = Contours.specFor("z500", "m")!!
                 lines += FieldLines(z.values, z.grid, Style(), spec, "z5|${z.run}|${t.pick.valid / 3600}|${z.grid.id}", dst)
+                info += "500 mb: REFS ${z.run} +${z.lead} h, valid ${formatClock(z.valid)}"
                 shown += ShownOverlay("500 mb", Product("surface_z500", "500 mb height (REFS ${z.run}, +${z.lead} h)", MrmsCatalog.MODEL, Style(units = "m", digits = 0), hasMembers = false, timeDimension = null, grid = z.grid)) { z.values }
             }
         }
-        return UnderLineSet(lines, shown, missing)
+        return UnderLineSet(lines, shown, missing, info)
     }
 
     private val heights = SynopticHeights(AppContainer.repo)
@@ -1064,6 +1065,16 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         val dst = rectOn(t.grid, v)
         val fill = if (st.underTemp) underFill(t, dst) else null
         return UnderParts(fill, underLineSet(st, t, dst).lines)
+    }
+
+    /** The coldest and warmest of a temperature field (given in C) in the chosen unit: " · T 12 to 68 F"; empty when there is none. */
+    private fun tempRange(values: FloatArray): String {
+        var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
+        for (v in values) if (!v.isNaN()) { if (v < lo) lo = v; if (v > hi) hi = v }
+        if (lo > hi) return ""
+        val c = _state.value.units.celsius
+        fun f(x: Float) = Math.round(if (c) x else x * 9f / 5f + 32f)
+        return " \u00B7 T ${f(lo)} to ${f(hi)} ${if (c) "C" else "F"}"
     }
 
     private fun joinInfo(overlays: String?, under: List<String>): String? =
@@ -1223,7 +1234,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             if (t == null) underInfo += "No surface temperature near this time"
             else {
                 under += tempShown(t)
-                underInfo += t.pick.label
+                underInfo += t.pick.label + tempRange(t.values)
                 if (st.underTemp) { fill = underFill(t, rectOn(t.grid, v)); dirty = true }
             }
             dirty = true      // (the read-out note changes too)
@@ -1235,6 +1246,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
         if (st.underLines && t != null) {
             val set = stage { underLineSet(st, t, rectOn(t.grid, v)) }
             for (m in set.missing) underInfo += "no $m"
+            underInfo += set.info
             lines = set.lines; under += set.shown.filter { s -> under.none { it.name == s.name } }; dirty = true
         }
         paint(final = true)
