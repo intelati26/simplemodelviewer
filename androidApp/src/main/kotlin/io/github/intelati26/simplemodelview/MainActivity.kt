@@ -706,20 +706,26 @@ internal fun SettingsDialog(
         title = { Text("Settings") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionTitle("Data")
                 SwitchRow("Download loops on Wi-Fi only", "Play will not start a loop on a metered connection (a loop is about 15 MB).", settings.wifiOnlyLoop) {
                     onChange(settings.copy(wifiOnlyLoop = it))
                 }
                 SwitchRow("Data saver", "Draw the whole-US map at half resolution: about 4x less memory. Downloads are the same size.", settings.dataSaver) {
                     onChange(settings.copy(dataSaver = it))
                 }
+                var storage by remember { mutableStateOf(false) }
+                Column {
+                    Text("Storage and cache")
+                    Text("What the app keeps on the device (downloaded files, model data, rainfall days), how much space it takes, and how to clear it.", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { storage = true }) { Text("Open\u2026") }
+                }
+                if (storage) StorageDialog(settings, onChange) { storage = false }
+                SectionTitle("Display")
                 SwitchRow("Minimal layout", "The map fills the screen; the product, run, loop and overlay controls open from a menu button.", settings.minimalUi) {
                     onChange(settings.copy(minimalUi = it))
                 }
                 if (showContours) SwitchRow("Contour lines", "Draw lines for heights, sea-level pressure and temperatures over the colors (REFS), and for the freezing level and model temperatures (MRMS).", settings.contours) {
                     onChange(settings.copy(contours = it))
-                }
-                if (showCrop) SwitchRow("Crop regions with NOMADS", "Ask NOAA's NOMADS for just the sector's box of each GFS field (tens of kilobytes instead of about 0.8 MB). If NOMADS is off or does not answer, AWS gives the field down to the sector's south edge (about half), and only then the whole field.", settings.gfsCrop) {
-                    onChange(settings.copy(gfsCrop = it))
                 }
                 if (showBarbs) Column {
                     Text("Wind barb spacing")
@@ -739,23 +745,6 @@ internal fun SettingsDialog(
                     }
                     Text("Auto draws them when the map is zoomed to a sector.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                SwitchRow("Show timings", "A small line under the map with how long the last picture took, stage by stage: data, raster, layers under and over it, lines, contours, barbs.", settings.showTimings) {
-                    onChange(settings.copy(showTimings = it))
-                }
-                var logTimings by remember { mutableStateOf(AppContainer.prefs.getBoolean("log_timings", false)) }
-                SwitchRow("Log timings", "Also write each stage time to Logcat (tag Timings), to measure a drag or a loop from a computer: adb logcat -s Timings.", logTimings) {
-                    logTimings = it; Timings.logging = it; AppContainer.prefs.edit().putBoolean("log_timings", it).apply()
-                }
-                SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
-                    onChange(settings.copy(optionsInExport = it))
-                }
-                var storage by remember { mutableStateOf(false) }
-                Column {
-                    Text("Storage and cache")
-                    Text("What the app keeps on the device (downloaded files, model data, rainfall days), how much space it takes, and how to clear it.", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { storage = true }) { Text("Open\u2026") }
-                }
-                if (storage) StorageDialog(settings, onChange) { storage = false }
                 if (units != null) Column {      // (the MRMS page only: SPC's fields have their own fixed units)
                     Text("Units (MRMS page)")
                     @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -768,16 +757,7 @@ internal fun SettingsDialog(
                         FilterChip(units.kilometers, { onUnits(units.copy(kilometers = true)) }, label = { Text("km") })
                     }
                 }
-                var email by remember { mutableStateOf(settings.contactEmail) }
-                // follow a change from outside the field (an imported settings file) without disturbing what is being typed
-                LaunchedEffect(settings.contactEmail) { if (isValidEmail(settings.contactEmail) && settings.contactEmail != email.trim()) email = settings.contactEmail }
-                OutlinedTextField(
-                    value = email, onValueChange = { email = it; if (isValidEmail(it)) onChange(settings.copy(contactEmail = it.trim())) }, singleLine = true,
-                    label = { Text("Your email (optional)") }, isError = email.isNotEmpty() && !isValidEmail(email),
-                    supportingText = { Text(if (isValidEmail(email)) "Sent to the data provider in this app's User-Agent." else if (email.isEmpty()) "Optional. Sent to the data provider in this app's User-Agent." else "Enter a valid address; the last valid one stays in use.") },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                SectionTitle("Backup")
                 Column {
                     Text("Back up or move your settings")
                     Text("Favorites, saved places, these options, the display choices (units, barbs, contours, loops, each page's product, area and level) and the sources (LightningCast and ProbSevere links, the GFS crop switch), as a JSON file you choose where to save. Importing restarts the app.", style = MaterialTheme.typography.bodySmall)
@@ -805,10 +785,47 @@ internal fun SettingsDialog(
                     }
                     rainNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
+                var advanced by remember { mutableStateOf(false) }
+                TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▴" else "Advanced ▾") }
+                if (advanced) {
+                if (showCrop) SwitchRow("Crop regions with NOMADS", "Ask NOAA's NOMADS for just the sector's box of each GFS field (tens of kilobytes instead of about 0.8 MB). If NOMADS is off or does not answer, AWS gives the field down to the sector's south edge (about half), and only then the whole field.", settings.gfsCrop) {
+                    onChange(settings.copy(gfsCrop = it))
+                }
+                var logTimings by remember { mutableStateOf(AppContainer.prefs.getBoolean("log_timings", false)) }
+                Column {
+                    Text("Timings")
+                    Text("How long the last picture took, stage by stage (data, raster, layers, lines, contours, barbs): a small line under the map, and optionally Logcat (tag Timings; adb logcat -s Timings) to measure a drag or a loop from a computer.", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val mode = if (logTimings && settings.showTimings) 2 else if (settings.showTimings) 1 else 0
+                        for ((m, name) in listOf(0 to "Off", 1 to "On screen", 2 to "+ Logcat")) FilterChip(mode == m, {
+                            logTimings = m == 2; Timings.logging = m == 2; AppContainer.prefs.edit().putBoolean("log_timings", m == 2).apply()
+                            onChange(settings.copy(showTimings = m > 0))
+                        }, label = { Text(name) })
+                    }
+                }
+                SwitchRow("Use these in exports too", "Wind barb spacing and county lines in shared pictures and loops. Off: exports keep the standard look, so the screen can show more than reads well in a picture.", settings.optionsInExport) {
+                    onChange(settings.copy(optionsInExport = it))
+                }
+                var email by remember { mutableStateOf(settings.contactEmail) }
+                // follow a change from outside the field (an imported settings file) without disturbing what is being typed
+                LaunchedEffect(settings.contactEmail) { if (isValidEmail(settings.contactEmail) && settings.contactEmail != email.trim()) email = settings.contactEmail }
+                OutlinedTextField(
+                    value = email, onValueChange = { email = it; if (isValidEmail(it)) onChange(settings.copy(contactEmail = it.trim())) }, singleLine = true,
+                    label = { Text("Your email (optional)") }, isError = email.isNotEmpty() && !isValidEmail(email),
+                    supportingText = { Text(if (isValidEmail(email)) "Sent to the data provider in this app's User-Agent." else if (email.isEmpty()) "Optional. Sent to the data provider in this app's User-Agent." else "Enter a valid address; the last valid one stays in use.") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                }
                 Disclaimer(text = disclaimer)
             }
         },
     )
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
 }
 
 @Composable

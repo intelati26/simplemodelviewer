@@ -53,12 +53,12 @@ object AppContainer {
         get() = simplemodelview.VideoSize.byName(prefs.getString("video_size", null))
         set(value) { prefs.edit().putString("video_size", value.name).apply() }
 
-    /** Whether the page should ask for a contact e-mail now: not when one is set, and at most once in 30 minutes. */
-    private var lastContactPrompt = 0L
+    /** Whether the page should ask for a contact e-mail now: not when one is set, and at most once in 30 days (the asking is remembered). */
     fun contactPromptDue(email: String): Boolean {
         val now = System.currentTimeMillis()
-        if (simplemodelview.isValidEmail(email) || now - lastContactPrompt < 30 * 60 * 1000 && lastContactPrompt != 0L) return false
-        lastContactPrompt = now
+        val last = prefs.getLong("contact_asked", 0L)
+        if (simplemodelview.isValidEmail(email) || last != 0L && now - last < 30L * 24 * 3600 * 1000) return false
+        prefs.edit().putLong("contact_asked", now).apply()
         return true
     }
 
