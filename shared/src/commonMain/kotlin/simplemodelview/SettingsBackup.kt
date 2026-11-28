@@ -33,7 +33,7 @@ object BackupPrefs {
         "page" to text(), "product" to text(), "sector" to text(), "member_name" to text(), "wind_color" to text(), "wind_level" to int(10, 1000),
         "mrms_product" to text(), "mrms_sector" to text(), "mrms_overlays" to text(), "mrms_alerts" to text(), "overlay_hail" to text(), "overlay_rotation" to text(), "outlook_type" to text(), "mrms_under_t" to bool(), "mrms_under_td" to bool(), "mrms_stations" to bool(),
         "gfs_product" to text(), "gfs_sector" to text(), "gfs_level" to int(10, 1000), "gfs_color" to text(), "nbm_product" to text(), "nbm_sector" to text(), "analysis_product" to text(), "analysis_sector" to text(),
-        "analysis_lines" to text(), "mrms_under_rh" to bool(), "mrms_under_tl" to bool(), "mrms_station_density" to int(0, 100),
+        "analysis_lines" to text(), "mrms_under_rh" to bool(), "mrms_under_z500" to bool(), "mrms_under_tl" to bool(), "mrms_station_density" to int(0, 100),
         "today_place" to text(), "today_gust_line" to int(0, 1000), "today_thunder_line" to int(0, 1000), "point_place" to text(), "app_mode" to text(),
     )
 

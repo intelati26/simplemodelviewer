@@ -86,7 +86,7 @@ internal fun OverlayTreeDialog(
     probSevere: ProbSevereState = ProbSevereState(), onProbSevere: (Boolean) -> Unit = {}, onProbSevereLink: () -> Unit = {},
     contours: Boolean, contoursAvailable: Boolean, onContours: (Boolean) -> Unit,
     /** The surface layers under the radar (MRMS page only; null: not offered): the temperature fill and the dewpoint lines. */
-    underTemp: Boolean? = null, onUnderTemp: (Boolean) -> Unit = {}, underDew: Boolean = false, onUnderDew: (Boolean) -> Unit = {}, underTLines: Boolean = false, onUnderTLines: (Boolean) -> Unit = {}, underRh: Boolean = false, onUnderRh: (Boolean) -> Unit = {},
+    underTemp: Boolean? = null, onUnderTemp: (Boolean) -> Unit = {}, underDew: Boolean = false, onUnderDew: (Boolean) -> Unit = {}, underTLines: Boolean = false, onUnderTLines: (Boolean) -> Unit = {}, underRh: Boolean = false, onUnderRh: (Boolean) -> Unit = {}, underHeight: Boolean = false, onUnderHeight: (Boolean) -> Unit = {}, onSynoptic: (() -> Unit)? = null,
     /** METAR station plots (MRMS page only; null: not offered). */
     stations: Boolean? = null, onStations: (Boolean) -> Unit = {}, stationDensity: Int = 2, onStationDensity: (Int) -> Unit = {},
     onDismiss: () -> Unit,
@@ -234,7 +234,7 @@ internal fun OverlayTreeDialog(
                     }
                     // the surface under the radar
                     if (underTemp != null) {
-                        val summary = listOfNotNull("T".takeIf { underTemp }, "Td lines".takeIf { underDew }, "T lines".takeIf { underTLines }, "RH lines".takeIf { underRh }).joinToString(" + ").ifEmpty { "off" }
+                        val summary = listOfNotNull("T".takeIf { underTemp }, "Td lines".takeIf { underDew }, "T lines".takeIf { underTLines }, "RH lines".takeIf { underRh }, "500 mb".takeIf { underHeight }).joinToString(" + ").ifEmpty { "off" }
                         TreeNode("Surface", summary, "surface" in open, { toggle("surface") }) {
                             Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
@@ -264,6 +264,14 @@ internal fun OverlayTreeDialog(
                                 }
                                 Switch(checked = underRh, onCheckedChange = onUnderRh)
                             }
+                            Row(Modifier.fillMaxWidth().padding(end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("500 mb height lines", fontWeight = FontWeight.Bold)
+                                    Text("SPC's REFS (the RRFS ensemble mean) for the hour of the analysis: every 6 dam, the 540 / 570 / 600 heavier", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(checked = underHeight, onCheckedChange = onUnderHeight)
+                            }
+                            onSynoptic?.let { TextButton(onClick = it, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Radar + temperature + 500 mb") } }
                             Note("Drawn after the radar and its overlays: they show first, the surface follows as it arrives. Each scan takes the newest analysis at or before it (about 6 MB per field, one per 15 minutes); when there is none, the National Blend of Models' forecast for that hour.")
                         }
                     }

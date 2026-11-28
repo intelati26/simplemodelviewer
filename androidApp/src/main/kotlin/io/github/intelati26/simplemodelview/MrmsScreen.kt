@@ -333,7 +333,7 @@ internal fun MrmsScreen(vm: MrmsViewModel, onOpen: (String) -> Unit) {
         onProbSevereLink = { probSevereLink = true },
         contours = s.settings.contours, contoursAvailable = simplemodelview.Contours.specFor(s.product.directory, s.style?.units.orEmpty()) != null,
         onContours = { vm.setSettings(s.settings.copy(contours = it)) },
-        underTemp = s.underTemp, onUnderTemp = vm::setUnderTemp, underDew = s.underDew, onUnderDew = vm::setUnderDew, underTLines = s.underTLines, onUnderTLines = vm::setUnderTLines, underRh = s.underRh, onUnderRh = vm::setUnderRh,
+        underTemp = s.underTemp, onUnderTemp = vm::setUnderTemp, underDew = s.underDew, onUnderDew = vm::setUnderDew, underTLines = s.underTLines, onUnderTLines = vm::setUnderTLines, underRh = s.underRh, onUnderRh = vm::setUnderRh, underHeight = s.underHeight, onUnderHeight = vm::setUnderHeight, onSynoptic = vm::setSynoptic,
         stations = s.stations, onStations = vm::setStations, stationDensity = s.stationDensity, onStationDensity = vm::setStationDensity,
         onDismiss = { overlayTree = false },
     )

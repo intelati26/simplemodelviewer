@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import simplemodelview.Underlay
+import simplemodelview.Contours
 import simplemodelview.SurfacePick
 import simplemodelview.BackupPlace
 import simplemodelview.FrameTarget
@@ -125,6 +126,7 @@ data class MrmsState(
     val underDew: Boolean = false,                    // surface dewpoint lines over the picture
     val underTLines: Boolean = false,                 // surface temperature lines over the picture
     val underRh: Boolean = false,                     // surface relative humidity lines (worked out from the temperature and dewpoint)
+    val underHeight: Boolean = false,                 // the 500 mb height (REFS, the hour nearest the analysis) as lines
     val stations: Boolean = false,                    // METAR station plots over everything (aviationweather.gov)
     val stationDensity: Int = 2,                      // 1 as before, 2 and 3 closer up and down
     val station: StationDetail? = null,               // the station tapped: its reports and chart
@@ -145,7 +147,7 @@ data class MrmsState(
     val alertDetail: Pair<String, String?>? = null,   // title and text of the alert being read (text null: loading)
 ) {
     /** Any surface line layer (dewpoint, temperature, humidity) is on. */
-    val underLines: Boolean get() = underDew || underTLines || underRh
+    val underLines: Boolean get() = underDew || underTLines || underRh || underHeight
     /** Any surface layer at all is on: the fill or a line. */
     val underAny: Boolean get() = underTemp || underLines
     val overlayName: String get() = overlayName(overlays)
@@ -202,6 +204,7 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
             underDew = prefs.getBoolean("mrms_under_td", false),
             underTLines = prefs.getBoolean("mrms_under_tl", false),
             underRh = prefs.getBoolean("mrms_under_rh", false),
+            underHeight = prefs.getBoolean("mrms_under_z500", false),
             stations = prefs.getBoolean("mrms_stations", false),
             stationDensity = prefs.getInt("mrms_station_density", 2).coerceIn(1, 3),
         )
@@ -916,11 +919,15 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
     fun setUnderDew(on: Boolean) = setUnder { it.copy(underDew = on) }
     fun setUnderTLines(on: Boolean) = setUnder { it.copy(underTLines = on) }
     fun setUnderRh(on: Boolean) = setUnder { it.copy(underRh = on) }
+    fun setUnderHeight(on: Boolean) = setUnder { it.copy(underHeight = on) }
+
+    /** The radar over the synoptic picture in one step: the temperature fill and the 500 mb height lines, and no other surface lines. */
+    fun setSynoptic() = setUnder { it.copy(underTemp = true, underHeight = true, underDew = false, underTLines = false, underRh = false) }
 
     private fun setUnder(change: (MrmsState) -> MrmsState) {
         update(change)
         val st = _state.value
-        prefs.edit().putBoolean("mrms_under_t", st.underTemp).putBoolean("mrms_under_td", st.underDew).putBoolean("mrms_under_tl", st.underTLines).putBoolean("mrms_under_rh", st.underRh).apply()
+        prefs.edit().putBoolean("mrms_under_t", st.underTemp).putBoolean("mrms_under_td", st.underDew).putBoolean("mrms_under_tl", st.underTLines).putBoolean("mrms_under_rh", st.underRh).putBoolean("mrms_under_z500", st.underHeight).apply()
         if (shown != null && !_state.value.playing) showFrame()
     }
 
@@ -1024,7 +1031,28 @@ class MrmsViewModel(app: Application) : AndroidViewModel(app) {
                 shown += rhShown(t, rh)
             }
         }
+        if (st.underHeight) {
+            val z = underHeight(t)
+            if (z == null) missing += "500 mb height"
+            else {
+                val spec = Contours.specFor("z500", "m")!!
+                lines += FieldLines(z.values, z.grid, Style(), spec, "z5|${z.run}|${t.pick.valid / 3600}|${z.grid.id}", dst)
+                shown += ShownOverlay("500 mb", Product("surface_z500", "500 mb height (REFS ${z.run}, +${z.lead} h)", MrmsCatalog.MODEL, Style(units = "m", digits = 0), hasMembers = false, timeDimension = null, grid = z.grid)) { z.values }
+            }
+        }
         return UnderLineSet(lines, shown, missing)
+    }
+
+    private val heights = SynopticHeights(AppContainer.repo)
+    private val heightCache = LinkedHashMap<Long, SynopticHeight?>()
+
+    /** The REFS 500 mb height for the hour of [t]'s analysis (on the run's own grid: the lines are drawn from it directly). */
+    private suspend fun underHeight(t: UnderTemp): SynopticHeight? {
+        val hour = t.pick.valid / 3600
+        synchronized(heightCache) { if (heightCache.containsKey(hour)) return heightCache[hour] }
+        val z = heights.at(t.pick.valid, System.currentTimeMillis() / 1000)
+        if (z != null) synchronized(heightCache) { heightCache[hour] = z; while (heightCache.size > 6) heightCache.remove(heightCache.keys.first()) }
+        return z
     }
 
     /** The surface layers of one flat picture, all at once (a zoomed-in detail, an export). */
