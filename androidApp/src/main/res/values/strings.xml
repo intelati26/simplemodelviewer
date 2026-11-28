@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">simplemodelview</string>
+    <string name="synoptic_widget_description">MRMS radar over the surface temperature, with the 500 mb height as lines (SPC REFS). Experimental guidance, not a warning.</string>
     <string name="widget_description">The latest SPC REFS picture of the product and area you looked at last. Experimental guidance, not a warning.</string>
 </resources>

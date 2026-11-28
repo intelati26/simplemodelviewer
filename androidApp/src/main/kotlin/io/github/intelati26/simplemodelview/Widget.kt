@@ -43,11 +43,12 @@ class RefsWidgetProvider : AppWidgetProvider() {
 }
 
 object WidgetUpdater {
-    fun ids(context: Context): IntArray =
-        AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, RefsWidgetProvider::class.java))
+    fun ids(context: Context, provider: Class<*> = RefsWidgetProvider::class.java): IntArray =
+        AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, provider))
 
-    fun show(context: Context, manager: AppWidgetManager, ids: IntArray, picture: Bitmap?, message: String?) {
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    /** Puts [picture] (or [message]) on the widgets [ids]; a tap opens the app, on [page] when it is given. */
+    fun show(context: Context, manager: AppWidgetManager, ids: IntArray, picture: Bitmap?, message: String?, page: String? = null) {
+        val open = PendingIntent.getActivity(context, if (page == null) 0 else 1, Intent(context, MainActivity::class.java).apply { if (page != null) putExtra("page", page) }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         for (id in ids) {
             val views = RemoteViews(context.packageName, R.layout.widget)
             if (picture != null) views.setImageViewBitmap(R.id.widget_image, picture)
